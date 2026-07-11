@@ -19,6 +19,17 @@ class Settings(BaseSettings):
     aws_region: str = ""
     ollama_base_url: str = "http://localhost:11434"
 
+    # Model dropdown catalogs (comma-separated, env-overridable). Ollama's list
+    # is discovered live from the running server instead.
+    anthropic_models: str = "claude-opus-4-8,claude-sonnet-5,claude-haiku-4-5"
+    openai_models: str = "gpt-5.1,gpt-5.1-mini,gpt-4.1"
+    openrouter_models: str = (
+        "anthropic/claude-opus-4.8,openai/gpt-5.1,google/gemini-2.5-pro,meta-llama/llama-4-maverick"
+    )
+    bedrock_models: str = (
+        "anthropic.claude-opus-4-8,anthropic.claude-sonnet-5,anthropic.claude-haiku-4-5"
+    )
+
 
 @lru_cache
 def get_settings() -> Settings:

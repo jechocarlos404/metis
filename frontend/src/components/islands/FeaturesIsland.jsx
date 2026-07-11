@@ -2,9 +2,7 @@ import React from "react";
 import { PageHeader } from "../shell/PageHeader.jsx";
 import { Badge, Button, Dialog, Icon, Input, PriorityBadge, Select, StatusBadge, Tabs, Tag } from "../../ds";
 import { api } from "../../lib/api.js";
-
-const NODE_W = 140;
-const NODE_H = 52;
+import { FeatureGraphView } from "../graph/FeatureGraphView.jsx";
 
 export default function FeaturesIsland() {
   const [tab, setTab] = React.useState("graph");
@@ -51,9 +49,6 @@ export default function FeaturesIsland() {
     return () => clearTimeout(timer);
   }, [query]);
 
-  const byId = Object.fromEntries(layout.nodes.map((n) => [n.id, n]));
-  const canvasW = Math.max(660, ...layout.nodes.map((n) => n.x + NODE_W + 60));
-  const canvasH = Math.max(290, ...layout.nodes.map((n) => n.y + NODE_H + 60));
   const impactIds = new Set((impact?.dependents ?? []).map((d) => d.id));
   const directory = results ?? layout.nodes;
 
@@ -87,26 +82,6 @@ export default function FeaturesIsland() {
     }
   };
 
-  const nodeCard = (n) => {
-    const isSelected = selected === n.id;
-    const inImpact = impactIds.has(n.id);
-    return (
-      <button key={n.id} onClick={() => setSelected(n.id)} style={{
-        position: "absolute", left: n.x, top: n.y, width: NODE_W,
-        background: "var(--surface-card)", textAlign: "left", cursor: "pointer",
-        border: isSelected ? "1.5px solid var(--accent)" : inImpact ? "1.5px solid var(--danger-fg)" : "1px solid var(--border-default)",
-        boxShadow: isSelected ? "var(--ring-focus)" : "var(--shadow-card)",
-        borderRadius: "var(--radius-md)", padding: "8px 10px", fontFamily: "var(--font-body)",
-      }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 5, marginBottom: 3 }}>
-          <span style={{ width: 7, height: 7, borderRadius: "50%", background: `var(--stage-${{ capability: "feature", integration: "spec", ui: "goal", infra: "ticket" }[n.type]})` }} />
-          <span style={{ fontFamily: "var(--font-mono)", fontSize: 9, color: "var(--text-secondary)" }}>{n.display_id}</span>
-        </div>
-        <div style={{ fontSize: 12, fontWeight: "var(--weight-medium)", color: "var(--text-heading)", lineHeight: 1.3 }}>{n.name}</div>
-      </button>
-    );
-  };
-
   return (
     <>
       <PageHeader
@@ -130,27 +105,8 @@ export default function FeaturesIsland() {
 
       {tab === "graph" ? (
         <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
-          <div style={{ flex: 1, position: "relative", margin: 20, background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", overflow: "auto", minWidth: 0 }}>
-            <div style={{ position: "relative", width: canvasW, height: canvasH }}>
-              <svg width={canvasW} height={canvasH} style={{ position: "absolute", inset: 0 }}>
-                {layout.edges.map((e, i) => {
-                  const src = byId[e.src];
-                  const dst = byId[e.dst];
-                  if (!src || !dst) return null;
-                  return (
-                    <line key={i}
-                      x1={src.x + NODE_W / 2} y1={src.y + NODE_H / 2}
-                      x2={dst.x + NODE_W / 2} y2={dst.y + NODE_H / 2}
-                      stroke="var(--ink-3)" strokeWidth="1.5"
-                      strokeDasharray={src.status === "pending" ? "4 4" : "none"} />
-                  );
-                })}
-              </svg>
-              {layout.nodes.map(nodeCard)}
-            </div>
-            <div style={{ position: "sticky", bottom: 10, left: 12, padding: "0 12px", fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-disabled)" }}>
-              impact(f) → dependents via DEPENDS_ON
-            </div>
+          <div style={{ flex: 1, position: "relative", margin: 20, background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", overflow: "hidden", minWidth: 0 }}>
+            <FeatureGraphView layout={layout} selectedId={selected} onSelect={setSelected} impactIds={impactIds} />
           </div>
           <aside style={{ width: 280, flex: "none", margin: "20px 20px 20px 0", background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", padding: 16, display: "flex", flexDirection: "column", gap: 12, overflowY: "auto" }}>
             {detail ? (

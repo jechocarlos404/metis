@@ -1,0 +1,7 @@
+/* Metis Design System — global entry.
+   Fonts load via <link> in AppLayout.astro (not CSS @import) so the page
+   renders with fallback stacks even when Google Fonts is unreachable. */
+@import "./tokens/colors.css";
+@import "./tokens/typography.css";
+@import "./tokens/spacing.css";
+@import "./tokens/base.css";

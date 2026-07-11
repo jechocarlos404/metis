@@ -1,0 +1,74 @@
+/* Metis — Color tokens
+   Direction: "instrument panel for product thinking".
+   Light, paper-like surfaces; ink-dark text; one calm Aegean blue accent.
+   Semantic + pipeline-stage + priority + context-budget scales. */
+
+:root {
+  /* ---- Base neutrals (warm paper → ink) ---- */
+  --ink-0: oklch(0.985 0.003 90);   /* page paper */
+  --ink-1: oklch(0.965 0.004 90);   /* raised panel */
+  --ink-2: oklch(0.93 0.006 90);    /* inset / hover wash */
+  --ink-3: oklch(0.86 0.008 90);    /* hairline strong */
+  --ink-4: oklch(0.70 0.010 90);    /* disabled text */
+  --ink-5: oklch(0.52 0.012 90);    /* secondary text */
+  --ink-6: oklch(0.35 0.012 90);    /* body text */
+  --ink-7: oklch(0.22 0.012 90);    /* headings / primary text */
+  --ink-8: oklch(0.16 0.012 90);    /* near-black, buttons */
+
+  /* ---- Accent: Aegean blue ---- */
+  --aegean-3: oklch(0.93 0.03 235);
+  --aegean-4: oklch(0.80 0.08 235);
+  --aegean-5: oklch(0.58 0.13 235);  /* primary accent */
+  --aegean-6: oklch(0.48 0.12 237);  /* accent hover / text-on-light */
+  --aegean-7: oklch(0.38 0.10 238);
+
+  /* ---- Semantic ---- */
+  --ok-bg: oklch(0.94 0.05 155);
+  --ok-fg: oklch(0.42 0.10 155);
+  --warn-bg: oklch(0.95 0.06 85);
+  --warn-fg: oklch(0.50 0.11 75);
+  --danger-bg: oklch(0.94 0.04 25);
+  --danger-fg: oklch(0.48 0.15 25);
+  --danger-solid: oklch(0.55 0.18 25);
+
+  /* ---- Pipeline stage hues (OrgGoal → Ticket) ---- */
+  --stage-goal: oklch(0.58 0.13 235);      /* aegean */
+  --stage-spec: oklch(0.55 0.10 200);      /* sea teal */
+  --stage-feature: oklch(0.55 0.12 155);   /* olive green */
+  --stage-prd: oklch(0.58 0.12 85);        /* amber */
+  --stage-ticket: oklch(0.52 0.14 305);    /* violet */
+
+  /* ---- Priority scale (1 = highest) ---- */
+  --priority-1: oklch(0.52 0.17 25);
+  --priority-2: oklch(0.60 0.13 55);
+  --priority-3: oklch(0.62 0.11 85);
+  --priority-4: oklch(0.58 0.09 200);
+  --priority-5: oklch(0.62 0.02 90);
+
+  /* ---- Context budget (S / M / L) ---- */
+  --budget-s-bg: var(--ok-bg);    --budget-s-fg: var(--ok-fg);
+  --budget-m-bg: var(--warn-bg);  --budget-m-fg: var(--warn-fg);
+  --budget-l-bg: var(--danger-bg);--budget-l-fg: var(--danger-fg);
+
+  /* ---- Semantic aliases ---- */
+  --surface-page: var(--ink-0);
+  --surface-card: oklch(1 0 0);
+  --surface-inset: var(--ink-1);
+  --surface-hover: var(--ink-2);
+  --surface-inverse: var(--ink-8);
+
+  --text-heading: var(--ink-7);
+  --text-body: var(--ink-6);
+  --text-secondary: var(--ink-5);
+  --text-disabled: var(--ink-4);
+  --text-inverse: oklch(0.97 0.003 90);
+  --text-accent: var(--aegean-6);
+
+  --border-hairline: var(--ink-2);
+  --border-default: var(--ink-3);
+  --border-focus: var(--aegean-5);
+
+  --accent: var(--aegean-5);
+  --accent-hover: var(--aegean-6);
+  --accent-wash: var(--aegean-3);
+}

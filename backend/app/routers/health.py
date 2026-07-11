@@ -5,6 +5,7 @@ router = APIRouter(tags=["health"])
 
 
 @router.get("/health")
+@router.get("/api/health")
 async def health(request: Request) -> dict:
     checks = {"api": "ok", "db": "unknown", "graph": "unknown"}
     sessionmaker = getattr(request.app.state, "sessionmaker", None)

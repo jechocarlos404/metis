@@ -5,7 +5,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
 from app.db import init_db, make_engine
-from app.routers import features, goals, health, products, strategies, work
+from app.routers import features, goals, graph, health, products, strategies, work
+from app.services.graph_service import FeatureGraph
 from app.services.seed import seed_demo_data
 
 
@@ -18,6 +19,8 @@ async def lifespan(app: FastAPI):
     await init_db(engine)
     if settings.seed_demo_data:
         await seed_demo_data(sessionmaker)
+    app.state.graph = FeatureGraph(sessionmaker)
+    await app.state.graph.load()
     yield
     await engine.dispose()
 
@@ -36,6 +39,7 @@ def create_app() -> FastAPI:
     app.include_router(products.router)
     app.include_router(work.router)
     app.include_router(features.router)
+    app.include_router(graph.router)
     app.include_router(strategies.router)
     return app
 

@@ -14,6 +14,7 @@ dist/
 # Env & local
 .env
 *.local
+extra-ca.crt
 
 # OS / editor
 .DS_Store

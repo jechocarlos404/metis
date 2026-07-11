@@ -1,0 +1,10 @@
+---
+import AppLayout from "../../layouts/AppLayout.astro";
+import ChatIsland from "../../components/islands/ChatIsland.jsx";
+
+const { threadId } = Astro.params;
+---
+
+<AppLayout title="Chat">
+  <ChatIsland client:load threadId={threadId} />
+</AppLayout>

@@ -6,7 +6,17 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import get_settings
 from app.db import init_db, make_engine
 from app.llm.registry import ProviderRegistry
-from app.routers import admin_llm, features, goals, graph, health, products, strategies, work
+from app.routers import (
+    admin_llm,
+    chat,
+    features,
+    goals,
+    graph,
+    health,
+    products,
+    strategies,
+    work,
+)
 from app.services.graph_service import FeatureGraph
 from app.services.seed import seed_demo_data
 
@@ -44,6 +54,7 @@ def create_app() -> FastAPI:
     app.include_router(graph.router)
     app.include_router(strategies.router)
     app.include_router(admin_llm.router)
+    app.include_router(chat.router)
     return app
 
 

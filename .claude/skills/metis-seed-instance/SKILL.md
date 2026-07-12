@@ -74,6 +74,8 @@ Then point the user at the UI: http://localhost:4321.
 - **"product already has a PRD" note** — the loader never stacks a second
   decomposition version onto a product (normal on re-runs); create new PRD
   versions through the app.
-- **Undo** — there is no bulk undo. Individual entities can be removed via
+- **Undo** — the companion `metis-unseed` skill removes everything a seed file
+  created (dry-run first; it deletes by the same name-identity). Individual
+  entities can be removed via
   `DELETE /api/{goals,capabilities,features,products}/{id}` (features cascade
   their edges; deleting a capability requires it to have no features).

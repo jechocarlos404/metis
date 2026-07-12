@@ -1,6 +1,6 @@
 import React from "react";
 import { PageHeader } from "../shell/PageHeader.jsx";
-import { Badge, Button, Dialog, Icon, Input, PriorityBadge, Select, StatusBadge, Tabs, Tag } from "../../ds";
+import { Badge, Button, Dialog, Icon, IconButton, Input, PriorityBadge, Select, StatusBadge, Tabs, Tag } from "../../ds";
 import { api } from "../../lib/api.js";
 import { FeatureGraphView } from "../graph/FeatureGraphView.jsx";
 
@@ -12,19 +12,27 @@ export default function FeaturesIsland() {
   const [impact, setImpact] = React.useState(null);
   const [query, setQuery] = React.useState("");
   const [results, setResults] = React.useState(null);
-  const [dialogOpen, setDialogOpen] = React.useState(false);
+  const [dialog, setDialog] = React.useState(null); // null | {mode:"new"} | {mode:"edit"}
   const [capabilities, setCapabilities] = React.useState([]);
-  const [draft, setDraft] = React.useState({ name: "", description: "", capabilityId: "", layer: "service", priority: "3" });
+  const [edgeList, setEdgeList] = React.useState([]);
+  const [draft, setDraft] = React.useState({ name: "", description: "", capabilityId: "", layer: "service", priority: "3", status: "pending" });
+  const [edgeDraft, setEdgeDraft] = React.useState({ kind: "DEPENDS_ON", targetId: "" });
   const [saving, setSaving] = React.useState(false);
+  const [confirmingDelete, setConfirmingDelete] = React.useState(false);
   const [error, setError] = React.useState(null);
   const [cutTargets, setCutTargets] = React.useState([]); // {kind: "feature"|"capability", id}
   const [cut, setCut] = React.useState(null);
   const [cutting, setCutting] = React.useState(false);
 
   const load = React.useCallback(async () => {
-    const [data, caps] = await Promise.all([api("/graph/layout"), api("/capabilities")]);
+    const [data, caps, edges] = await Promise.all([
+      api("/graph/layout"),
+      api("/capabilities"),
+      api("/features/edges"),
+    ]);
     setLayout(data);
     setCapabilities(caps);
+    setEdgeList(edges);
     setSelected((sel) => sel && data.nodes.some((n) => n.id === sel) ? sel : data.nodes[0]?.id ?? null);
     setDraft((d) => (d.capabilityId ? d : { ...d, capabilityId: caps[0]?.id ?? "" }));
   }, []);
@@ -38,14 +46,22 @@ export default function FeaturesIsland() {
     load().catch((e) => setError(String(e.message)));
   }, [load]);
 
-  React.useEffect(() => {
-    if (!selected) {
+  const refreshDetail = React.useCallback(async (id) => {
+    if (!id) {
       setDetail(null);
       return;
     }
+    try {
+      setDetail(await api(`/features/${id}`));
+    } catch {
+      setDetail(null);
+    }
+  }, []);
+
+  React.useEffect(() => {
     setImpact(null);
-    api(`/features/${selected}`).then(setDetail).catch(() => setDetail(null));
-  }, [selected]);
+    refreshDetail(selected);
+  }, [selected, refreshDetail]);
 
   React.useEffect(() => {
     if (!query.trim()) {
@@ -109,29 +125,102 @@ export default function FeaturesIsland() {
     return states;
   }, [cut]);
 
+  const openNew = () => {
+    setConfirmingDelete(false);
+    setDialog({ mode: "new" });
+  };
+
+  const openEdit = () => {
+    if (!detail) return;
+    setDraft({
+      name: detail.name,
+      description: detail.description ?? "",
+      capabilityId: detail.capability_id,
+      layer: detail.facets?.layer ?? "service",
+      priority: detail.priority != null ? String(detail.priority) : "",
+      status: detail.status,
+    });
+    setConfirmingDelete(false);
+    setDialog({ mode: "edit" });
+  };
+
   const save = async () => {
     if (!draft.name.trim() || !draft.capabilityId) return;
     setSaving(true);
     setError(null);
     try {
-      const created = await api("/features", {
-        method: "POST",
-        body: {
-          name: draft.name.trim(),
-          description: draft.description.trim() || null,
-          capability_id: draft.capabilityId,
-          facets: { layer: draft.layer },
-          priority: Number(draft.priority),
-        },
-      });
-      setDialogOpen(false);
-      setDraft((d) => ({ name: "", description: "", capabilityId: d.capabilityId, layer: "service", priority: "3" }));
-      await load();
-      setSelected(created.id);
+      const body = {
+        name: draft.name.trim(),
+        description: draft.description.trim() || null,
+        capability_id: draft.capabilityId,
+        priority: draft.priority === "" ? null : Number(draft.priority),
+      };
+      if (dialog.mode === "new") {
+        const created = await api("/features", {
+          method: "POST",
+          body: { ...body, facets: { layer: draft.layer } },
+        });
+        setDraft((d) => ({ name: "", description: "", capabilityId: d.capabilityId, layer: "service", priority: "3", status: "pending" }));
+        await load();
+        setSelected(created.id);
+      } else {
+        await api(`/features/${detail.id}`, {
+          method: "PATCH",
+          body: { ...body, facets: { ...detail.facets, layer: draft.layer }, status: draft.status },
+        });
+        await load();
+        await refreshDetail(detail.id);
+      }
+      setDialog(null);
     } catch (e) {
       setError(String(e.message));
     } finally {
       setSaving(false);
+    }
+  };
+
+  const removeFeature = async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      await api(`/features/${detail.id}`, { method: "DELETE" });
+      setDialog(null);
+      setSelected(null);
+      await load();
+    } catch (e) {
+      setError(String(e.message));
+      setConfirmingDelete(false);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const addEdge = async () => {
+    if (!selected || !edgeDraft.targetId) return;
+    setError(null);
+    try {
+      await api("/features/edges", {
+        method: "POST",
+        body: { src_id: selected, dst_id: edgeDraft.targetId, kind: edgeDraft.kind },
+      });
+      setEdgeDraft((d) => ({ ...d, targetId: "" }));
+      await load();
+      await refreshDetail(selected);
+    } catch (e) {
+      setError(String(e.message));
+    }
+  };
+
+  const removeEdge = async (srcId, dstId, kind) => {
+    const edge = edgeList.find((e) => e.src_id === srcId && e.dst_id === dstId && e.kind === kind);
+    if (!edge) return;
+    setError(null);
+    try {
+      await api(`/features/edges/${edge.id}`, { method: "DELETE" });
+      await load();
+      await refreshDetail(selected);
+    } catch (e) {
+      setError(String(e.message));
     }
   };
 
@@ -145,7 +234,7 @@ export default function FeaturesIsland() {
             <Input placeholder="Find features like…" style={{ width: 220 }} inputStyle={{ height: 30 }}
               value={query}
               onChange={(e) => { setQuery(e.target.value); if (e.target.value.trim()) setTab("directory"); }} />
-            <Button size="sm" variant="accent" style={{ gap: 6 }} onClick={() => setDialogOpen(true)}>
+            <Button size="sm" variant="accent" style={{ gap: 6 }} onClick={openNew}>
               <Icon name="plus" size={13} />New feature
             </Button>
           </>
@@ -178,7 +267,10 @@ export default function FeaturesIsland() {
             <div style={{ borderTop: "1px solid var(--border-hairline)" }} />
             {detail ? (
               <>
-                <div style={{ fontSize: "var(--text-md)", fontWeight: "var(--weight-semibold)", color: "var(--text-heading)" }}>{detail.name}</div>
+                <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
+                  <div style={{ flex: 1, fontSize: "var(--text-md)", fontWeight: "var(--weight-semibold)", color: "var(--text-heading)" }}>{detail.name}</div>
+                  <IconButton size="sm" label="Edit feature" onClick={openEdit}><Icon name="pencil" size={13} /></IconButton>
+                </div>
                 {detail.description && <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", lineHeight: "var(--leading-snug)" }}>{detail.description}</div>}
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                   {detail.facets?.layer && <Tag type={detail.facets.layer}>{detail.facets.layer}</Tag>}
@@ -193,14 +285,30 @@ export default function FeaturesIsland() {
                 <div style={{ borderTop: "1px solid var(--border-hairline)", paddingTop: 12, display: "flex", flexDirection: "column", gap: 6 }}>
                   <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: "var(--tracking-caps)", textTransform: "uppercase", color: "var(--text-disabled)" }}>Relationships</div>
                   {detail.outgoing.map((r, i) => (
-                    <div key={`o${i}`} style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-body)" }}>{r.kind} → {r.feature.name}</div>
+                    <div key={`o${i}`} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-body)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.kind} → {r.feature.name}</span>
+                      <IconButton size="sm" label="Remove edge" onClick={() => removeEdge(detail.id, r.feature.id, r.kind)}><Icon name="x" size={12} /></IconButton>
+                    </div>
                   ))}
                   {detail.incoming.map((r, i) => (
-                    <div key={`i${i}`} style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-body)" }}>{r.feature.name} → {r.kind}</div>
+                    <div key={`i${i}`} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-body)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.feature.name} → {r.kind}</span>
+                      <IconButton size="sm" label="Remove edge" onClick={() => removeEdge(r.feature.id, detail.id, r.kind)}><Icon name="x" size={12} /></IconButton>
+                    </div>
                   ))}
                   {detail.outgoing.length + detail.incoming.length === 0 && (
                     <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-disabled)" }}>no edges</div>
                   )}
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 4 }}>
+                    <Select value={edgeDraft.kind} onChange={(e) => setEdgeDraft({ ...edgeDraft, kind: e.target.value })}
+                      options={["DEPENDS_ON", "BLOCKS", "RELATES_TO"]} />
+                    <Select value={edgeDraft.targetId} onChange={(e) => setEdgeDraft({ ...edgeDraft, targetId: e.target.value })}
+                      options={[{ value: "", label: "Target feature…" },
+                        ...layout.nodes.filter((n) => n.id !== detail.id).map((n) => ({ value: n.id, label: n.name }))]} />
+                    <Button size="sm" variant="secondary" disabled={!edgeDraft.targetId} onClick={addEdge} style={{ gap: 6 }}>
+                      <Icon name="plus" size={13} />Add edge
+                    </Button>
+                  </div>
                 </div>
                 {impact && (
                   <div style={{ borderTop: "1px solid var(--border-hairline)", paddingTop: 12, display: "flex", flexDirection: "column", gap: 6 }}>
@@ -247,13 +355,22 @@ export default function FeaturesIsland() {
       )}
 
       <Dialog
-        open={dialogOpen}
-        title="New feature"
-        onClose={() => setDialogOpen(false)}
+        open={dialog != null}
+        title={dialog?.mode === "new" ? "New feature" : `Edit ${detail?.name ?? ""}`}
+        onClose={() => setDialog(null)}
         footer={
           <>
-            <Button size="sm" variant="secondary" onClick={() => setDialogOpen(false)}>Cancel</Button>
-            <Button size="sm" variant="accent" disabled={saving || !draft.name.trim()} onClick={save}>Create feature</Button>
+            {dialog?.mode === "edit" && (
+              <Button size="sm" variant={confirmingDelete ? "danger" : "secondary"} disabled={saving}
+                style={{ marginRight: "auto", gap: 6 }}
+                onClick={() => (confirmingDelete ? removeFeature() : setConfirmingDelete(true))}>
+                <Icon name="trash" size={13} />{confirmingDelete ? "Confirm delete" : "Delete"}
+              </Button>
+            )}
+            <Button size="sm" variant="secondary" onClick={() => setDialog(null)}>Cancel</Button>
+            <Button size="sm" variant="accent" disabled={saving || !draft.name.trim()} onClick={save}>
+              {dialog?.mode === "new" ? "Create feature" : "Save"}
+            </Button>
           </>
         }
       >
@@ -263,7 +380,12 @@ export default function FeaturesIsland() {
           <Select label="Realizes capability" value={draft.capabilityId} onChange={(e) => setDraft({ ...draft, capabilityId: e.target.value })}
             options={capabilities.map((c) => ({ value: c.id, label: c.name }))} />
           <Select label="Layer" value={draft.layer} onChange={(e) => setDraft({ ...draft, layer: e.target.value })} options={["ui", "service", "integration", "infra"]} />
-          <Select label="Priority (1 hottest)" value={draft.priority} onChange={(e) => setDraft({ ...draft, priority: e.target.value })} options={["1", "2", "3", "4", "5"]} />
+          <Select label="Priority (1 hottest)" value={draft.priority} onChange={(e) => setDraft({ ...draft, priority: e.target.value })}
+            options={dialog?.mode === "edit" ? [{ value: "", label: "—" }, "1", "2", "3", "4", "5"] : ["1", "2", "3", "4", "5"]} />
+          {dialog?.mode === "edit" && (
+            <Select label="Status" value={draft.status} onChange={(e) => setDraft({ ...draft, status: e.target.value })}
+              options={["pending", "in_progress", "done"]} />
+          )}
         </div>
       </Dialog>
     </>

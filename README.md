@@ -35,6 +35,20 @@ The app runs with zero LLM keys — chat replies with a clear "provider not conf
 notice, and everything else works. Add any subset of provider credentials to `.env`
 and pick provider + model per agent in **LLM Config**.
 
+### Claude Code skills
+
+The repo ships a two-skill pipeline for seeding an instance from real codebases
+(seed file format: `skills/metis-export/references/seed-format.md`):
+
+- `.claude/skills/metis-seed-instance` loads a `metis-seed.json` into the running
+  instance via the API — idempotent, add-only. Auto-available in this repo.
+- `skills/metis-export` analyzes *any* repository and writes a `metis-seed.json`.
+  To use it from other repos, symlink it into your global skills once per machine:
+
+  ```sh
+  ./scripts/install-skills.sh
+  ```
+
 ## Architecture
 
 Two services plus Postgres:

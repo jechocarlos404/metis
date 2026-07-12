@@ -26,7 +26,7 @@ DRY_PREFIX = "dry-run:"
 
 
 # ---------------------------------------------------------------------------
-# Validation — keep in sync with metis-export/scripts/validate_seed.py
+# Validation — keep in sync with skills/metis-export/scripts/validate_seed.py
 # ---------------------------------------------------------------------------
 
 

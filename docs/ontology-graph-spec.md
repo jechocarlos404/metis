@@ -12,7 +12,7 @@ Four node types exist in the graph. Documents and tickets deliberately do **not*
 |---|---|---|---|---|
 | **Goal** | why | durable | title, success_criteria, priority, `goal_type: org\|product`, parent goal | own lifecycle (as today) |
 | **Product** | slow | durable | name, packaging metadata | versioned, never "done" |
-| **Capability** | slow | durable — *this is what snapshots pin* | noun-phrase name, description, facets, (later: maturity) | **no intrinsic status — always derived** (see `rollup`) |
+| **Capability** | slow | durable — *this is what snapshots pin* | noun-phrase name, description, facets, maturity, evidence anchors | **stored `maturity`** (where it stands); progress always derived (see `rollup`) |
 | **Feature** | fast | ephemeral-ish (archived, not deleted) | verb-phrase name, description, facets, priority | own `WorkStatus` — the only node type where "done" means anything |
 
 **Not node types, on purpose:**
@@ -92,7 +92,7 @@ Semantics stated as questions; existing implementations noted.
 | Traversal | Finding |
 |---|---|
 | feature with no `REALIZES` | invariant violation (misfiled capability, or unjustified work) — hard-blocked at write time post-migration |
-| capability with empty `scope(c)` | aspirational gap: promised but nothing building toward it → roadmap material |
+| capability with empty `scope(c)` **and maturity < GA** | aspirational gap: promised but nothing building toward it → roadmap material (empty scope at GA is just a stable shipped capability — no finding) |
 | capability unreachable from any Product via `BUNDLES` | dead map territory → prune or bundle |
 | goal with no `MOTIVATES` out-edges | empty intent → decompose or drop |
 | `drift(snapshot)` | diff pinned frozen copies vs live nodes: renamed / re-parented / deleted / split since approval — reportable, never auto-healed |
@@ -105,6 +105,38 @@ Semantics stated as questions; existing implementations noted.
 - No traversal crosses the bridge implicitly. `impact(f)` stays on the fast plane;
   seeing capability-level blast radius requires the explicit projection
   (`impact_capability`). Mixing resolutions silently is how graphs lie.
+
+## Brownfield: reverse-engineering an existing product
+
+The ontology is declarative — it defines what the structures are, not the order they are
+authored in. Only the *pipeline* is directional. Reverse engineering enters the graph at
+a different node type and runs some traversals backwards:
+
+| | Greenfield (forward) | Brownfield (reverse) |
+|---|---|---|
+| entry point | Goals → capabilities promised | Capabilities observed from the artifact |
+| capability map | authored from intent | bootstrapped by clustering the codebase + LLM naming, human-ratified (divergence #11 as ingestion, not lint) |
+| maturity at creation | `planned` | observed state, typically `GA` |
+| goals | given | inferred from the map (`why` run in reverse) — `MOTIVATES` health check relaxed during ingestion |
+| fast plane at T₀ | features from PRD decomposition | **legitimately empty** — features begin with the first planned change |
+| coupling graph evidence | feature `DEPENDS_ON` edges | static analysis of the code, checked against the authored map |
+
+Two amendments the brownfield case forces (both already folded into the tables above):
+
+1. **Stored maturity on Capability.** Without it, empty `scope(c)` is ambiguous between
+   *shipped-and-stable* and *not-started* — only history could disambiguate, and
+   brownfield has no history. Maturity is the stored answer to "where does this stand";
+   `rollup(c)` is reinterpreted as *in-flight progress*, not status. (This adopts
+   divergence #9 immediately rather than later, and supersedes the earlier
+   "no intrinsic status" rule.)
+2. **Evidence anchors on Capability.** Ingested capabilities carry pointers to where
+   they are implemented (paths, endpoints, routes). Attributes, not nodes. They double
+   as the "known context" a ticket needs to fit one Claude session.
+
+Ingestion workflow: observe → cluster & draft noun-phrase map → human ratifies →
+stamp maturity + evidence anchors → infer/attach goals → future features attach via
+`REALIZES` exactly as in greenfield. The as-built map at ingestion is itself worth
+versioning as a snapshot ("observed from codebase X on date Y").
 
 ## Implementation notes (non-normative)
 

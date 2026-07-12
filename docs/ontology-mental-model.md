@@ -21,9 +21,14 @@ Status: **proposed convergence** from `ontology-divergence.md` (candidates 4 + 8
 
 The load-bearing decision is the first row: **a capability is not a big feature.** It is
 a different species — a noun where features are verbs. Everything else follows from
-this split. Two planes result:
+this split. Two planes result, with the goal tree as a why-layer above both — goals
+justify *capabilities* (not features directly), and features inherit their justification
+through `REALIZES`, which is what makes the `why(f)` provenance chain a pure traversal:
 
 ```
+WHY LAYER (the reasons — sits above both planes, moves at its own speed)
+  Goal(org) ◀──parent── Goal(product) ──MOTIVATES──▶ Capability
+
 SLOW PLANE (the map — changes rarely, survives pivots)
   Product ──BUNDLES──▶ Capability ──PART_OF──▶ Capability (sub-capability)
 

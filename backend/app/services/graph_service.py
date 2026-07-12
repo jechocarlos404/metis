@@ -130,7 +130,6 @@ class FeatureGraph:
         attrs = self._g.nodes[node_id]
         return {
             "id": str(node_id),
-            "display_id": f"FTR-{attrs['seq']:03d}",
             "name": attrs["name"],
             "capability_id": str(attrs["capability_id"]) if attrs.get("capability_id") else None,
             "facets": attrs.get("facets", {}),
@@ -194,9 +193,9 @@ class FeatureGraph:
             if all(
                 self._g.nodes[d]["status"] == "done" for d in nx.descendants(dep, node)
             ):
-                ready.append(self._summary(node))
-        ready.sort(key=lambda s: (s["priority"] or 99, s["display_id"]))
-        return ready
+                ready.append(node)
+        ready.sort(key=lambda n: (self._g.nodes[n]["priority"] or 99, self._g.nodes[n]["seq"]))
+        return [self._summary(n) for n in ready]
 
     def topo_order(self) -> list[dict[str, Any]]:
         """Features ordered dependencies-first. Raises GraphCycleError on a cycle."""
@@ -227,10 +226,13 @@ class FeatureGraph:
             cycle = [edge[0] for edge in nx.find_cycle(sub)]
             raise GraphCycleError(cycle) from None
         essential = [{**self._summary(n), "is_target": n in targets} for n in order]
-        deferrable = sorted(
-            (self._summary(n) for n in set(self._g.nodes) - required),
-            key=lambda s: (s["priority"] or 99, s["display_id"]),
-        )
+        deferrable = [
+            self._summary(n)
+            for n in sorted(
+                set(self._g.nodes) - required,
+                key=lambda n: (self._g.nodes[n]["priority"] or 99, self._g.nodes[n]["seq"]),
+            )
+        ]
         capabilities: dict[uuid.UUID, dict[str, int]] = {}
         for node in self._g.nodes:
             cid = self._g.nodes[node].get("capability_id")

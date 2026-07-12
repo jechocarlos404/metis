@@ -178,7 +178,6 @@ export default function FeaturesIsland() {
             <div style={{ borderTop: "1px solid var(--border-hairline)" }} />
             {detail ? (
               <>
-                <div style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-2xs)", color: "var(--text-secondary)" }}>{detail.display_id}</div>
                 <div style={{ fontSize: "var(--text-md)", fontWeight: "var(--weight-semibold)", color: "var(--text-heading)" }}>{detail.name}</div>
                 {detail.description && <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", lineHeight: "var(--leading-snug)" }}>{detail.description}</div>}
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -187,17 +186,17 @@ export default function FeaturesIsland() {
                 </div>
                 {capabilityById.get(detail.capability_id) && (
                   <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-secondary)" }}>
-                    REALIZES → {capabilityById.get(detail.capability_id).display_id} {capabilityById.get(detail.capability_id).name}
+                    REALIZES → {capabilityById.get(detail.capability_id).name}
                   </div>
                 )}
                 {detail.priority != null && <PriorityBadge priority={detail.priority} rationale={detail.priority_rationale} />}
                 <div style={{ borderTop: "1px solid var(--border-hairline)", paddingTop: 12, display: "flex", flexDirection: "column", gap: 6 }}>
                   <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: "var(--tracking-caps)", textTransform: "uppercase", color: "var(--text-disabled)" }}>Relationships</div>
                   {detail.outgoing.map((r, i) => (
-                    <div key={`o${i}`} style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-body)" }}>{r.kind} → {r.feature.display_id} {r.feature.name}</div>
+                    <div key={`o${i}`} style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-body)" }}>{r.kind} → {r.feature.name}</div>
                   ))}
                   {detail.incoming.map((r, i) => (
-                    <div key={`i${i}`} style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-body)" }}>{r.feature.display_id} {r.feature.name} → {r.kind}</div>
+                    <div key={`i${i}`} style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-body)" }}>{r.feature.name} → {r.kind}</div>
                   ))}
                   {detail.outgoing.length + detail.incoming.length === 0 && (
                     <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-disabled)" }}>no edges</div>
@@ -210,7 +209,7 @@ export default function FeaturesIsland() {
                       {impact.dependents.length} dependent{impact.dependents.length === 1 ? "" : "s"} break if this changes; needs {impact.dependencies.length}.
                     </div>
                     {impact.dependents.map((d) => (
-                      <div key={d.id} style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--danger-fg)" }}>{d.display_id} {d.name}</div>
+                      <div key={d.id} style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--danger-fg)" }}>{d.name}</div>
                     ))}
                   </div>
                 )}
@@ -226,12 +225,11 @@ export default function FeaturesIsland() {
       ) : (
         <div style={{ flex: 1, overflowY: "auto", padding: 20 }}>
           <div style={{ background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", overflow: "hidden" }}>
-            <div style={{ display: "grid", gridTemplateColumns: "90px 1fr 160px 110px 110px 120px", padding: "8px 16px", borderBottom: "1px solid var(--border-hairline)", fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: "var(--tracking-caps)", textTransform: "uppercase", color: "var(--text-disabled)" }}>
-              <span>ID</span><span>Feature</span><span>Capability</span><span>Layer</span><span>Priority</span><span>Status</span>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 160px 110px 110px 120px", padding: "8px 16px", borderBottom: "1px solid var(--border-hairline)", fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: "var(--tracking-caps)", textTransform: "uppercase", color: "var(--text-disabled)" }}>
+              <span>Feature</span><span>Capability</span><span>Layer</span><span>Priority</span><span>Status</span>
             </div>
             {directory.map((n, i) => (
-              <div key={n.id} onClick={() => { setSelected(n.id); setTab("graph"); }} style={{ display: "grid", gridTemplateColumns: "90px 1fr 160px 110px 110px 120px", alignItems: "center", padding: "10px 16px", borderBottom: i < directory.length - 1 ? "1px solid var(--border-hairline)" : "none", cursor: "pointer", fontSize: "var(--text-sm)" }}>
-                <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-secondary)" }}>{n.display_id}</span>
+              <div key={n.id} onClick={() => { setSelected(n.id); setTab("graph"); }} style={{ display: "grid", gridTemplateColumns: "1fr 160px 110px 110px 120px", alignItems: "center", padding: "10px 16px", borderBottom: i < directory.length - 1 ? "1px solid var(--border-hairline)" : "none", cursor: "pointer", fontSize: "var(--text-sm)" }}>
                 <span style={{ color: "var(--text-heading)", fontWeight: "var(--weight-medium)" }}>{n.name}</span>
                 <span style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>{capabilityById.get(n.capability_id)?.name ?? "—"}</span>
                 <span>{n.facets?.layer ? <Tag type={n.facets.layer}>{n.facets.layer}</Tag> : <span style={{ color: "var(--text-disabled)" }}>—</span>}</span>
@@ -263,7 +261,7 @@ export default function FeaturesIsland() {
           <Input label="Name (a change, verb phrase)" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="Add Notion export backend" />
           <Input label="Description" value={draft.description} onChange={(e) => setDraft({ ...draft, description: e.target.value })} />
           <Select label="Realizes capability" value={draft.capabilityId} onChange={(e) => setDraft({ ...draft, capabilityId: e.target.value })}
-            options={capabilities.map((c) => ({ value: c.id, label: `${c.display_id} ${c.name}` }))} />
+            options={capabilities.map((c) => ({ value: c.id, label: c.name }))} />
           <Select label="Layer" value={draft.layer} onChange={(e) => setDraft({ ...draft, layer: e.target.value })} options={["ui", "service", "integration", "infra"]} />
           <Select label="Priority (1 hottest)" value={draft.priority} onChange={(e) => setDraft({ ...draft, priority: e.target.value })} options={["1", "2", "3", "4", "5"]} />
         </div>
@@ -290,15 +288,15 @@ function MVPCutPanel({ capabilities, nodeById, capabilityById, selectedId, targe
         <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
           {targets.map((t) => {
             const label = t.kind === "feature"
-              ? nodeById.get(t.id)?.display_id ?? "FTR-?"
-              : capabilityById.get(t.id)?.display_id ?? "CAP-?";
+              ? nodeById.get(t.id)?.name ?? "unknown feature"
+              : capabilityById.get(t.id)?.name ?? "unknown capability";
             return <Tag key={`${t.kind}:${t.id}`} onRemove={() => onRemoveTarget(t.kind, t.id)}>{label}</Tag>;
           })}
         </div>
       )}
       <Select value="" onChange={(e) => e.target.value && onAddTarget("capability", e.target.value)}
         options={[{ value: "", label: "Target a capability…" },
-          ...capabilities.map((c) => ({ value: c.id, label: `${c.display_id} ${c.name}` }))]} />
+          ...capabilities.map((c) => ({ value: c.id, label: c.name }))]} />
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
         <Button size="sm" variant="secondary" disabled={!selectedId || selectedTargeted}
           onClick={() => onAddTarget("feature", selectedId)}>Target selected</Button>
@@ -316,7 +314,6 @@ function MVPCutPanel({ capabilities, nodeById, capabilityById, selectedId, targe
           </div>
           {cut.capabilities.map((c) => (
             <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 6, ...MONO_ROW }}>
-              <span style={{ color: "var(--text-secondary)", flex: "none" }}>{c.display_id}</span>
               <span style={{ color: "var(--text-body)", flex: 1, ...ELLIPSIS }}>{c.name}</span>
               <span style={{ color: c.essential ? "var(--ok-fg)" : "var(--text-disabled)", flex: "none" }}>
                 {c.required}/{c.total}
@@ -326,13 +323,13 @@ function MVPCutPanel({ capabilities, nodeById, capabilityById, selectedId, targe
           <div style={{ ...CAPS_HEADER, marginTop: 4 }}>Build order (essential)</div>
           {cut.essential.map((f, i) => (
             <div key={f.id} style={{ ...MONO_ROW, ...ELLIPSIS, color: f.is_target ? "var(--text-accent)" : "var(--text-body)" }}>
-              {i + 1}. {f.display_id} {f.name}
+              {i + 1}. {f.name}
             </div>
           ))}
           <div style={{ ...CAPS_HEADER, marginTop: 4 }}>Nice to have (deferred)</div>
           {cut.deferrable.slice(0, 8).map((f) => (
             <div key={f.id} style={{ display: "flex", alignItems: "center", gap: 6, ...MONO_ROW, color: "var(--text-secondary)" }}>
-              <span style={{ flex: 1, ...ELLIPSIS }}>{f.display_id} {f.name}</span>
+              <span style={{ flex: 1, ...ELLIPSIS }}>{f.name}</span>
               {f.priority != null && <PriorityBadge priority={f.priority} />}
             </div>
           ))}

@@ -1,9 +1,9 @@
 import uuid
 
-from pydantic import BaseModel, Field, computed_field
+from pydantic import BaseModel, Field
 
 from app.models.enums import EdgeKind, WorkStatus
-from app.schemas.common import Stamped, display
+from app.schemas.common import Stamped
 
 
 class FeatureCreate(BaseModel):
@@ -35,11 +35,6 @@ class FeatureRead(Stamped):
     priority: int | None
     priority_rationale: str | None
 
-    @computed_field
-    @property
-    def display_id(self) -> str:
-        return display("FTR", self.seq, 3)
-
 
 class EdgeCreate(BaseModel):
     src_id: uuid.UUID
@@ -68,7 +63,7 @@ class WhyStep(BaseModel):
 
     kind: str  # "feature" | "capability" | "goal"
     id: uuid.UUID
-    display_id: str
+    display_id: str | None = None  # goals only; features/capabilities go by name
     name: str
     relation: str  # relation that led here: "REALIZES" | "PART_OF" | "MOTIVATES" | "parent"
 

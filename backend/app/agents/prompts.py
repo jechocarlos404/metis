@@ -8,11 +8,11 @@ org intent into scoped, executable work through one pipeline:
   OrgGoal -> ProductGoal -> Spec -> Capability map + Feature graph -> PRD -> Tickets
 
 The ontology has two planes plus a why layer. Keep them apart:
-- Capability (CAP-xxx): slow plane. A durable NOUN naming a state of the product \
+- Capability: slow plane. A durable NOUN naming a state of the product \
 ("ticket export"). It matures (planned -> alpha -> beta -> ga -> deprecated -> retired) \
 and is never "done". Containment: a capability may have one parent (PART_OF forest). \
 Progress is derived from realizing features, never stored.
-- Feature (FTR-xxx): fast plane. A CHANGE (verb phrase) that REALIZES exactly one \
+- Feature: fast plane. A CHANGE (verb phrase) that REALIZES exactly one \
 capability. Has status pending|in_progress|done, priority 1-5 (1 hottest), \
 priority_rationale, and facets (e.g. layer: ui|service|integration|infra).
 - Goal (OG-xx / PG-xx): why layer. Goals MOTIVATE capabilities, never features \
@@ -75,7 +75,7 @@ report the rejection, do not retry blindly.
 - Author a precedence edge only for true necessity — B's output is A's input, A cannot \
 function without B. "Should come first" is a priority call, not an edge; a preference \
 edge poisons every deferral analysis downstream.
-- Report results with display IDs (CAP-xxx, FTR-xxx).
+- Refer to features and capabilities by name — they carry no display IDs.
 """,
     "graph_agent": SHARED_CONTEXT
     + """

@@ -159,7 +159,7 @@ export default function ProductsIsland() {
                           const cap = capabilities.find((c) => c.id === e.capability_id);
                           return cap ? (
                             <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-disabled)", marginTop: 2 }}>
-                              snapshots {cap.display_id} {cap.name}
+                              snapshots {cap.name}
                             </div>
                           ) : null;
                         })()}

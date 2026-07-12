@@ -25,8 +25,14 @@ async def _graph(request: Request) -> FeatureGraph:
 
 
 @router.get("/layout")
-async def layout(request: Request):
-    return (await _graph(request)).layout()
+async def layout(request: Request, session: AsyncSession = Depends(get_db)):
+    """Graph layout plus derived product attribution per node (see
+    capability_service.product_attribution)."""
+    data = (await _graph(request)).layout()
+    attribution = await capability_service.product_attribution(session)
+    for node in data["nodes"]:
+        node["product_ids"] = attribution.get(node["capability_id"], [])
+    return data
 
 
 @router.get("/impact/{feature_id}")

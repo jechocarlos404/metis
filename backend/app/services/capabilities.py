@@ -14,7 +14,7 @@ from fastapi import HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Capability, Feature, Goal, GoalType, Motivation, WorkStatus
+from app.models import Capability, Feature, Goal, GoalType, Motivation, Product, WorkStatus
 from app.schemas.capability import (
     CapabilityCreate,
     CapabilityNode,
@@ -317,6 +317,33 @@ async def motivating_goals(session: AsyncSession, capability_id: uuid.UUID) -> l
         .order_by(Goal.seq)
     )
     return list((await session.scalars(stmt)).all())
+
+
+async def product_attribution(session: AsyncSession) -> dict[str, list[str]]:
+    """Derived capability -> products map, mirroring why(): a capability is
+    attributed to every Spec whose goal motivates it or any containment
+    ancestor. Keys and values are strings, ready to stamp onto layout JSON;
+    capabilities with no path to a product map to an empty list."""
+    parent_of = {c.id: c.parent_id for c in await list_capabilities(session)}
+    cap_goals: dict[uuid.UUID, set[uuid.UUID]] = defaultdict(set)
+    for m in (await session.scalars(select(Motivation))).all():
+        cap_goals[m.capability_id].add(m.goal_id)
+    goal_products: dict[uuid.UUID, set[uuid.UUID]] = defaultdict(set)
+    products = await session.scalars(select(Product).where(Product.goal_id.is_not(None)))
+    for p in products.all():
+        goal_products[p.goal_id].add(p.id)
+
+    attribution: dict[str, list[str]] = {}
+    for cap_id in parent_of:
+        found: set[uuid.UUID] = set()
+        cursor, seen = cap_id, set()
+        while cursor is not None and cursor not in seen:
+            seen.add(cursor)
+            for goal_id in cap_goals.get(cursor, ()):
+                found.update(goal_products.get(goal_id, ()))
+            cursor = parent_of.get(cursor)
+        attribution[str(cap_id)] = sorted(str(pid) for pid in found)
+    return attribution
 
 
 # ---- health (findings generators) ----

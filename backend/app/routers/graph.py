@@ -1,10 +1,19 @@
 import uuid
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db import get_db
+from app.services import capabilities as capability_service
 from app.services.graph_service import FeatureGraph, GraphCycleError
 
 router = APIRouter(prefix="/api/graph", tags=["graph"])
+
+
+class MVPCutRequest(BaseModel):
+    features: list[uuid.UUID] = []
+    capabilities: list[uuid.UUID] = []
 
 
 async def _graph(request: Request) -> FeatureGraph:
@@ -50,6 +59,29 @@ async def cycles(request: Request):
 async def ready(request: Request):
     """The work frontier: pending features whose dependencies are all done."""
     return {"ready": (await _graph(request)).ready_set()}
+
+
+@router.post("/mvp-cut")
+async def mvp_cut(
+    data: MVPCutRequest, request: Request, session: AsyncSession = Depends(get_db)
+):
+    """Prerequisite closure for a delivery cut: essential = targets plus
+    everything they transitively need (dependencies first); deferrable =
+    everything else (hottest priority first). Capability targets expand to
+    their scope."""
+    graph = await _graph(request)
+    try:
+        return await capability_service.mvp_cut(
+            session, graph, data.features, data.capabilities
+        )
+    except GraphCycleError as e:
+        raise HTTPException(
+            409,
+            {
+                "message": "Dependency cycle detected — break it before cutting scope.",
+                "cycle": [str(n) for n in e.cycle],
+            },
+        ) from None
 
 
 @router.post("/refresh")

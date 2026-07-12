@@ -208,6 +208,40 @@ class FeatureGraph:
             raise GraphCycleError(cycle) from None
         return [self._summary(n) for n in order]
 
+    def mvp_cut(self, target_ids: set[uuid.UUID]) -> dict[str, Any]:
+        """Prerequisite closure for a delivery cut: essential = targets ∪ their
+        precedence-descendants (what must exist for the targets to work),
+        dependencies-first; deferrable = every other feature, hottest priority
+        first. Capabilities are grouped flat by capability_id — submap
+        aggregation is the caller's job. Raises GraphCycleError if the
+        essential subgraph contains a cycle."""
+        dep = self._precedence_subgraph()
+        targets = {t for t in target_ids if self._g.has_node(t)}
+        required = set(targets)
+        for target in targets:
+            required |= nx.descendants(dep, target)
+        sub = dep.subgraph(required)
+        try:
+            order = list(reversed(list(nx.topological_sort(sub))))
+        except nx.NetworkXUnfeasible:
+            cycle = [edge[0] for edge in nx.find_cycle(sub)]
+            raise GraphCycleError(cycle) from None
+        essential = [{**self._summary(n), "is_target": n in targets} for n in order]
+        deferrable = sorted(
+            (self._summary(n) for n in set(self._g.nodes) - required),
+            key=lambda s: (s["priority"] or 99, s["display_id"]),
+        )
+        capabilities: dict[uuid.UUID, dict[str, int]] = {}
+        for node in self._g.nodes:
+            cid = self._g.nodes[node].get("capability_id")
+            if not cid:
+                continue
+            entry = capabilities.setdefault(cid, {"required": 0, "total": 0})
+            entry["total"] += 1
+            if node in required:
+                entry["required"] += 1
+        return {"essential": essential, "deferrable": deferrable, "capabilities": capabilities}
+
     def find_cycles(self, limit: int = 20) -> list[list[dict[str, Any]]]:
         dep = self._precedence_subgraph()
         return [

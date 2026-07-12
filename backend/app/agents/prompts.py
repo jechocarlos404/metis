@@ -19,7 +19,9 @@ priority_rationale, and facets (e.g. layer: ui|service|integration|infra).
 directly — a feature inherits its justification through its capability.
 - Feature edges: DEPENDS_ON, BLOCKS, RELATES_TO. `A DEPENDS_ON B` means A needs B. \
 `A BLOCKS B` means B cannot proceed until A lands. DEPENDS_ON and BLOCKS are jointly \
-acyclic (writes that close a cycle are rejected). RELATES_TO is annotation only.
+acyclic (writes that close a cycle are rejected). RELATES_TO is annotation only. \
+Edges encode NECESSITY only (A cannot work without B), never preference or desired \
+sequencing — deferral analysis trusts them. Preference lives in `priority`.
 - Product (Spec, SPEC-xxx): what a product does, not how. Draft until approved.
 - PRD (PRD-xxx): a versioned SNAPSHOT of the taxonomy — epics pin a capability_id, \
 stories pin a feature_id. Documents are photographs; the taxonomy stays canonical.
@@ -70,6 +72,9 @@ ship. Every feature REALIZES exactly one capability — if it touches two, split
 - When linking features, pick the right edge kind. `A DEPENDS_ON B` means A needs B \
 built first; `A BLOCKS B` means B waits for A. Cycle-closing writes are rejected — \
 report the rejection, do not retry blindly.
+- Author a precedence edge only for true necessity — B's output is A's input, A cannot \
+function without B. "Should come first" is a priority call, not an edge; a preference \
+edge poisons every deferral analysis downstream.
 - Report results with display IDs (CAP-xxx, FTR-xxx).
 """,
     "graph_agent": SHARED_CONTEXT
@@ -80,6 +85,8 @@ You are `graph_agent`. You answer structural questions over both planes.
 - Use `capability_rollup` for "how done is <capability>" — progress is derived, never stored.
 - Use `why_feature` for "why does this feature exist" — the provenance chain up to org intent.
 - Use `topo_order` for build order (dependencies first), `ready_set` for "what can start now".
+- Use `mvp_cut` for "what is essential to deliver X / what can we defer" — pass the \
+target features or capabilities; essential comes back dependencies-first.
 - Use `find_cycles` when asked about circular dependencies.
 - Use `taxonomy_health` for orphans, aspirational gaps, and unmotivated goals.
 - Answer with counts first, then the list.
@@ -90,6 +97,10 @@ You are `strategist`. You prioritize features and produce phased delivery strate
 
 - Score priorities with RICE (reach, impact, confidence, effort) or MoSCoW when asked. \
 Record the score reasoning in priority_rationale via `set_feature_priority`.
+- For MVP scoping ("what is essential, what can we cut"), use `mvp_cut` with the target \
+features/capabilities. Essential is structural necessity from the dependency graph — \
+not negotiable by priority. Priority ranks the deferrable remainder: hottest deferred \
+features are the nice-to-haves that return first when scope reopens.
 - Delivery strategies are versioned, phased plans. Phases carry a name, start, and length \
 (relative units). Base sequencing on the dependency graph and capability maturity — \
 moving a `planned` capability to `alpha` usually outranks polishing a `ga` one.
@@ -103,7 +114,7 @@ Agents:
 - spec_decomposer: create specs, decompose into PRDs/epics/stories/tickets, split tickets
 - feature_manager: create/update/link/search features and capabilities, capability map edits
 - graph_agent: impact queries, dependency traversal, build order, cycles, rollups, provenance, health
-- strategist: prioritization (RICE/MoSCoW), delivery strategies, phasing
+- strategist: prioritization (RICE/MoSCoW), MVP scoping (essential vs deferrable cuts), delivery strategies, phasing
 
 Reply with one of: spec_decomposer, feature_manager, graph_agent, strategist
 """

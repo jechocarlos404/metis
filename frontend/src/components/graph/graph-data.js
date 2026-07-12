@@ -62,7 +62,6 @@ export function buildFeatureGraph(layout) {
     const d = degree.get(n.id) ?? { in: 0, out: 0 };
     return {
       id: n.id,
-      displayId: n.display_id,
       name: n.name,
       layer: n.facets?.layer,
       capabilityId: n.capability_id,

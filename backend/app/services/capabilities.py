@@ -201,7 +201,6 @@ async def mvp_cut(
     capabilities = [
         {
             "id": str(cid),
-            "display_id": f"CAP-{by_id[cid].seq:03d}",
             "name": by_id[cid].name,
             "maturity": str(by_id[cid].maturity),
             "required": counts["required"],
@@ -211,7 +210,7 @@ async def mvp_cut(
         for cid, counts in cut["capabilities"].items()
         if cid in by_id
     ]
-    capabilities.sort(key=lambda c: (not c["essential"], c["display_id"]))
+    capabilities.sort(key=lambda c: (not c["essential"], c["name"]))
     return {
         "targets": sorted(str(t) for t in target_ids),
         "essential": cut["essential"],
@@ -226,13 +225,7 @@ async def why(session: AsyncSession, feature: Feature) -> WhyChain:
     """f --REALIZES--> c --PART_OF*--> root, collecting MOTIVATES goals (and
     their org parents) at every capability on the path."""
     chain: list[WhyStep] = [
-        WhyStep(
-            kind="feature",
-            id=feature.id,
-            display_id=f"FTR-{feature.seq:03d}",
-            name=feature.name,
-            relation="",
-        )
+        WhyStep(kind="feature", id=feature.id, name=feature.name, relation="")
     ]
     seen_goals: set[uuid.UUID] = set()
     cursor: uuid.UUID | None = feature.capability_id
@@ -247,7 +240,6 @@ async def why(session: AsyncSession, feature: Feature) -> WhyChain:
             WhyStep(
                 kind="capability",
                 id=capability.id,
-                display_id=f"CAP-{capability.seq:03d}",
                 name=capability.name,
                 relation=relation,
             )
@@ -357,7 +349,6 @@ async def health(session: AsyncSession) -> list[HealthFinding]:
                 HealthFinding(
                     kind="aspirational_gap",
                     subject_id=capability.id,
-                    subject_display_id=f"CAP-{capability.seq:03d}",
                     subject_name=capability.name,
                     detail=f"maturity `{capability.maturity}` but no feature realizes it "
                     "— promised, nothing building toward it.",
@@ -370,7 +361,6 @@ async def health(session: AsyncSession) -> list[HealthFinding]:
                 HealthFinding(
                     kind="unmotivated_capability",
                     subject_id=capability.id,
-                    subject_display_id=f"CAP-{capability.seq:03d}",
                     subject_name=capability.name,
                     detail="no goal motivates this capability or anything under it "
                     "— why does it exist?",

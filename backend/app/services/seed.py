@@ -1,7 +1,7 @@
 """Demo seed reproducing the Metis design-system UI kit's reference data.
 
-Explicit `seq` values match the display IDs shown in the kit (FTR-031,
-TKT-0142, SPEC-004, ...); sequences are bumped past the seeded maxima
+Explicit `seq` values match the display IDs shown in the kit (TKT-0142,
+SPEC-004, ...); sequences are bumped past the seeded maxima
 afterwards. Idempotent: skipped when any goal exists.
 """
 

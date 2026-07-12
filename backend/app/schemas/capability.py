@@ -1,9 +1,9 @@
 import uuid
 
-from pydantic import BaseModel, Field, computed_field
+from pydantic import BaseModel, Field
 
 from app.models.enums import CapabilityMaturity
-from app.schemas.common import Stamped, display
+from app.schemas.common import Stamped
 
 
 class CapabilityCreate(BaseModel):
@@ -32,11 +32,6 @@ class CapabilityRead(Stamped):
     facets: dict[str, str]
     evidence_anchors: list[str]
 
-    @computed_field
-    @property
-    def display_id(self) -> str:
-        return display("CAP", self.seq, 3)
-
 
 class Rollup(BaseModel):
     """Derived in-flight progress over scope(c). Distinct from maturity."""
@@ -61,6 +56,6 @@ class MotivationCreate(BaseModel):
 class HealthFinding(BaseModel):
     kind: str
     subject_id: uuid.UUID
-    subject_display_id: str
+    subject_display_id: str | None = None  # goals only; capabilities go by name
     subject_name: str
     detail: str

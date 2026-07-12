@@ -71,7 +71,6 @@ async def _resolve(session, model, ref: str, prefix: str, name_column=None):
 def _feature_dict(f: Feature) -> dict[str, Any]:
     return {
         "id": str(f.id),
-        "display_id": f"FTR-{f.seq:03d}",
         "name": f.name,
         "capability_id": str(f.capability_id),
         "facets": dict(f.facets or {}),
@@ -84,7 +83,6 @@ def _feature_dict(f: Feature) -> dict[str, Any]:
 def _capability_dict(c: Capability) -> dict[str, Any]:
     return {
         "id": str(c.id),
-        "display_id": f"CAP-{c.seq:03d}",
         "name": c.name,
         "description": c.description,
         "parent_id": str(c.parent_id) if c.parent_id else None,
@@ -513,7 +511,7 @@ _PRD_SCHEMA = {
                 "properties": {
                     "title": _STR,
                     "acceptance_criteria": _STR,
-                    "capability": {"type": "string", "description": "Capability this epic snapshots (UUID, CAP-xxx, or name)"},
+                    "capability": {"type": "string", "description": "Capability this epic snapshots (UUID or name)"},
                     "stories": {
                         "type": "array",
                         "items": {
@@ -521,7 +519,7 @@ _PRD_SCHEMA = {
                             "properties": {
                                 "title": _STR,
                                 "description": _STR,
-                                "feature": {"type": "string", "description": "Feature this story delivers (UUID, FTR-xxx, or name)"},
+                                "feature": {"type": "string", "description": "Feature this story delivers (UUID or name)"},
                                 "tickets": {
                                     "type": "array",
                                     "items": {
@@ -566,7 +564,7 @@ _MATURITY = {"type": "string", "enum": ["planned", "alpha", "beta", "ga", "depre
 _MVP_CUT_TOOL = _tool(
     "mvp_cut",
     "Prerequisite closure for a delivery cut. targets = features and/or capabilities "
-    "(UUID, FTR-xxx/CAP-xxx, or name); capability targets expand to every feature in "
+    "(UUID or name); capability targets expand to every feature in "
     "their scope. Returns `essential` (targets plus everything they transitively need, "
     "dependencies first, with is_target flags), `deferrable` (every feature that can "
     "wait, hottest priority first), and per-capability required/total counts.",
@@ -591,11 +589,11 @@ AGENT_TOOLS: dict[str, list[tuple[ToolDef, Any]]] = {
         _tool("update_ticket", "Update a ticket by UUID, TKT-xxxx, or title. Only pass fields to change.", {"ticket": _STR, "title": _STR, "description": _STR, "technical_approach": _STR, "acceptance_criteria": _STR, "affected_files": {"type": "array", "items": _STR}, "context_budget": {"type": "string", "enum": ["S", "M", "L"]}, "status": {"type": "string", "enum": ["pending", "in_progress", "done"]}}, ["ticket"], update_ticket),
     ],
     "feature_manager": SHARED_TOOLS + [
-        _tool("create_capability", "Create a capability (slow plane). Name must be a NOUN phrase naming a durable state of the product. Optionally nest under a parent capability (UUID, CAP-xxx, or name).", {"name": _STR, "description": _STR, "parent": _STR, "maturity": _MATURITY, "evidence_anchors": {"type": "array", "items": _STR}}, ["name"], create_capability),
-        _tool("update_capability", "Update a capability by UUID, CAP-xxx, or name. Only pass fields to change. Re-parenting that closes a containment cycle is rejected.", {"capability": _STR, "name": _STR, "description": _STR, "parent": _STR, "maturity": _MATURITY}, ["capability"], update_capability),
+        _tool("create_capability", "Create a capability (slow plane). Name must be a NOUN phrase naming a durable state of the product. Optionally nest under a parent capability (UUID or name).", {"name": _STR, "description": _STR, "parent": _STR, "maturity": _MATURITY, "evidence_anchors": {"type": "array", "items": _STR}}, ["name"], create_capability),
+        _tool("update_capability", "Update a capability by UUID or name. Only pass fields to change. Re-parenting that closes a containment cycle is rejected.", {"capability": _STR, "name": _STR, "description": _STR, "parent": _STR, "maturity": _MATURITY}, ["capability"], update_capability),
         _tool("motivate_capability", "Link a goal to a capability: goal MOTIVATES capability. Goals justify capabilities, never features directly.", {"capability": _STR, "goal": _STR}, ["capability", "goal"], motivate_capability),
-        _tool("create_feature", "Create a feature (fast plane). Name must be a VERB phrase naming a change. capability = the one capability it REALIZES (required; UUID, CAP-xxx, or name). layer facet: ui | service | integration | infra. priority 1-5 (1 hottest).", {"name": _STR, "capability": _STR, "description": _STR, "layer": {"type": "string", "enum": ["ui", "service", "integration", "infra"]}, "priority": {"type": "integer", "minimum": 1, "maximum": 5}}, ["name", "capability"], create_feature),
-        _tool("update_feature", "Update a feature by UUID, FTR-xxx, or name. Only pass fields to change. capability re-points which capability it REALIZES.", {"feature": _STR, "name": _STR, "description": _STR, "capability": _STR, "layer": {"type": "string", "enum": ["ui", "service", "integration", "infra"]}, "status": {"type": "string", "enum": ["pending", "in_progress", "done"]}, "priority": {"type": "integer", "minimum": 1, "maximum": 5}, "priority_rationale": _STR}, ["feature"], update_feature),
+        _tool("create_feature", "Create a feature (fast plane). Name must be a VERB phrase naming a change. capability = the one capability it REALIZES (required; UUID or name). layer facet: ui | service | integration | infra. priority 1-5 (1 hottest).", {"name": _STR, "capability": _STR, "description": _STR, "layer": {"type": "string", "enum": ["ui", "service", "integration", "infra"]}, "priority": {"type": "integer", "minimum": 1, "maximum": 5}}, ["name", "capability"], create_feature),
+        _tool("update_feature", "Update a feature by UUID or name. Only pass fields to change. capability re-points which capability it REALIZES.", {"feature": _STR, "name": _STR, "description": _STR, "capability": _STR, "layer": {"type": "string", "enum": ["ui", "service", "integration", "infra"]}, "status": {"type": "string", "enum": ["pending", "in_progress", "done"]}, "priority": {"type": "integer", "minimum": 1, "maximum": 5}, "priority_rationale": _STR}, ["feature"], update_feature),
         _tool("link_features", "Create a typed edge src -> dst. `src DEPENDS_ON dst` means src needs dst; `src BLOCKS dst` means dst waits for src. Writes that close a precedence cycle are rejected. Kinds: DEPENDS_ON, BLOCKS, RELATES_TO.", {"src": _STR, "dst": _STR, "kind": {"type": "string", "enum": ["DEPENDS_ON", "BLOCKS", "RELATES_TO"]}}, ["src", "dst"], link_features),
     ],
     "graph_agent": SHARED_TOOLS + [

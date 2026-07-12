@@ -6,6 +6,7 @@ import { api } from "../../lib/api.js";
 export default function ProductsIsland() {
   const [products, setProducts] = React.useState([]);
   const [productId, setProductId] = React.useState(null);
+  const [goals, setGoals] = React.useState([]);
   const [epics, setEpics] = React.useState([]);
   const [tickets, setTickets] = React.useState([]);
   const [decompositions, setDecompositions] = React.useState([]);
@@ -14,6 +15,8 @@ export default function ProductsIsland() {
   const [tab, setTab] = React.useState("prd");
   const [toast, setToast] = React.useState(null);
   const [ticketDialog, setTicketDialog] = React.useState(null); // null | {mode:'new'} | {mode:'edit', ticket}
+  const [productDialog, setProductDialog] = React.useState(null); // null | {mode:'new'} | {mode:'edit'}
+  const [confirmingDelete, setConfirmingDelete] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
 
   const product = products.find((p) => p.id === productId);
@@ -21,8 +24,9 @@ export default function ProductsIsland() {
   const strategy = strategies[0];
 
   const loadProducts = React.useCallback(async () => {
-    const list = await api("/products");
+    const [list, goalList] = await Promise.all([api("/products"), api("/goals")]);
     setProducts(list);
+    setGoals(goalList);
     setProductId((current) => current && list.some((p) => p.id === current) ? current : list[0]?.id ?? null);
   }, []);
 
@@ -62,6 +66,57 @@ export default function ProductsIsland() {
       .then(() => { setToast({ tone: "ok", title: `${prd.display_id} approved` }); return loadDetail(productId); })
       .catch(showError("PRD not ready"));
 
+  const openNewProduct = () => {
+    setConfirmingDelete(false);
+    setProductDialog({ mode: "new", name: "", summary: "", goalId: "" });
+  };
+
+  const openEditProduct = () => {
+    setConfirmingDelete(false);
+    setProductDialog({ mode: "edit", name: product.name, summary: product.summary ?? "", goalId: product.goal_id ?? "" });
+  };
+
+  const saveProduct = async () => {
+    const d = productDialog;
+    if (!d?.name?.trim()) return;
+    setSaving(true);
+    try {
+      const body = {
+        name: d.name.trim(),
+        summary: d.summary.trim() || null,
+        goal_id: d.goalId || null,
+      };
+      if (d.mode === "new") {
+        const created = await api("/products", { method: "POST", body });
+        await loadProducts();
+        setProductId(created.id);
+      } else {
+        await api(`/products/${productId}`, { method: "PATCH", body });
+        await loadProducts();
+      }
+      setProductDialog(null);
+    } catch (e) {
+      showError("Spec save failed")(e);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const deleteProduct = async () => {
+    setSaving(true);
+    try {
+      await api(`/products/${productId}`, { method: "DELETE" });
+      setProductDialog(null);
+      setToast({ tone: "ok", title: "Spec deleted" });
+      await loadProducts();
+    } catch (e) {
+      showError("Delete failed")(e);
+      setConfirmingDelete(false);
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const saveTicket = async () => {
     const d = ticketDialog;
     if (!d?.title?.trim()) return;
@@ -100,10 +155,15 @@ export default function ProductsIsland() {
         title="Products"
         meta={product ? `${product.display_id} · v${product.version}` : "no products"}
         actions={
-          products.length > 1 ? (
-            <Select value={productId ?? ""} onChange={(e) => setProductId(e.target.value)} style={{ width: 240 }}
-              options={products.map((p) => ({ value: p.id, label: p.name }))} />
-          ) : null
+          <>
+            {products.length > 1 && (
+              <Select value={productId ?? ""} onChange={(e) => setProductId(e.target.value)} style={{ width: 240 }}
+                options={products.map((p) => ({ value: p.id, label: p.name }))} />
+            )}
+            <Button size="sm" variant="accent" style={{ gap: 6 }} onClick={openNewProduct}>
+              <Icon name="plus" size={13} />New spec
+            </Button>
+          </>
         }
       />
       <div style={{ flex: 1, overflowY: "auto", padding: 24 }}>
@@ -117,6 +177,9 @@ export default function ProductsIsland() {
                   <StatusBadge status={product.status} />
                   {prd && <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-disabled)" }}>{prd.display_id} v{prd.version} · {prd.created_by}</span>}
                   <span style={{ flex: 1 }} />
+                  <Button size="sm" variant="secondary" style={{ gap: 6 }} onClick={openEditProduct}>
+                    <Icon name="pencil" size={13} />Edit
+                  </Button>
                   {product.status === "draft" && (
                     <Button size="sm" onClick={approveProduct}>Approve</Button>
                   )}
@@ -246,6 +309,37 @@ export default function ProductsIsland() {
               <Select label="Status" value={ticketDialog.status} onChange={(e) => setTicketDialog({ ...ticketDialog, status: e.target.value })}
                 options={["pending", "in_progress", "done"]} />
             )}
+          </div>
+        )}
+      </Dialog>
+
+      <Dialog
+        open={productDialog != null}
+        title={productDialog?.mode === "new" ? "New spec" : `Edit ${product?.display_id ?? ""}`}
+        onClose={() => setProductDialog(null)}
+        footer={
+          <>
+            {productDialog?.mode === "edit" && (
+              <Button size="sm" variant={confirmingDelete ? "danger" : "secondary"} disabled={saving}
+                style={{ marginRight: "auto", gap: 6 }}
+                onClick={() => (confirmingDelete ? deleteProduct() : setConfirmingDelete(true))}>
+                <Icon name="trash" size={13} />{confirmingDelete ? "Confirm delete" : "Delete"}
+              </Button>
+            )}
+            <Button size="sm" variant="secondary" onClick={() => setProductDialog(null)}>Cancel</Button>
+            <Button size="sm" variant="accent" disabled={saving || !productDialog?.name?.trim()} onClick={saveProduct}>
+              {productDialog?.mode === "new" ? "Create spec" : "Save"}
+            </Button>
+          </>
+        }
+      >
+        {productDialog && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <Input label="Name" value={productDialog.name} onChange={(e) => setProductDialog({ ...productDialog, name: e.target.value })} placeholder="PM tracker export" />
+            <Input label="Summary" value={productDialog.summary} onChange={(e) => setProductDialog({ ...productDialog, summary: e.target.value })} />
+            <Select label="Product goal" value={productDialog.goalId} onChange={(e) => setProductDialog({ ...productDialog, goalId: e.target.value })}
+              options={[{ value: "", label: "None" },
+                ...goals.map((g) => ({ value: g.id, label: `${g.display_id} ${g.title}` }))]} />
           </div>
         )}
       </Dialog>

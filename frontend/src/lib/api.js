@@ -9,7 +9,10 @@ export class ApiError extends Error {
 export async function api(path, { method = "GET", body } = {}) {
   const res = await fetch(`/api${path}`, {
     method,
-    headers: body !== undefined ? { "content-type": "application/json" } : undefined,
+    // Declared on every mutating request, even body-less DELETE/POST: Astro's
+    // CSRF guard (security.checkOrigin) 403s "simple"-content-type requests
+    // in production builds, and a missing content-type counts as simple.
+    headers: method !== "GET" ? { "content-type": "application/json" } : undefined,
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
   if (!res.ok) {

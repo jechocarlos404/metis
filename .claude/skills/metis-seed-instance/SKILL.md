@@ -1,5 +1,5 @@
 ---
-name: seed-instance
+name: metis-seed-instance
 description: Load a metis-seed JSON file into the running metis instance via the REST API — goals, capability map, features, dependency edges, motivations, and spec/PRD documents. Use whenever the user wants to seed, load, import, or ingest data into their metis instance, mentions a metis-seed.json or a seed file exported from another repository, or describes goals/capabilities/features in conversation and wants them inserted into metis (author a seed file first, then load it).
 ---
 
@@ -38,8 +38,8 @@ Always dry-run first — it validates the file, diffs it against what's already 
 the instance, and writes nothing:
 
 ```sh
-python3 .claude/skills/seed-instance/scripts/seed_instance.py <seed-file> --dry-run
-python3 .claude/skills/seed-instance/scripts/seed_instance.py <seed-file>
+python3 .claude/skills/metis-seed-instance/scripts/seed_instance.py <seed-file> --dry-run
+python3 .claude/skills/metis-seed-instance/scripts/seed_instance.py <seed-file>
 ```
 
 The script is stdlib-only (no venv needed) and defaults to

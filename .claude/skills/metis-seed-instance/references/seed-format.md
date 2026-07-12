@@ -2,11 +2,11 @@
 
 A single JSON document describing a connected slice of the metis ontology, portable
 between repositories. Produced by the `metis-export` skill (or authored by hand) and
-loaded by the `seed-instance` skill in the metis repo.
+loaded by the `metis-seed-instance` skill in the metis repo.
 
 Keep this file in sync with the copy in the other skill
 (`~/.claude/skills/metis-export/references/seed-format.md` and
-`<metis repo>/.claude/skills/seed-instance/references/seed-format.md`).
+`<metis repo>/.claude/skills/metis-seed-instance/references/seed-format.md`).
 
 ## Top-level shape
 

@@ -477,7 +477,7 @@ class Loader:
                 continue
             status, body = self.api.post(
                 f"/api/products/{pid}/decompositions",
-                {"document": self.build_prd(decomp), "created_by": "seed-instance"},
+                {"document": self.build_prd(decomp), "created_by": "metis-seed-instance"},
             )
             if status != 201:
                 sys.exit(

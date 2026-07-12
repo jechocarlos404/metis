@@ -434,6 +434,37 @@ async def why_feature(ctx: ToolContext, feature: str) -> ToolResult:
     return ToolResult(_dump(chain.model_dump(mode="json")))
 
 
+async def mvp_cut(ctx: ToolContext, targets: list[str]) -> ToolResult:
+    from app.services.graph_service import GraphCycleError
+
+    feature_ids: list[uuid.UUID] = []
+    capability_ids: list[uuid.UUID] = []
+    for ref in targets:
+        try:
+            feature_obj = await _resolve(ctx.session, Feature, ref, "FTR", Feature.name)
+            feature_ids.append(feature_obj.id)
+            continue
+        except ToolError:
+            pass
+        try:
+            capability_obj = await _resolve(ctx.session, Capability, ref, "CAP", Capability.name)
+            capability_ids.append(capability_obj.id)
+        except ToolError:
+            raise ToolError(f"Could not resolve `{ref}` to a feature or capability") from None
+    try:
+        result = await capability_service.mvp_cut(
+            ctx.session, ctx.graph, feature_ids, capability_ids
+        )
+    except HTTPException as e:
+        raise ToolError(str(e.detail)) from None
+    except GraphCycleError:
+        raise ToolError(
+            "Dependency cycle detected among the required features - break it first "
+            "(see find_cycles)."
+        ) from None
+    return ToolResult(_dump(result))
+
+
 async def taxonomy_health(ctx: ToolContext) -> ToolResult:
     findings = await capability_service.health(ctx.session)
     return ToolResult(_dump({
@@ -532,6 +563,18 @@ def _tool(name, description, properties, required, executor) -> tuple[ToolDef, A
 
 _MATURITY = {"type": "string", "enum": ["planned", "alpha", "beta", "ga", "deprecated", "retired"]}
 
+_MVP_CUT_TOOL = _tool(
+    "mvp_cut",
+    "Prerequisite closure for a delivery cut. targets = features and/or capabilities "
+    "(UUID, FTR-xxx/CAP-xxx, or name); capability targets expand to every feature in "
+    "their scope. Returns `essential` (targets plus everything they transitively need, "
+    "dependencies first, with is_target flags), `deferrable` (every feature that can "
+    "wait, hottest priority first), and per-capability required/total counts.",
+    {"targets": {"type": "array", "items": _STR}},
+    ["targets"],
+    mvp_cut,
+)
+
 SHARED_TOOLS = [
     _tool("list_goals", "List all org and product goals with IDs, criteria, priority, status.", {}, [], list_goals),
     _tool("list_products", "List all products (Specs) with IDs, names, status, version.", {}, [], list_products),
@@ -563,9 +606,11 @@ AGENT_TOOLS: dict[str, list[tuple[ToolDef, Any]]] = {
         _tool("ready_set", "The work frontier: pending features whose precedence dependencies are all done.", {}, [], ready_set),
         _tool("find_cycles", "List dependency cycles in the feature graph.", {}, [], find_cycles),
         _tool("taxonomy_health", "Findings over the taxonomy: aspirational gaps (capability with no realizing work), unmotivated root capabilities, product goals motivating nothing.", {}, [], taxonomy_health),
+        _MVP_CUT_TOOL,
     ],
     "strategist": SHARED_TOOLS + [
         _tool("set_feature_priority", "Set a feature's priority (1-5, 1 hottest) with the scoring rationale (e.g. RICE numbers).", {"feature": _STR, "priority": {"type": "integer", "minimum": 1, "maximum": 5}, "rationale": _STR}, ["feature", "priority", "rationale"], set_feature_priority),
+        _MVP_CUT_TOOL,
         _tool("create_delivery_strategy", "Create a new versioned delivery strategy for a product. phases: [{name, start, length}] in relative units.", {"product": _STR, "phases": {"type": "array", "items": {"type": "object", "properties": {"name": _STR, "start": {"type": "number"}, "length": {"type": "number"}}, "required": ["name"]}}, "rationale": _STR}, ["product", "phases"], create_delivery_strategy),
     ],
 }

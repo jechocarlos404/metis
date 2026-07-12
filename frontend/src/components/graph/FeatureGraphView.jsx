@@ -12,7 +12,7 @@ const useIsomorphicLayoutEffect = typeof window !== "undefined" ? React.useLayou
 const EDGE_KINDS = ["DEPENDS_ON", "BLOCKS", "RELATES_TO"];
 const STATUS_DOT = { pending: "var(--text-secondary)", in_progress: "var(--warn-fg)", done: "var(--ok-fg)" };
 
-export function FeatureGraphView({ layout, selectedId, onSelect, impactIds, style }) {
+export function FeatureGraphView({ layout, selectedId, onSelect, impactIds, cutStates, style }) {
   const svgRef = React.useRef(null);
   const viewportRef = React.useRef(null);
   const engineRef = React.useRef(null);
@@ -85,7 +85,9 @@ export function FeatureGraphView({ layout, selectedId, onSelect, impactIds, styl
     }
   }, [graphData]);
 
-  const focusId = hoveredId ?? selectedId ?? null;
+  // With a cut overlay active, tier coloring owns the canvas — selection no
+  // longer dims non-neighbors (hover still focuses transiently).
+  const focusId = hoveredId ?? (cutStates != null ? null : selectedId) ?? null;
   const focusNeighbors = focusId ? adjacency.get(focusId) : null;
 
   return (
@@ -106,7 +108,9 @@ export function FeatureGraphView({ layout, selectedId, onSelect, impactIds, styl
           <g>
             {graphData.edges.map((e) => {
               const st = edgeStyle(e.kind);
-              const dim = focusId != null && e.source !== focusId && e.target !== focusId;
+              const cutDim = cutStates != null &&
+                (cutStates.get(e.source) === "deferrable" || cutStates.get(e.target) === "deferrable");
+              const dim = cutDim || (focusId != null && e.source !== focusId && e.target !== focusId);
               return (
                 <line
                   key={e.id}
@@ -138,6 +142,7 @@ export function FeatureGraphView({ layout, selectedId, onSelect, impactIds, styl
                 isHovered={hoveredId === n.id}
                 isDimmed={focusId != null && focusId !== n.id && !focusNeighbors?.has(n.id)}
                 isImpacted={impactIds ? impactIds.has(n.id) : false}
+                cutState={cutStates ? cutStates.get(n.id) : null}
                 isPinned={pinned.has(n.id)}
                 onSelect={onSelect}
                 onHoverChange={setHoveredId}
@@ -161,7 +166,7 @@ export function FeatureGraphView({ layout, selectedId, onSelect, impactIds, styl
         onZoomOut={() => engineRef.current?.zoomBy(1 / 1.4)}
         onFit={() => engineRef.current?.fitToView()}
       />
-      <GraphLegend />
+      <GraphLegend cutActive={cutStates != null} />
 
       <div style={{
         position: "absolute", bottom: 10, left: 12, pointerEvents: "none",
@@ -182,9 +187,16 @@ export function FeatureGraphView({ layout, selectedId, onSelect, impactIds, styl
   );
 }
 
-function FeatureNode({ node, isSelected, isHovered, isDimmed, isImpacted, isPinned, onSelect, onHoverChange, registerEl }) {
+function FeatureNode({ node, isSelected, isHovered, isDimmed, isImpacted, cutState, isPinned, onSelect, onHoverChange, registerEl }) {
   const accent = `var(${nodeAccentVar(node.layer)})`;
-  const ring = isSelected ? "var(--accent)" : isImpacted ? "var(--danger-fg)" : isHovered ? "var(--border-default)" : "var(--border-hairline)";
+  const ring = isSelected ? "var(--accent)"
+    : isImpacted ? "var(--danger-fg)"
+    : cutState === "target" ? "var(--accent)"
+    : cutState === "essential" ? "var(--ok-fg)"
+    : isHovered ? "var(--border-default)" : "var(--border-hairline)";
+  const ringWide = isSelected || cutState === "target" || cutState === "essential";
+  // Deferrable nodes fade like focus-dimming does, but stay readable on hover/select.
+  const isDeferred = cutState === "deferrable" && !isHovered && !isSelected;
   return (
     <g
       ref={registerEl}
@@ -201,11 +213,11 @@ function FeatureNode({ node, isSelected, isHovered, isDimmed, isImpacted, isPinn
           onSelect && onSelect(node.id);
         }
       }}
-      style={{ opacity: isDimmed ? 0.25 : 1, transition: "opacity var(--dur-med) var(--ease-out)", cursor: "grab", outline: "none" }}
+      style={{ opacity: isDimmed || isDeferred ? 0.25 : 1, transition: "opacity var(--dur-med) var(--ease-out)", cursor: "grab", outline: "none" }}
     >
       <rect
         x={-NODE_W / 2} y={-NODE_H / 2} width={NODE_W} height={NODE_H} rx={8}
-        fill="var(--surface-card)" stroke={ring} strokeWidth={isSelected ? 1.5 : 1}
+        fill="var(--surface-card)" stroke={ring} strokeWidth={ringWide ? 1.5 : 1}
         style={{
           filter: isHovered || isSelected ? "drop-shadow(var(--shadow-raised))" : "drop-shadow(var(--shadow-card))",
           transition: "stroke var(--dur-fast) var(--ease-out), filter var(--dur-fast) var(--ease-out)",
@@ -257,7 +269,12 @@ function GraphToolbar({ onZoomIn, onZoomOut, onFit }) {
   );
 }
 
-function GraphLegend() {
+function GraphLegend({ cutActive }) {
+  const CUT_TIERS = [
+    ["target", "var(--accent)", 1],
+    ["essential", "var(--ok-fg)", 1],
+    ["deferrable", "var(--text-secondary)", 0.3],
+  ];
   return (
     <div style={{
       position: "absolute", top: 10, left: 10, display: "flex", flexDirection: "column", gap: 5,
@@ -276,6 +293,19 @@ function GraphLegend() {
           </div>
         );
       })}
+      {cutActive && (
+        <>
+          <div style={{ borderTop: "1px solid var(--border-hairline)", margin: "2px 0" }} />
+          {CUT_TIERS.map(([label, color, opacity]) => (
+            <div key={label} style={{ display: "flex", alignItems: "center", gap: 6, opacity }}>
+              <svg width="16" height="10" style={{ flex: "none" }}>
+                <rect x="2" y="1" width="12" height="8" rx="2" fill="none" stroke={color} strokeWidth="1.5" />
+              </svg>
+              {label}
+            </div>
+          ))}
+        </>
+      )}
     </div>
   );
 }

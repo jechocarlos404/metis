@@ -137,6 +137,48 @@ def test_relationships(chain):
     assert rels["outgoing"][0]["kind"] == "DEPENDS_ON"
 
 
+def test_mvp_cut_closure(chain):
+    """Essential = target + transitive prerequisites, dependencies first;
+    deferrable = everything outside the closure."""
+    graph, protocol, jira, exporter = chain
+    cut = graph.mvp_cut({jira.id})
+    assert [n["name"] for n in cut["essential"]] == ["protocol", "jira"]
+    assert [n["is_target"] for n in cut["essential"]] == [False, True]
+    assert [n["name"] for n in cut["deferrable"]] == ["exporter"]
+
+    # targeting the tip pulls in the whole chain — nothing deferrable
+    cut = graph.mvp_cut({exporter.id})
+    assert [n["name"] for n in cut["essential"]] == ["protocol", "jira", "exporter"]
+    assert cut["deferrable"] == []
+
+
+def test_mvp_cut_deferrable_ranked_by_priority(chain):
+    graph, protocol, jira, exporter = chain
+    extra = fake_feature(4, "extra", priority=1)
+    graph.upsert_node(extra)
+    cut = graph.mvp_cut({protocol.id})
+    assert [n["name"] for n in cut["deferrable"]] == ["extra", "jira", "exporter"]
+
+
+def test_mvp_cut_capability_counts():
+    graph = FeatureGraph(sessionmaker=None)
+    search = fake_feature(1, "search", capability_id=CAP_A)
+    index = fake_feature(2, "index", capability_id=CAP_A)
+    export = fake_feature(3, "export", capability_id=CAP_B)
+    for f in (search, index, export):
+        graph.upsert_node(f)
+    graph.add_edge(search.id, index.id, "DEPENDS_ON")
+    graph.add_edge(export.id, search.id, "DEPENDS_ON")
+
+    cut = graph.mvp_cut({export.id})
+    assert cut["capabilities"][CAP_A] == {"required": 2, "total": 2}
+    assert cut["capabilities"][CAP_B] == {"required": 1, "total": 1}
+
+    cut = graph.mvp_cut({index.id})
+    assert cut["capabilities"][CAP_A] == {"required": 1, "total": 2}
+    assert cut["capabilities"][CAP_B] == {"required": 0, "total": 1}
+
+
 def test_capability_coupling_projection():
     """Feature precedence projects onto capabilities; internal edges drop."""
     graph = FeatureGraph(sessionmaker=None)

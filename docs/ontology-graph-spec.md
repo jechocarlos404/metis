@@ -76,6 +76,33 @@ Semantics stated as questions; existing implementations noted.
 | `impact(f)` | who breaks if f changes? | ancestors of f in the precedence graph |
 | `build_order(S)` | in what order do we build S? | reverse topological sort of precedence subgraph *(exists)* |
 | `ready_set()` | what can start right now? | pending features whose precedence-descendants are all done — the agent-facing work frontier |
+| `required_set(T)` | what must be built to deliver targets T? | T ∪ precedence-descendants of T, dependencies-first |
+| `deferrable(T)` | what can be cut without breaking T? | all features − `required_set(T)`, ranked by priority |
+
+### Delivery cuts (MVP scoping)
+
+`required_set`/`deferrable` are the schedule-free prioritization primitives: they answer
+"which features are essential vs nice-to-have" from graph structure alone, with no
+timeline anywhere. Decisions baked in:
+
+- **Necessity lives on the feature plane.** There is no authored capability-level
+  `REQUIRES` edge; capability ordering is always the derived coupling projection.
+  Consequence: capability-level ordering cannot be expressed before decomposition —
+  decompose coarsely early rather than invent a new edge kind.
+- **A cut is a query, not an entity.** No Release/Milestone node — a milestone without
+  a date is just a computed cut. Named, persistent cuts ("MVP", "v1") are the deferred
+  `Product` + `BUNDLES` entity's job: an MVP is literally a product, a promise made
+  from a subset of the map.
+- **Targets are features.** Capability targets are accepted as a convenience and expand
+  to `scope(c)`; thin-slice MVPs (capability needed, but only partially) should target
+  features directly or the required set overshoots.
+- **Capability projection.** `required_set` grouped by `REALIZES` gives the
+  capability-level answer: which capabilities must move, and how many of their features
+  are required vs total (a partial-rollup target, not full maturity).
+- **Discipline (load-bearing):** `deferrable()` is only as truthful as the edges.
+  `DEPENDS_ON`/`BLOCKS` encode *necessity* — B's output is A's input; "should come
+  first" is a `priority` opinion, and encoding it as an edge shrinks the deferrable set
+  with lies. Agent prompts state this rule.
 
 ### Slow plane and bridge (new)
 
@@ -169,6 +196,10 @@ noted. Deviations and deferrals, with reasons:
   `/{id}/rollup`, `/{id}/impact`, `/{id}/motivations`), `/api/features/{id}/why`,
   `/api/graph/ready`. Snapshots pin: `PRDEpic.capability_id`, `PRDStory.feature_id`,
   materialized onto `epics`/`stories` rows.
+- **Delivery cuts:** `POST /api/graph/mvp-cut` ({features, capabilities} → essential /
+  deferrable / per-capability counts), mirrored as the `mvp_cut` tool on `graph_agent`
+  and `strategist`. Empty expansion (capability target with no features) is a 422, not
+  an empty cut — an all-deferrable answer would be a lie.
 - **`unmotivated_capability` refined:** a root is flagged only when *nothing in its
   submap* is motivated — justification is inherited through containment.
 - **Deferred:** `BUNDLES` + the Product-as-bundle entity (single-product today; the

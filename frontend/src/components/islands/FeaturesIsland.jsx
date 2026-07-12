@@ -17,6 +17,9 @@ export default function FeaturesIsland() {
   const [draft, setDraft] = React.useState({ name: "", description: "", capabilityId: "", layer: "service", priority: "3" });
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState(null);
+  const [cutTargets, setCutTargets] = React.useState([]); // {kind: "feature"|"capability", id}
+  const [cut, setCut] = React.useState(null);
+  const [cutting, setCutting] = React.useState(false);
 
   const load = React.useCallback(async () => {
     const [data, caps] = await Promise.all([api("/graph/layout"), api("/capabilities")]);
@@ -64,6 +67,47 @@ export default function FeaturesIsland() {
     if (!selected) return;
     setImpact(await api(`/graph/impact/${selected}`));
   };
+
+  const nodeById = React.useMemo(() => new Map(layout.nodes.map((n) => [n.id, n])), [layout]);
+
+  // Editing targets invalidates a previous cut — the overlay must never lie.
+  const addCutTarget = (kind, id) => {
+    setCutTargets((ts) => (ts.some((t) => t.kind === kind && t.id === id) ? ts : [...ts, { kind, id }]));
+    setCut(null);
+  };
+  const removeCutTarget = (kind, id) => {
+    setCutTargets((ts) => ts.filter((t) => !(t.kind === kind && t.id === id)));
+    setCut(null);
+  };
+  const clearCut = () => {
+    setCutTargets([]);
+    setCut(null);
+  };
+  const runCut = async () => {
+    setCutting(true);
+    setError(null);
+    try {
+      setCut(await api("/graph/mvp-cut", {
+        method: "POST",
+        body: {
+          features: cutTargets.filter((t) => t.kind === "feature").map((t) => t.id),
+          capabilities: cutTargets.filter((t) => t.kind === "capability").map((t) => t.id),
+        },
+      }));
+    } catch (e) {
+      setError(String(e.message));
+    } finally {
+      setCutting(false);
+    }
+  };
+
+  const cutStates = React.useMemo(() => {
+    if (!cut) return null;
+    const states = new Map();
+    for (const f of cut.essential) states.set(f.id, f.is_target ? "target" : "essential");
+    for (const f of cut.deferrable) states.set(f.id, "deferrable");
+    return states;
+  }, [cut]);
 
   const save = async () => {
     if (!draft.name.trim() || !draft.capabilityId) return;
@@ -115,9 +159,23 @@ export default function FeaturesIsland() {
       {tab === "graph" ? (
         <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
           <div style={{ flex: 1, position: "relative", margin: 20, background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", overflow: "hidden", minWidth: 0 }}>
-            <FeatureGraphView layout={layout} selectedId={selected} onSelect={setSelected} impactIds={impactIds} />
+            <FeatureGraphView layout={layout} selectedId={selected} onSelect={setSelected} impactIds={impactIds} cutStates={cutStates} />
           </div>
           <aside style={{ width: 280, flex: "none", margin: "20px 20px 20px 0", background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", padding: 16, display: "flex", flexDirection: "column", gap: 12, overflowY: "auto" }}>
+            <MVPCutPanel
+              capabilities={capabilities}
+              nodeById={nodeById}
+              capabilityById={capabilityById}
+              selectedId={selected}
+              targets={cutTargets}
+              onAddTarget={addCutTarget}
+              onRemoveTarget={removeCutTarget}
+              onRun={runCut}
+              onClear={clearCut}
+              cut={cut}
+              cutting={cutting}
+            />
+            <div style={{ borderTop: "1px solid var(--border-hairline)" }} />
             {detail ? (
               <>
                 <div style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-2xs)", color: "var(--text-secondary)" }}>{detail.display_id}</div>
@@ -211,5 +269,81 @@ export default function FeaturesIsland() {
         </div>
       </Dialog>
     </>
+  );
+}
+
+const CAPS_HEADER = {
+  fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: "var(--tracking-caps)",
+  textTransform: "uppercase", color: "var(--text-disabled)",
+};
+const MONO_ROW = { fontFamily: "var(--font-mono)", fontSize: 11 };
+const ELLIPSIS = { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
+
+// Schedule-free MVP scoping: pick targets, run the prerequisite closure,
+// read back essential (build order) vs deferrable (priority order).
+function MVPCutPanel({ capabilities, nodeById, capabilityById, selectedId, targets, onAddTarget, onRemoveTarget, onRun, onClear, cut, cutting }) {
+  const selectedTargeted = targets.some((t) => t.kind === "feature" && t.id === selectedId);
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      <div style={CAPS_HEADER}>MVP cut</div>
+      {targets.length > 0 && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+          {targets.map((t) => {
+            const label = t.kind === "feature"
+              ? nodeById.get(t.id)?.display_id ?? "FTR-?"
+              : capabilityById.get(t.id)?.display_id ?? "CAP-?";
+            return <Tag key={`${t.kind}:${t.id}`} onRemove={() => onRemoveTarget(t.kind, t.id)}>{label}</Tag>;
+          })}
+        </div>
+      )}
+      <Select value="" onChange={(e) => e.target.value && onAddTarget("capability", e.target.value)}
+        options={[{ value: "", label: "Target a capability…" },
+          ...capabilities.map((c) => ({ value: c.id, label: `${c.display_id} ${c.name}` }))]} />
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+        <Button size="sm" variant="secondary" disabled={!selectedId || selectedTargeted}
+          onClick={() => onAddTarget("feature", selectedId)}>Target selected</Button>
+        <Button size="sm" variant="accent" disabled={targets.length === 0 || cutting} onClick={onRun}>
+          {cutting ? "Cutting…" : "Run cut"}
+        </Button>
+        {(targets.length > 0 || cut) && (
+          <Button size="sm" variant="secondary" onClick={onClear}>Clear</Button>
+        )}
+      </div>
+      {cut && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <div style={{ fontSize: "var(--text-xs)", color: "var(--text-body)" }}>
+            {cut.essential.length} essential · {cut.deferrable.length} deferrable
+          </div>
+          {cut.capabilities.map((c) => (
+            <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 6, ...MONO_ROW }}>
+              <span style={{ color: "var(--text-secondary)", flex: "none" }}>{c.display_id}</span>
+              <span style={{ color: "var(--text-body)", flex: 1, ...ELLIPSIS }}>{c.name}</span>
+              <span style={{ color: c.essential ? "var(--ok-fg)" : "var(--text-disabled)", flex: "none" }}>
+                {c.required}/{c.total}
+              </span>
+            </div>
+          ))}
+          <div style={{ ...CAPS_HEADER, marginTop: 4 }}>Build order (essential)</div>
+          {cut.essential.map((f, i) => (
+            <div key={f.id} style={{ ...MONO_ROW, ...ELLIPSIS, color: f.is_target ? "var(--text-accent)" : "var(--text-body)" }}>
+              {i + 1}. {f.display_id} {f.name}
+            </div>
+          ))}
+          <div style={{ ...CAPS_HEADER, marginTop: 4 }}>Nice to have (deferred)</div>
+          {cut.deferrable.slice(0, 8).map((f) => (
+            <div key={f.id} style={{ display: "flex", alignItems: "center", gap: 6, ...MONO_ROW, color: "var(--text-secondary)" }}>
+              <span style={{ flex: 1, ...ELLIPSIS }}>{f.display_id} {f.name}</span>
+              {f.priority != null && <PriorityBadge priority={f.priority} />}
+            </div>
+          ))}
+          {cut.deferrable.length > 8 && (
+            <div style={{ ...MONO_ROW, color: "var(--text-disabled)" }}>+{cut.deferrable.length - 8} more</div>
+          )}
+          {cut.deferrable.length === 0 && (
+            <div style={{ ...MONO_ROW, color: "var(--text-disabled)" }}>nothing deferrable — targets need the whole graph</div>
+          )}
+        </div>
+      )}
+    </div>
   );
 }

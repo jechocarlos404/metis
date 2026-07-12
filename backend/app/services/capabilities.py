@@ -1,6 +1,6 @@
 """Capability map (slow plane) — CRUD, containment forest, and the traversals
 that cross the REALIZES bridge: submap, scope, rollup, capability impact,
-why(feature), and health findings.
+why(feature), mvp_cut, and health findings.
 
 The map is a forest stored relationally (parent_id): single parent, acyclic.
 Capabilities never carry work status — maturity is stored ("where it stands"),
@@ -168,6 +168,56 @@ async def capability_map(session: AsyncSession) -> list[CapabilityNode]:
         )
 
     return [build(root) for root in children.get(None, [])]
+
+
+# ---- mvp cut (prerequisite closure over the bridge) ----
+
+async def mvp_cut(
+    session: AsyncSession,
+    graph,
+    feature_ids: list[uuid.UUID],
+    capability_ids: list[uuid.UUID],
+) -> dict:
+    """Essential vs deferrable relative to target features/capabilities.
+    Capability targets expand to their whole scope — thin-slice MVPs should
+    target features directly. The closure itself runs on the fast plane
+    (graph.mvp_cut); this wrapper resolves targets and names capabilities."""
+    target_ids: set[uuid.UUID] = set()
+    for feature_id in feature_ids:
+        if await session.get(Feature, feature_id) is None:
+            raise HTTPException(404, f"Feature {feature_id} not found")
+        target_ids.add(feature_id)
+    for capability_id in capability_ids:
+        target_ids.update(f.id for f in await scope(session, capability_id))
+    if not target_ids:
+        raise HTTPException(
+            422,
+            "Targets resolve to no features — the cut is computed over the "
+            "feature plane; decompose the capability first.",
+        )
+    await graph.ensure_fresh()
+    cut = graph.mvp_cut(target_ids)
+    by_id = {c.id: c for c in await list_capabilities(session)}
+    capabilities = [
+        {
+            "id": str(cid),
+            "display_id": f"CAP-{by_id[cid].seq:03d}",
+            "name": by_id[cid].name,
+            "maturity": str(by_id[cid].maturity),
+            "required": counts["required"],
+            "total": counts["total"],
+            "essential": counts["required"] > 0,
+        }
+        for cid, counts in cut["capabilities"].items()
+        if cid in by_id
+    ]
+    capabilities.sort(key=lambda c: (not c["essential"], c["display_id"]))
+    return {
+        "targets": sorted(str(t) for t in target_ids),
+        "essential": cut["essential"],
+        "deferrable": cut["deferrable"],
+        "capabilities": capabilities,
+    }
 
 
 # ---- why (provenance chain) ----

@@ -127,6 +127,47 @@ async def test_health_findings(db):
 
 
 @pytest.mark.asyncio
+async def test_mvp_cut_expands_capability_targets(db):
+    async with db() as session:
+        graph = FeatureGraph(sessionmaker=None)
+        root = await make_capability(session, "ticket export")
+        sub = await make_capability(session, "jira export", parent_id=root.id)
+        auth = await make_capability(session, "authentication")
+        reporting = await make_capability(session, "reporting")
+        login = await make_feature(session, "add login", auth.id, graph=graph)
+        export = await make_feature(session, "export to jira", sub.id, graph=graph)
+        await make_feature(session, "draw charts", reporting.id, graph=graph)
+        await feature_service.create_edge(
+            session, EdgeCreate(src_id=export.id, dst_id=login.id, kind="DEPENDS_ON"), graph
+        )
+
+        # target the root capability: expands through the submap to its features
+        cut = await capability_service.mvp_cut(session, graph, [], [root.id])
+        assert [f["name"] for f in cut["essential"]] == ["add login", "export to jira"]
+        assert cut["essential"][0]["is_target"] is False  # pulled in as prerequisite
+        assert cut["essential"][1]["is_target"] is True
+        assert [f["name"] for f in cut["deferrable"]] == ["draw charts"]
+        assert cut["targets"] == [str(export.id)]
+
+        by_name = {c["name"]: c for c in cut["capabilities"]}
+        assert by_name["jira export"]["essential"] is True
+        assert (by_name["authentication"]["required"], by_name["authentication"]["total"]) == (1, 1)
+        assert by_name["reporting"]["essential"] is False
+        # essential capabilities sort ahead of deferrable ones
+        assert [c["essential"] for c in cut["capabilities"]] == [True, True, False]
+
+
+@pytest.mark.asyncio
+async def test_mvp_cut_rejects_featureless_targets(db):
+    async with db() as session:
+        graph = FeatureGraph(sessionmaker=None)
+        empty = await make_capability(session, "notion export")
+        with pytest.raises(HTTPException) as err:
+            await capability_service.mvp_cut(session, graph, [], [empty.id])
+        assert err.value.status_code == 422
+
+
+@pytest.mark.asyncio
 async def test_edge_write_rejected_on_cycle(db):
     async with db() as session:
         capability = await make_capability(session, "export")

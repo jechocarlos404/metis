@@ -4,7 +4,7 @@
 import pytest
 from fastapi import HTTPException
 
-from app.models import CapabilityMaturity, Goal, GoalType, WorkStatus
+from app.models import CapabilityMaturity, Goal, GoalType, Product, WorkStatus
 from app.schemas.capability import CapabilityCreate, CapabilityUpdate
 from app.schemas.feature import EdgeCreate, FeatureCreate
 from app.services import capabilities as capability_service
@@ -103,6 +103,27 @@ async def test_why_chain_reaches_org_intent(db):
         assert ("goal", "MOTIVATES") in kinds
         assert ("goal", "parent") in kinds  # climbed to the org goal
         assert chain[-1].name == "Be the default tool"
+
+
+@pytest.mark.asyncio
+async def test_product_attribution_follows_containment(db):
+    async with db() as session:
+        root = await make_capability(session, "feature intelligence")
+        child = await make_capability(session, "feature search", parent_id=root.id)
+        stray = await make_capability(session, "ticket export")
+        pg = Goal(goal_type=GoalType.product, title="Ship search")
+        session.add(pg)
+        await session.flush()
+        spec = Product(name="Search Spec", goal_id=pg.id)
+        session.add(spec)
+        await session.commit()
+        await capability_service.add_motivation(session, root.id, pg.id)
+
+        attribution = await capability_service.product_attribution(session)
+        assert attribution[str(root.id)] == [str(spec.id)]
+        # children inherit attribution through PART_OF, like why() does
+        assert attribution[str(child.id)] == [str(spec.id)]
+        assert attribution[str(stray.id)] == []
 
 
 @pytest.mark.asyncio

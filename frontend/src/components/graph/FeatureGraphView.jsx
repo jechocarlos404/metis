@@ -12,7 +12,7 @@ const useIsomorphicLayoutEffect = typeof window !== "undefined" ? React.useLayou
 const EDGE_KINDS = ["DEPENDS_ON", "BLOCKS", "RELATES_TO"];
 const STATUS_DOT = { pending: "var(--text-secondary)", in_progress: "var(--warn-fg)", done: "var(--ok-fg)" };
 
-export function FeatureGraphView({ layout, selectedId, onSelect, impactIds, cutStates, style }) {
+export function FeatureGraphView({ layout, selectedId, onSelect, impactIds, cutStates, fadedIds, style }) {
   const svgRef = React.useRef(null);
   const viewportRef = React.useRef(null);
   const engineRef = React.useRef(null);
@@ -110,7 +110,8 @@ export function FeatureGraphView({ layout, selectedId, onSelect, impactIds, cutS
               const st = edgeStyle(e.kind);
               const cutDim = cutStates != null &&
                 (cutStates.get(e.source) === "deferrable" || cutStates.get(e.target) === "deferrable");
-              const dim = cutDim || (focusId != null && e.source !== focusId && e.target !== focusId);
+              const fadeDim = fadedIds != null && (fadedIds.has(e.source) || fadedIds.has(e.target));
+              const dim = cutDim || fadeDim || (focusId != null && e.source !== focusId && e.target !== focusId);
               return (
                 <line
                   key={e.id}
@@ -141,6 +142,7 @@ export function FeatureGraphView({ layout, selectedId, onSelect, impactIds, cutS
                 isSelected={selectedId === n.id}
                 isHovered={hoveredId === n.id}
                 isDimmed={focusId != null && focusId !== n.id && !focusNeighbors?.has(n.id)}
+                isFaded={fadedIds ? fadedIds.has(n.id) : false}
                 isImpacted={impactIds ? impactIds.has(n.id) : false}
                 cutState={cutStates ? cutStates.get(n.id) : null}
                 isPinned={pinned.has(n.id)}
@@ -187,7 +189,7 @@ export function FeatureGraphView({ layout, selectedId, onSelect, impactIds, cutS
   );
 }
 
-function FeatureNode({ node, isSelected, isHovered, isDimmed, isImpacted, cutState, isPinned, onSelect, onHoverChange, registerEl }) {
+function FeatureNode({ node, isSelected, isHovered, isDimmed, isFaded, isImpacted, cutState, isPinned, onSelect, onHoverChange, registerEl }) {
   const accent = `var(${nodeAccentVar(node.layer)})`;
   const ring = isSelected ? "var(--accent)"
     : isImpacted ? "var(--danger-fg)"
@@ -195,8 +197,9 @@ function FeatureNode({ node, isSelected, isHovered, isDimmed, isImpacted, cutSta
     : cutState === "essential" ? "var(--ok-fg)"
     : isHovered ? "var(--border-default)" : "var(--border-hairline)";
   const ringWide = isSelected || cutState === "target" || cutState === "essential";
-  // Deferrable nodes fade like focus-dimming does, but stay readable on hover/select.
-  const isDeferred = cutState === "deferrable" && !isHovered && !isSelected;
+  // Deferrable and filtered-out nodes fade like focus-dimming does, but stay
+  // readable on hover/select.
+  const isDeferred = (cutState === "deferrable" || isFaded) && !isHovered && !isSelected;
   return (
     <g
       ref={registerEl}

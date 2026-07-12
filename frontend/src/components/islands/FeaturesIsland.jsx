@@ -15,6 +15,8 @@ export default function FeaturesIsland() {
   const [dialog, setDialog] = React.useState(null); // null | {mode:"new"} | {mode:"edit"}
   const [capabilities, setCapabilities] = React.useState([]);
   const [edgeList, setEdgeList] = React.useState([]);
+  const [products, setProducts] = React.useState([]);
+  const [productFilter, setProductFilter] = React.useState(""); // "" | "unattributed" | product id
   const [draft, setDraft] = React.useState({ name: "", description: "", capabilityId: "", layer: "service", priority: "3", status: "pending" });
   const [edgeDraft, setEdgeDraft] = React.useState({ kind: "DEPENDS_ON", targetId: "" });
   const [saving, setSaving] = React.useState(false);
@@ -25,14 +27,16 @@ export default function FeaturesIsland() {
   const [cutting, setCutting] = React.useState(false);
 
   const load = React.useCallback(async () => {
-    const [data, caps, edges] = await Promise.all([
+    const [data, caps, edges, productList] = await Promise.all([
       api("/graph/layout"),
       api("/capabilities"),
       api("/features/edges"),
+      api("/products"),
     ]);
     setLayout(data);
     setCapabilities(caps);
     setEdgeList(edges);
+    setProducts(productList);
     setSelected((sel) => sel && data.nodes.some((n) => n.id === sel) ? sel : data.nodes[0]?.id ?? null);
     setDraft((d) => (d.capabilityId ? d : { ...d, capabilityId: caps[0]?.id ?? "" }));
   }, []);
@@ -77,14 +81,29 @@ export default function FeaturesIsland() {
   }, [query]);
 
   const impactIds = new Set((impact?.dependents ?? []).map((d) => d.id));
-  const directory = results ?? layout.nodes;
+
+  const nodeById = React.useMemo(() => new Map(layout.nodes.map((n) => [n.id, n])), [layout]);
+  const productById = React.useMemo(() => new Map(products.map((p) => [p.id, p])), [products]);
+
+  // Attribution is derived server-side (feature -> capability -> motivating
+  // goals -> specs); search results lack it, so always read it off the layout node.
+  const matchesProduct = React.useCallback((id) => {
+    if (!productFilter) return true;
+    const ids = nodeById.get(id)?.product_ids ?? [];
+    return productFilter === "unattributed" ? ids.length === 0 : ids.includes(productFilter);
+  }, [productFilter, nodeById]);
+
+  const directory = (results ?? layout.nodes).filter((n) => matchesProduct(n.id));
+
+  const fadedIds = React.useMemo(() => {
+    if (!productFilter) return null;
+    return new Set(layout.nodes.filter((n) => !matchesProduct(n.id)).map((n) => n.id));
+  }, [productFilter, layout, matchesProduct]);
 
   const runImpact = async () => {
     if (!selected) return;
     setImpact(await api(`/graph/impact/${selected}`));
   };
-
-  const nodeById = React.useMemo(() => new Map(layout.nodes.map((n) => [n.id, n])), [layout]);
 
   // Editing targets invalidates a previous cut — the overlay must never lie.
   const addCutTarget = (kind, id) => {
@@ -231,6 +250,12 @@ export default function FeaturesIsland() {
         meta={`${layout.nodes.length} nodes · ${layout.edges.length} edges · in-memory graph`}
         actions={
           <>
+            {products.length > 0 && (
+              <Select value={productFilter} onChange={(e) => setProductFilter(e.target.value)} style={{ width: 200 }}
+                options={[{ value: "", label: "All products" },
+                  ...products.map((p) => ({ value: p.id, label: p.name })),
+                  { value: "unattributed", label: "Unattributed" }]} />
+            )}
             <Input placeholder="Find features like…" style={{ width: 220 }} inputStyle={{ height: 30 }}
               value={query}
               onChange={(e) => { setQuery(e.target.value); if (e.target.value.trim()) setTab("directory"); }} />
@@ -248,7 +273,7 @@ export default function FeaturesIsland() {
       {tab === "graph" ? (
         <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
           <div style={{ flex: 1, position: "relative", margin: 20, background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", overflow: "hidden", minWidth: 0 }}>
-            <FeatureGraphView layout={layout} selectedId={selected} onSelect={setSelected} impactIds={impactIds} cutStates={cutStates} />
+            <FeatureGraphView layout={layout} selectedId={selected} onSelect={setSelected} impactIds={impactIds} cutStates={cutStates} fadedIds={fadedIds} />
           </div>
           <aside style={{ width: 280, flex: "none", margin: "20px 20px 20px 0", background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", padding: 16, display: "flex", flexDirection: "column", gap: 12, overflowY: "auto" }}>
             <MVPCutPanel
@@ -280,6 +305,19 @@ export default function FeaturesIsland() {
                   <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-secondary)" }}>
                     REALIZES → {capabilityById.get(detail.capability_id).name}
                   </div>
+                )}
+                {products.length > 0 && (
+                  (nodeById.get(detail.id)?.product_ids ?? []).length > 0 ? (
+                    nodeById.get(detail.id).product_ids.map((pid) => (
+                      <div key={pid} style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-secondary)" }}>
+                        SPEC → {productById.get(pid)?.name ?? "unknown spec"}
+                      </div>
+                    ))
+                  ) : (
+                    <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-disabled)" }}>
+                      no product attribution
+                    </div>
+                  )
                 )}
                 {detail.priority != null && <PriorityBadge priority={detail.priority} rationale={detail.priority_rationale} />}
                 <div style={{ borderTop: "1px solid var(--border-hairline)", paddingTop: 12, display: "flex", flexDirection: "column", gap: 6 }}>

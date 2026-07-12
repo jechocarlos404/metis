@@ -211,7 +211,6 @@ function FeatureNode({ node, isSelected, isHovered, isDimmed, isImpacted, isPinn
           transition: "stroke var(--dur-fast) var(--ease-out), filter var(--dur-fast) var(--ease-out)",
         }}
       />
-      <circle cx={-NODE_W / 2 + 14} cy={-NODE_H / 2 + 14} r={3.5} fill={accent} />
       <circle cx={NODE_W / 2 - 12} cy={-NODE_H / 2 + 12} r={3} fill={STATUS_DOT[node.status] || STATUS_DOT.pending} />
       {isPinned && (
         <g transform={`translate(${NODE_W / 2 - 22},${NODE_H / 2 - 22})`}>
@@ -221,16 +220,19 @@ function FeatureNode({ node, isSelected, isHovered, isDimmed, isImpacted, isPinn
           </g>
         </g>
       )}
-      <foreignObject x={-NODE_W / 2 + 8} y={-NODE_H / 2 + 6} width={NODE_W - 16} height={NODE_H - 10} style={{ pointerEvents: "none" }}>
+      <foreignObject x={-NODE_W / 2 + 8} y={-NODE_H / 2 + 6} width={NODE_W - 26} height={NODE_H - 10} style={{ pointerEvents: "none" }}>
         <div xmlns="http://www.w3.org/1999/xhtml" style={{ fontFamily: "var(--font-body)" }}>
-          <div style={{
-            fontFamily: "var(--font-mono)", fontSize: 9, color: "var(--text-secondary)",
-            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-          }}>
-            {node.displayId}
+          <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+            <span style={{ width: 6, height: 6, borderRadius: "50%", background: accent, flex: "none" }} />
+            <span style={{
+              fontFamily: "var(--font-mono)", fontSize: 9, color: "var(--text-secondary)",
+              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+            }}>
+              {node.displayId}
+            </span>
           </div>
           <div style={{
-            fontSize: 11.5, fontWeight: 500, color: "var(--text-heading)", lineHeight: 1.25, marginTop: 2,
+            fontSize: 11.5, fontWeight: 500, color: "var(--text-heading)", lineHeight: 1.25, marginTop: 3,
             overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
           }}>
             {node.name}

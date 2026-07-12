@@ -204,8 +204,11 @@ export function createForceGraph(opts) {
     const b = trimToRect(-dx, -dy, halfW, halfH);
     const x1 = sp.x + a.dx;
     const y1 = sp.y + a.dy;
-    const x2 = tp.x - b.dx;
-    const y2 = tp.y - b.dy;
+    // b is the offset from the target's center to its near boundary (facing
+    // the source) — add it, don't subtract, or the endpoint lands on the
+    // rect's far side and the line is drawn straight through the card.
+    const x2 = tp.x + b.dx;
+    const y2 = tp.y + b.dy;
     const { el } = entry;
     const last = el.__lastLine;
     if (

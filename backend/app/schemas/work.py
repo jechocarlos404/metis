@@ -52,6 +52,7 @@ class TicketRead(Stamped):
 
 class StoryRead(Stamped):
     epic_id: uuid.UUID
+    feature_id: uuid.UUID | None  # taxonomy pin: the feature this story snapshots
     title: str
     description: str | None
     position: int
@@ -65,6 +66,7 @@ class StoryRead(Stamped):
 class EpicRead(Stamped):
     product_id: uuid.UUID
     decomposition_id: uuid.UUID | None
+    capability_id: uuid.UUID | None  # taxonomy pin: the capability this epic snapshots
     title: str
     acceptance_criteria: str | None
     position: int

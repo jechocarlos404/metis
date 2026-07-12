@@ -16,10 +16,11 @@ AGENTS = ["spec_decomposer", "feature_manager", "graph_agent", "strategist"]
 # matches "decompos". graph_agent before feature_manager so "what depends on X"
 # routes to traversal, not CRUD.
 _KEYWORD_TABLE: list[tuple[str, str]] = [
-    (r"\b(impact|blast|breaks|depends on|topo|build order|cycle|travers|dependency order)", "graph_agent"),
+    (r"\b(impact|blast|breaks|depends on|topo|build order|cycle|travers|dependency order"
+     r"|rollup|why does|provenance|ready|health)", "graph_agent"),
     (r"\b(priorit|rice\b|moscow|strateg|phase|phasing|sequenc|roadmap|rank)", "strategist"),
     (r"\b(decompos|specs?\b|prd|epic|stor(?:y|ies)|ticket|split|break .{0,12}down)", "spec_decomposer"),
-    (r"\b(feature|link|edge|relat|semantic|library)", "feature_manager"),
+    (r"\b(feature|capabilit|maturity|realiz|motivat|link|edge|relat|semantic|library)", "feature_manager"),
 ]
 
 

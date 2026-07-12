@@ -8,6 +8,7 @@ from app.db import init_db, make_engine
 from app.llm.registry import ProviderRegistry
 from app.routers import (
     admin_llm,
+    capabilities,
     chat,
     features,
     goals,
@@ -48,6 +49,7 @@ def create_app() -> FastAPI:
     )
     app.include_router(health.router)
     app.include_router(goals.router)
+    app.include_router(capabilities.router)
     app.include_router(products.router)
     app.include_router(work.router)
     app.include_router(features.router)

@@ -17,18 +17,26 @@ class DocStatus(StrEnum):
     approved = "approved"
 
 
-class FeatureType(StrEnum):
-    capability = "capability"
-    integration = "integration"
-    ui = "ui"
-    infra = "infra"
+class CapabilityMaturity(StrEnum):
+    """Where a capability stands. Stored, not derived — in-flight progress is
+    the rollup over realizing features (see docs/ontology-graph-spec.md)."""
+
+    planned = "planned"
+    alpha = "alpha"
+    beta = "beta"
+    ga = "ga"
+    deprecated = "deprecated"
+    retired = "retired"
 
 
 class EdgeKind(StrEnum):
+    """Feature-plane edges. DEPENDS_ON and BLOCKS form the precedence graph
+    (jointly acyclic); RELATES_TO is annotation only. Containment (PART_OF)
+    lives on the capability map as parent_id, not here."""
+
     DEPENDS_ON = "DEPENDS_ON"
     BLOCKS = "BLOCKS"
     RELATES_TO = "RELATES_TO"
-    PART_OF = "PART_OF"
 
 
 class ContextBudget(StrEnum):

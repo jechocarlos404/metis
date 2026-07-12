@@ -46,6 +46,12 @@ async def cycles(request: Request):
     return {"cycles": (await _graph(request)).find_cycles()}
 
 
+@router.get("/ready")
+async def ready(request: Request):
+    """The work frontier: pending features whose dependencies are all done."""
+    return {"ready": (await _graph(request)).ready_set()}
+
+
 @router.post("/refresh")
 async def refresh(request: Request):
     graph = getattr(request.app.state, "graph", None)

@@ -1,9 +1,10 @@
+from app.models.capability import Capability, Motivation
 from app.models.chat import ChatMessage, ChatThread
 from app.models.enums import (
+    CapabilityMaturity,
     ContextBudget,
     DocStatus,
     EdgeKind,
-    FeatureType,
     GoalType,
     WorkStatus,
 )
@@ -16,6 +17,8 @@ from app.models.work import Epic, Story, Ticket
 
 __all__ = [
     "AgentLLMConfig",
+    "Capability",
+    "CapabilityMaturity",
     "ChatMessage",
     "ChatThread",
     "ContextBudget",
@@ -25,9 +28,9 @@ __all__ = [
     "Epic",
     "Feature",
     "FeatureEdge",
-    "FeatureType",
     "Goal",
     "GoalType",
+    "Motivation",
     "Product",
     "ProductDecomposition",
     "Story",

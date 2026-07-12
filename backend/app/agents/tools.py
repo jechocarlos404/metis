@@ -16,11 +16,13 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.llm.types import ToolDef
-from app.models import Feature, Goal, Product, Ticket
+from app.models import Capability, Feature, Goal, Product, Ticket
+from app.schemas.capability import CapabilityCreate, CapabilityUpdate
 from app.schemas.feature import EdgeCreate, FeatureCreate, FeatureUpdate
 from app.schemas.prd import PRDDocument
 from app.schemas.strategy import StrategyCreate
 from app.schemas.work import TicketCreate, TicketUpdate
+from app.services import capabilities as capability_service
 from app.services import decomposition as decomposition_service
 from app.services import features as feature_service
 from app.services import search as search_service
@@ -71,10 +73,23 @@ def _feature_dict(f: Feature) -> dict[str, Any]:
         "id": str(f.id),
         "display_id": f"FTR-{f.seq:03d}",
         "name": f.name,
-        "type": str(f.type),
+        "capability_id": str(f.capability_id),
+        "facets": dict(f.facets or {}),
         "status": str(f.status),
         "priority": f.priority,
         "priority_rationale": f.priority_rationale,
+    }
+
+
+def _capability_dict(c: Capability) -> dict[str, Any]:
+    return {
+        "id": str(c.id),
+        "display_id": f"CAP-{c.seq:03d}",
+        "name": c.name,
+        "description": c.description,
+        "parent_id": str(c.parent_id) if c.parent_id else None,
+        "maturity": str(c.maturity),
+        "evidence_anchors": list(c.evidence_anchors or []),
     }
 
 
@@ -147,6 +162,11 @@ async def list_features(ctx: ToolContext) -> ToolResult:
     return ToolResult(_dump([_feature_dict(f) for f in features]))
 
 
+async def list_capabilities(ctx: ToolContext) -> ToolResult:
+    capabilities = await capability_service.list_capabilities(ctx.session)
+    return ToolResult(_dump([_capability_dict(c) for c in capabilities]))
+
+
 async def search_features(ctx: ToolContext, query: str) -> ToolResult:
     features = await search_service.search_features(ctx.session, query)
     return ToolResult(_dump([_feature_dict(f) for f in features]))
@@ -170,6 +190,18 @@ async def create_product_spec(
 
 async def create_prd_draft(ctx: ToolContext, product: str, document: dict) -> ToolResult:
     product_obj = await _resolve(ctx.session, Product, product, "SPEC", Product.name)
+    # Resolve taxonomy pins: epics may name a capability, stories a feature,
+    # by UUID, display ID, or name. Snapshots pin node IDs.
+    for epic in document.get("epics", []):
+        ref = epic.pop("capability", None)
+        if ref:
+            capability = await _resolve(ctx.session, Capability, ref, "CAP", Capability.name)
+            epic["capability_id"] = str(capability.id)
+        for story in epic.get("stories", []):
+            ref = story.pop("feature", None)
+            if ref:
+                feature = await _resolve(ctx.session, Feature, ref, "FTR", Feature.name)
+                story["feature_id"] = str(feature.id)
     try:
         prd = PRDDocument.model_validate(document)
     except Exception as e:
@@ -241,24 +273,79 @@ async def update_ticket(ctx: ToolContext, ticket: str, **fields) -> ToolResult:
 
 # ---- feature_manager tools ----
 
-async def create_feature(
+async def create_capability(
     ctx: ToolContext,
     name: str,
     description: str = "",
-    type: str = "capability",
-    priority: int | None = None,
-    product: str = "",
+    parent: str = "",
+    maturity: str = "planned",
+    evidence_anchors: list[str] | None = None,
 ) -> ToolResult:
-    product_id = None
-    if product:
-        product_obj = await _resolve(ctx.session, Product, product, "SPEC", Product.name)
-        product_id = product_obj.id
+    parent_id = None
+    if parent:
+        parent_obj = await _resolve(ctx.session, Capability, parent, "CAP", Capability.name)
+        parent_id = parent_obj.id
+    try:
+        data = CapabilityCreate(
+            name=name, description=description or None, parent_id=parent_id,
+            maturity=maturity, evidence_anchors=evidence_anchors or [],
+        )
+        capability = await capability_service.create_capability(ctx.session, data)
+    except HTTPException as e:
+        raise ToolError(str(e.detail)) from None
+    except ValueError as e:
+        raise ToolError(str(e)) from None
+    return ToolResult(_dump(_capability_dict(capability)))
+
+
+async def update_capability(ctx: ToolContext, capability: str, **fields) -> ToolResult:
+    capability_obj = await _resolve(ctx.session, Capability, capability, "CAP", Capability.name)
+    parent = fields.pop("parent", None)
+    if parent:
+        parent_obj = await _resolve(ctx.session, Capability, parent, "CAP", Capability.name)
+        fields["parent_id"] = parent_obj.id
+    try:
+        data = CapabilityUpdate(**{k: v for k, v in fields.items() if v not in (None, "")})
+        updated = await capability_service.update_capability(ctx.session, capability_obj.id, data)
+    except HTTPException as e:
+        raise ToolError(str(e.detail)) from None
+    except ValueError as e:
+        raise ToolError(str(e)) from None
+    return ToolResult(_dump(_capability_dict(updated)))
+
+
+async def motivate_capability(ctx: ToolContext, capability: str, goal: str) -> ToolResult:
+    capability_obj = await _resolve(ctx.session, Capability, capability, "CAP", Capability.name)
+    goal_obj = await _resolve(ctx.session, Goal, goal, "(?:PG|OG)", Goal.title)
+    try:
+        await capability_service.add_motivation(ctx.session, capability_obj.id, goal_obj.id)
+    except HTTPException as e:
+        raise ToolError(str(e.detail)) from None
+    return ToolResult(_dump({
+        "capability": _capability_dict(capability_obj),
+        "meaning": f"{goal_obj.title} MOTIVATES {capability_obj.name}",
+    }))
+
+
+async def create_feature(
+    ctx: ToolContext,
+    name: str,
+    capability: str,
+    description: str = "",
+    layer: str = "",
+    priority: int | None = None,
+) -> ToolResult:
+    capability_obj = await _resolve(ctx.session, Capability, capability, "CAP", Capability.name)
     try:
         data = FeatureCreate(
-            name=name, description=description or None, type=type,
-            priority=priority, product_id=product_id,
+            name=name, description=description or None,
+            capability_id=capability_obj.id,
+            facets={"layer": layer} if layer else {},
+            priority=priority,
         )
         feature = await feature_service.create_feature(ctx.session, data, ctx.graph)
+    except HTTPException as e:
+        raise ToolError(str(e.detail)) from None
     except ValueError as e:
         raise ToolError(str(e)) from None
     return ToolResult(_dump(_feature_dict(feature)))
@@ -266,6 +353,13 @@ async def create_feature(
 
 async def update_feature(ctx: ToolContext, feature: str, **fields) -> ToolResult:
     feature_obj = await _resolve(ctx.session, Feature, feature, "FTR", Feature.name)
+    capability = fields.pop("capability", None)
+    if capability:
+        capability_obj = await _resolve(ctx.session, Capability, capability, "CAP", Capability.name)
+        fields["capability_id"] = capability_obj.id
+    layer = fields.pop("layer", None)
+    if layer:
+        fields["facets"] = {**(feature_obj.facets or {}), "layer": layer}
     try:
         data = FeatureUpdate(**{k: v for k, v in fields.items() if v not in (None, "")})
         updated = await feature_service.update_feature(ctx.session, feature_obj.id, data, ctx.graph)
@@ -320,6 +414,33 @@ async def find_cycles(ctx: ToolContext) -> ToolResult:
     return ToolResult(_dump({"cycles": ctx.graph.find_cycles()}))
 
 
+async def ready_set(ctx: ToolContext) -> ToolResult:
+    await ctx.graph.ensure_fresh()
+    return ToolResult(_dump({"ready": ctx.graph.ready_set()}))
+
+
+async def capability_rollup(ctx: ToolContext, capability: str) -> ToolResult:
+    capability_obj = await _resolve(ctx.session, Capability, capability, "CAP", Capability.name)
+    rollup = await capability_service.rollup(ctx.session, capability_obj.id)
+    return ToolResult(_dump({
+        "capability": _capability_dict(capability_obj),
+        "rollup": rollup.model_dump(),
+    }))
+
+
+async def why_feature(ctx: ToolContext, feature: str) -> ToolResult:
+    feature_obj = await _resolve(ctx.session, Feature, feature, "FTR", Feature.name)
+    chain = await capability_service.why(ctx.session, feature_obj)
+    return ToolResult(_dump(chain.model_dump(mode="json")))
+
+
+async def taxonomy_health(ctx: ToolContext) -> ToolResult:
+    findings = await capability_service.health(ctx.session)
+    return ToolResult(_dump({
+        "findings": [f.model_dump(mode="json") for f in findings],
+    }))
+
+
 # ---- strategist tools ----
 
 async def set_feature_priority(
@@ -361,6 +482,7 @@ _PRD_SCHEMA = {
                 "properties": {
                     "title": _STR,
                     "acceptance_criteria": _STR,
+                    "capability": {"type": "string", "description": "Capability this epic snapshots (UUID, CAP-xxx, or name)"},
                     "stories": {
                         "type": "array",
                         "items": {
@@ -368,6 +490,7 @@ _PRD_SCHEMA = {
                             "properties": {
                                 "title": _STR,
                                 "description": _STR,
+                                "feature": {"type": "string", "description": "Feature this story delivers (UUID, FTR-xxx, or name)"},
                                 "tickets": {
                                     "type": "array",
                                     "items": {
@@ -407,29 +530,39 @@ def _tool(name, description, properties, required, executor) -> tuple[ToolDef, A
     )
 
 
+_MATURITY = {"type": "string", "enum": ["planned", "alpha", "beta", "ga", "deprecated", "retired"]}
+
 SHARED_TOOLS = [
     _tool("list_goals", "List all org and product goals with IDs, criteria, priority, status.", {}, [], list_goals),
     _tool("list_products", "List all products (Specs) with IDs, names, status, version.", {}, [], list_products),
-    _tool("list_features", "List all features in the library with IDs, type, status, priority.", {}, [], list_features),
+    _tool("list_capabilities", "List the capability map (slow plane): IDs, names, parent, maturity, evidence anchors.", {}, [], list_capabilities),
+    _tool("list_features", "List all features in the library with IDs, realized capability, facets, status, priority.", {}, [], list_features),
     _tool("search_features", "Find features like a query string (trigram + keyword search). Use before creating features to avoid duplicates.", {"query": _STR}, ["query"], search_features),
 ]
 
 AGENT_TOOLS: dict[str, list[tuple[ToolDef, Any]]] = {
     "spec_decomposer": SHARED_TOOLS + [
         _tool("create_product_spec", "Create a new product Spec. summary = what it does, not how. Optionally link to a goal by ID (PG-xx) or title.", {"name": _STR, "summary": _STR, "body": _STR, "goal": _STR}, ["name", "summary"], create_product_spec),
-        _tool("create_prd_draft", "Create a new versioned PRD draft for a product and materialize its epics, stories, and tickets. Replaces the previous draft while all tickets are pending. product = UUID, SPEC-xxx, or name.", {"product": _STR, "document": _PRD_SCHEMA}, ["product", "document"], create_prd_draft),
+        _tool("create_prd_draft", "Create a new versioned PRD draft for a product and materialize its epics, stories, and tickets. Pin every epic to a capability and every story to a feature — the PRD is a snapshot of the taxonomy. Replaces the previous draft while all tickets are pending. product = UUID, SPEC-xxx, or name.", {"product": _STR, "document": _PRD_SCHEMA}, ["product", "document"], create_prd_draft),
         _tool("create_ticket", "Create a single ticket under a product (optionally under an epic/story UUID). context_budget: S, M, or L.", {"product": _STR, "title": _STR, "description": _STR, "technical_approach": _STR, "acceptance_criteria": _STR, "affected_files": {"type": "array", "items": _STR}, "context_budget": {"type": "string", "enum": ["S", "M", "L"]}, "epic_id": _STR, "story_id": _STR}, ["product", "title"], create_ticket),
         _tool("update_ticket", "Update a ticket by UUID, TKT-xxxx, or title. Only pass fields to change.", {"ticket": _STR, "title": _STR, "description": _STR, "technical_approach": _STR, "acceptance_criteria": _STR, "affected_files": {"type": "array", "items": _STR}, "context_budget": {"type": "string", "enum": ["S", "M", "L"]}, "status": {"type": "string", "enum": ["pending", "in_progress", "done"]}}, ["ticket"], update_ticket),
     ],
     "feature_manager": SHARED_TOOLS + [
-        _tool("create_feature", "Create a feature. type: capability | integration | ui | infra. priority 1-5 (1 hottest). Optionally scope to a product.", {"name": _STR, "description": _STR, "type": {"type": "string", "enum": ["capability", "integration", "ui", "infra"]}, "priority": {"type": "integer", "minimum": 1, "maximum": 5}, "product": _STR}, ["name"], create_feature),
-        _tool("update_feature", "Update a feature by UUID, FTR-xxx, or name. Only pass fields to change.", {"feature": _STR, "name": _STR, "description": _STR, "type": {"type": "string", "enum": ["capability", "integration", "ui", "infra"]}, "status": {"type": "string", "enum": ["pending", "in_progress", "done"]}, "priority": {"type": "integer", "minimum": 1, "maximum": 5}, "priority_rationale": _STR}, ["feature"], update_feature),
-        _tool("link_features", "Create a typed edge src -> dst. `src DEPENDS_ON dst` means src needs dst. Kinds: DEPENDS_ON, BLOCKS, RELATES_TO, PART_OF.", {"src": _STR, "dst": _STR, "kind": {"type": "string", "enum": ["DEPENDS_ON", "BLOCKS", "RELATES_TO", "PART_OF"]}}, ["src", "dst"], link_features),
+        _tool("create_capability", "Create a capability (slow plane). Name must be a NOUN phrase naming a durable state of the product. Optionally nest under a parent capability (UUID, CAP-xxx, or name).", {"name": _STR, "description": _STR, "parent": _STR, "maturity": _MATURITY, "evidence_anchors": {"type": "array", "items": _STR}}, ["name"], create_capability),
+        _tool("update_capability", "Update a capability by UUID, CAP-xxx, or name. Only pass fields to change. Re-parenting that closes a containment cycle is rejected.", {"capability": _STR, "name": _STR, "description": _STR, "parent": _STR, "maturity": _MATURITY}, ["capability"], update_capability),
+        _tool("motivate_capability", "Link a goal to a capability: goal MOTIVATES capability. Goals justify capabilities, never features directly.", {"capability": _STR, "goal": _STR}, ["capability", "goal"], motivate_capability),
+        _tool("create_feature", "Create a feature (fast plane). Name must be a VERB phrase naming a change. capability = the one capability it REALIZES (required; UUID, CAP-xxx, or name). layer facet: ui | service | integration | infra. priority 1-5 (1 hottest).", {"name": _STR, "capability": _STR, "description": _STR, "layer": {"type": "string", "enum": ["ui", "service", "integration", "infra"]}, "priority": {"type": "integer", "minimum": 1, "maximum": 5}}, ["name", "capability"], create_feature),
+        _tool("update_feature", "Update a feature by UUID, FTR-xxx, or name. Only pass fields to change. capability re-points which capability it REALIZES.", {"feature": _STR, "name": _STR, "description": _STR, "capability": _STR, "layer": {"type": "string", "enum": ["ui", "service", "integration", "infra"]}, "status": {"type": "string", "enum": ["pending", "in_progress", "done"]}, "priority": {"type": "integer", "minimum": 1, "maximum": 5}, "priority_rationale": _STR}, ["feature"], update_feature),
+        _tool("link_features", "Create a typed edge src -> dst. `src DEPENDS_ON dst` means src needs dst; `src BLOCKS dst` means dst waits for src. Writes that close a precedence cycle are rejected. Kinds: DEPENDS_ON, BLOCKS, RELATES_TO.", {"src": _STR, "dst": _STR, "kind": {"type": "string", "enum": ["DEPENDS_ON", "BLOCKS", "RELATES_TO"]}}, ["src", "dst"], link_features),
     ],
     "graph_agent": SHARED_TOOLS + [
         _tool("impact_query", "For a feature: which features transitively depend on it (dependents = blast radius) and what it depends on (dependencies).", {"feature": _STR}, ["feature"], impact_query),
+        _tool("capability_rollup", "Derived progress for a capability: pending/in_progress/done counts over every feature realizing it or its sub-capabilities.", {"capability": _STR}, ["capability"], capability_rollup),
+        _tool("why_feature", "Provenance chain for a feature: REALIZES -> capability -> PART_OF* -> MOTIVATES -> goals up to org intent.", {"feature": _STR}, ["feature"], why_feature),
         _tool("topo_order", "All features ordered dependencies-first (safe build order). Fails if the graph has a cycle.", {}, [], topo_order),
+        _tool("ready_set", "The work frontier: pending features whose precedence dependencies are all done.", {}, [], ready_set),
         _tool("find_cycles", "List dependency cycles in the feature graph.", {}, [], find_cycles),
+        _tool("taxonomy_health", "Findings over the taxonomy: aspirational gaps (capability with no realizing work), unmotivated root capabilities, product goals motivating nothing.", {}, [], taxonomy_health),
     ],
     "strategist": SHARED_TOOLS + [
         _tool("set_feature_priority", "Set a feature's priority (1-5, 1 hottest) with the scoring rationale (e.g. RICE numbers).", {"feature": _STR, "priority": {"type": "integer", "minimum": 1, "maximum": 5}, "rationale": _STR}, ["feature", "priority", "rationale"], set_feature_priority),

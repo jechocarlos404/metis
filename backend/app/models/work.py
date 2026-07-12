@@ -19,6 +19,9 @@ class Epic(PKMixin, TimestampMixin, Base):
     decomposition_id: Mapped[uuid.UUID | None] = mapped_column(
         PGUUID(as_uuid=True), ForeignKey("product_decompositions.id", ondelete="CASCADE")
     )
+    capability_id: Mapped[uuid.UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("capabilities.id", ondelete="SET NULL")
+    )
     title: Mapped[str] = mapped_column(Text)
     acceptance_criteria: Mapped[str | None] = mapped_column(Text)
     position: Mapped[int] = mapped_column(Integer, default=0)
@@ -36,6 +39,9 @@ class Story(PKMixin, TimestampMixin, Base):
 
     epic_id: Mapped[uuid.UUID] = mapped_column(
         PGUUID(as_uuid=True), ForeignKey("epics.id", ondelete="CASCADE")
+    )
+    feature_id: Mapped[uuid.UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("features.id", ondelete="SET NULL")
     )
     title: Mapped[str] = mapped_column(Text)
     description: Mapped[str | None] = mapped_column(Text)

@@ -10,6 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.models import (
     AgentLLMConfig,
+    Capability,
+    CapabilityMaturity,
     ChatMessage,
     ChatThread,
     ContextBudget,
@@ -19,9 +21,9 @@ from app.models import (
     Epic,
     Feature,
     FeatureEdge,
-    FeatureType,
     Goal,
     GoalType,
+    Motivation,
     Product,
     ProductDecomposition,
     Story,
@@ -101,34 +103,80 @@ async def seed_demo_data(sessionmaker: async_sessionmaker[AsyncSession]) -> bool
         session.add(product)
         await session.flush()
 
-        # --- Features (kit FeaturesScreen) ---
-        def feature(seq, name, ftype, priority, status, description, rationale=None):
+        # --- Capability map (slow plane: nouns that mature, never ship) ---
+        cap_intel = Capability(
+            seq=1,
+            name="Feature intelligence",
+            description="The product understands its own feature library: search it, "
+            "traverse it, answer impact questions from it.",
+            maturity=CapabilityMaturity.ga,
+            evidence_anchors=["backend/app/services/search.py", "backend/app/services/graph_service.py"],
+        )
+        session.add(cap_intel)
+        await session.flush()
+        cap_search = Capability(
+            seq=2,
+            parent_id=cap_intel.id,
+            name="Feature search",
+            description="Find features like X — ranked lookup over the library.",
+            maturity=CapabilityMaturity.ga,
+            evidence_anchors=["backend/app/services/search.py"],
+        )
+        cap_graph = Capability(
+            seq=3,
+            parent_id=cap_intel.id,
+            name="Feature graph",
+            description="Typed dependency graph with impact, build order, and cycles.",
+            maturity=CapabilityMaturity.beta,
+            evidence_anchors=["backend/app/services/graph_service.py"],
+        )
+        cap_export = Capability(
+            seq=4,
+            name="Ticket export",
+            description="Approved tickets flow to external trackers and carry their "
+            "external IDs back.",
+            maturity=CapabilityMaturity.alpha,
+        )
+        session.add_all([cap_search, cap_graph, cap_export])
+        await session.flush()
+
+        # Why layer: goals MOTIVATE capabilities. PG-3 is deliberately left
+        # unmotivated so /api/capabilities/health has a demo finding.
+        session.add_all(
+            [
+                Motivation(goal_id=product_goals[0].id, capability_id=cap_export.id),
+                Motivation(goal_id=product_goals[1].id, capability_id=cap_graph.id),
+            ]
+        )
+
+        # --- Features (fast plane: changes that REALIZE capabilities) ---
+        def feature(seq, name, capability, layer, priority, status, description, rationale=None):
             return Feature(
                 seq=seq,
-                product_id=product.id,
+                capability_id=capability.id,
                 name=name,
                 description=description,
-                type=ftype,
+                facets={"layer": layer},
                 priority=priority,
                 priority_rationale=rationale,
                 status=status,
             )
 
         features = {
-            31: feature(31, "Semantic feature search", FeatureType.capability, 1,
+            31: feature(31, "Semantic feature search", cap_search, "service", 1,
                         WorkStatus.done, "Find features like X — trigram-ranked search over the library.",
                         "Set by strategist (RICE)"),
-            32: feature(32, "Feature graph traversal", FeatureType.capability, 2,
+            32: feature(32, "Feature graph traversal", cap_graph, "service", 2,
                         WorkStatus.done, "Impact queries and dependency walks over the in-memory graph."),
-            40: feature(40, "Ticket export protocol", FeatureType.integration, 1,
+            40: feature(40, "Ticket export protocol", cap_export, "integration", 1,
                         WorkStatus.in_progress, "Single TicketItem protocol every PM backend satisfies.",
                         "Set by strategist (RICE)"),
-            41: feature(41, "Jira backend", FeatureType.integration, 2,
+            41: feature(41, "Jira backend", cap_export, "integration", 2,
                         WorkStatus.in_progress, "Create/update/status round-trip against Jira.",
                         "Set by strategist (RICE)"),
-            42: feature(42, "Linear backend", FeatureType.integration, 4,
+            42: feature(42, "Linear backend", cap_export, "integration", 4,
                         WorkStatus.pending, "Phase 2 — create() only."),
-            50: feature(50, "Graph visualization", FeatureType.ui, 3,
+            50: feature(50, "Graph visualization", cap_graph, "ui", 3,
                         WorkStatus.pending, "Positioned node cards with dependency edges and a detail rail."),
         }
         session.add_all(features.values())
@@ -183,17 +231,21 @@ async def seed_demo_data(sessionmaker: async_sessionmaker[AsyncSession]) -> bool
             ],
         }
 
+        # Epics pin the capability they snapshot; stories pin the feature.
+        # The taxonomy stays canonical — this document is a photograph of it.
+        story_feature = {0: features[40], 1: features[41], 2: features[42]}
         prd_document = {
             "summary": "PM export: protocol hardening, Jira parity, Linear backend.",
             "epics": [
                 {
                     "title": title,
                     "acceptance_criteria": ac,
-                    "feature_ids": [],
+                    "capability_id": str(cap_export.id),
                     "stories": [
                         {
                             "title": story_title,
                             "description": None,
+                            "feature_id": str(story_feature[i].id),
                             "tickets": [
                                 {
                                     "title": t[1],
@@ -227,13 +279,16 @@ async def seed_demo_data(sessionmaker: async_sessionmaker[AsyncSession]) -> bool
             epic = Epic(
                 product_id=product.id,
                 decomposition_id=decomposition.id,
+                capability_id=cap_export.id,
                 title=title,
                 acceptance_criteria=ac,
                 position=i,
             )
             session.add(epic)
             await session.flush()
-            story = Story(epic_id=epic.id, title=story_title, position=0)
+            story = Story(
+                epic_id=epic.id, feature_id=story_feature[i].id, title=story_title, position=0
+            )
             session.add(story)
             await session.flush()
             for pos, (seq, t_title, desc, status, budget, files) in enumerate(tickets_by_epic[i]):
@@ -320,7 +375,7 @@ async def seed_demo_data(sessionmaker: async_sessionmaker[AsyncSession]) -> bool
         await session.commit()
 
         # Bump identity sequences past the explicit seed values.
-        for table in ("goals", "products", "product_decompositions", "features", "tickets"):
+        for table in ("goals", "products", "product_decompositions", "capabilities", "features", "tickets"):
             await session.execute(
                 text(
                     f"SELECT setval(pg_get_serial_sequence('{table}', 'seq'), "

@@ -1,6 +1,7 @@
 # The Metis Graph Spec — Node Types, Edge Types, Traversal Semantics
 
-Status: **proposed**, elaborating `ontology-mental-model.md` into a formal spec.
+Status: **implemented** (see Implementation status at the bottom for deviations),
+elaborating `ontology-mental-model.md` into a formal spec.
 Direction conventions follow the existing graph service (`A DEPENDS_ON B` = *A depends
 on B*), extended to the new edge kinds.
 
@@ -151,3 +152,27 @@ versioning as a snapshot ("observed from codebase X on date Y").
   (2) add `capability_id` to features and backfill from `PART_OF`/`product_id` heuristics
   + agent pass, (3) move remaining `FeatureType` values to facets, (4) retire the enum
   and feature-level `PART_OF`.
+
+## Implementation status (what shipped)
+
+Landed in `backend/app` + `frontend/src`; all invariants above are enforced unless
+noted. Deviations and deferrals, with reasons:
+
+- **Maturity has no `absent` state.** A capability that does not exist has no row;
+  `planned` is the entry state. (`CapabilityMaturity` in `models/enums.py`.)
+- **`PART_OF` is `capabilities.parent_id`** (forest → FK), guarded against re-parenting
+  cycles at write time. `REALIZES` is `features.capability_id`, `NOT NULL`, `RESTRICT`
+  on capability delete — features cannot be orphaned.
+- **Precedence** = `DEPENDS_ON ∪ reverse(BLOCKS)`; cycle-closing edge writes are
+  rejected with 422 at `POST /api/features/edges` (not just detected at topo time).
+- **Endpoints:** `/api/capabilities` (CRUD, `/map`, `/health`, `/{id}/scope`,
+  `/{id}/rollup`, `/{id}/impact`, `/{id}/motivations`), `/api/features/{id}/why`,
+  `/api/graph/ready`. Snapshots pin: `PRDEpic.capability_id`, `PRDStory.feature_id`,
+  materialized onto `epics`/`stories` rows.
+- **`unmotivated_capability` refined:** a root is flagged only when *nothing in its
+  submap* is motivated — justification is inherited through containment.
+- **Deferred:** `BUNDLES` + the Product-as-bundle entity (single-product today; the
+  `Product` model remains the Spec document), the `Product → Spec` rename, and the
+  `drift(snapshot)` differ (pins are stored, the diff endpoint is not yet built).
+- **No migration scripts:** the schema is `create_all` on boot; existing dev volumes
+  need a reset (`docker compose down -v`) to pick up the new tables.

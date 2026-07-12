@@ -85,6 +85,7 @@ async def create_prd_draft(
         epic = Epic(
             product_id=product_id,
             decomposition_id=decomposition.id,
+            capability_id=prd_epic.capability_id,
             title=prd_epic.title,
             acceptance_criteria=prd_epic.acceptance_criteria,
             position=epos,
@@ -94,6 +95,7 @@ async def create_prd_draft(
         for spos, prd_story in enumerate(prd_epic.stories):
             story = Story(
                 epic_id=epic.id,
+                feature_id=prd_story.feature_id,
                 title=prd_story.title,
                 description=prd_story.description,
                 position=spos,

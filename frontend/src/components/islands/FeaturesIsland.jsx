@@ -13,15 +13,23 @@ export default function FeaturesIsland() {
   const [query, setQuery] = React.useState("");
   const [results, setResults] = React.useState(null);
   const [dialogOpen, setDialogOpen] = React.useState(false);
-  const [draft, setDraft] = React.useState({ name: "", description: "", type: "capability", priority: "3" });
+  const [capabilities, setCapabilities] = React.useState([]);
+  const [draft, setDraft] = React.useState({ name: "", description: "", capabilityId: "", layer: "service", priority: "3" });
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState(null);
 
   const load = React.useCallback(async () => {
-    const data = await api("/graph/layout");
+    const [data, caps] = await Promise.all([api("/graph/layout"), api("/capabilities")]);
     setLayout(data);
+    setCapabilities(caps);
     setSelected((sel) => sel && data.nodes.some((n) => n.id === sel) ? sel : data.nodes[0]?.id ?? null);
+    setDraft((d) => (d.capabilityId ? d : { ...d, capabilityId: caps[0]?.id ?? "" }));
   }, []);
+
+  const capabilityById = React.useMemo(
+    () => new Map(capabilities.map((c) => [c.id, c])),
+    [capabilities]
+  );
 
   React.useEffect(() => {
     load().catch((e) => setError(String(e.message)));
@@ -58,7 +66,7 @@ export default function FeaturesIsland() {
   };
 
   const save = async () => {
-    if (!draft.name.trim()) return;
+    if (!draft.name.trim() || !draft.capabilityId) return;
     setSaving(true);
     setError(null);
     try {
@@ -67,12 +75,13 @@ export default function FeaturesIsland() {
         body: {
           name: draft.name.trim(),
           description: draft.description.trim() || null,
-          type: draft.type,
+          capability_id: draft.capabilityId,
+          facets: { layer: draft.layer },
           priority: Number(draft.priority),
         },
       });
       setDialogOpen(false);
-      setDraft({ name: "", description: "", type: "capability", priority: "3" });
+      setDraft((d) => ({ name: "", description: "", capabilityId: d.capabilityId, layer: "service", priority: "3" }));
       await load();
       setSelected(created.id);
     } catch (e) {
@@ -115,9 +124,14 @@ export default function FeaturesIsland() {
                 <div style={{ fontSize: "var(--text-md)", fontWeight: "var(--weight-semibold)", color: "var(--text-heading)" }}>{detail.name}</div>
                 {detail.description && <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", lineHeight: "var(--leading-snug)" }}>{detail.description}</div>}
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  <Tag type={detail.type}>{detail.type}</Tag>
+                  {detail.facets?.layer && <Tag type={detail.facets.layer}>{detail.facets.layer}</Tag>}
                   <StatusBadge status={detail.status} />
                 </div>
+                {capabilityById.get(detail.capability_id) && (
+                  <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-secondary)" }}>
+                    REALIZES → {capabilityById.get(detail.capability_id).display_id} {capabilityById.get(detail.capability_id).name}
+                  </div>
+                )}
                 {detail.priority != null && <PriorityBadge priority={detail.priority} rationale={detail.priority_rationale} />}
                 <div style={{ borderTop: "1px solid var(--border-hairline)", paddingTop: 12, display: "flex", flexDirection: "column", gap: 6 }}>
                   <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: "var(--tracking-caps)", textTransform: "uppercase", color: "var(--text-disabled)" }}>Relationships</div>
@@ -154,14 +168,15 @@ export default function FeaturesIsland() {
       ) : (
         <div style={{ flex: 1, overflowY: "auto", padding: 20 }}>
           <div style={{ background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", overflow: "hidden" }}>
-            <div style={{ display: "grid", gridTemplateColumns: "90px 1fr 120px 110px 120px", padding: "8px 16px", borderBottom: "1px solid var(--border-hairline)", fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: "var(--tracking-caps)", textTransform: "uppercase", color: "var(--text-disabled)" }}>
-              <span>ID</span><span>Feature</span><span>Type</span><span>Priority</span><span>Status</span>
+            <div style={{ display: "grid", gridTemplateColumns: "90px 1fr 160px 110px 110px 120px", padding: "8px 16px", borderBottom: "1px solid var(--border-hairline)", fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: "var(--tracking-caps)", textTransform: "uppercase", color: "var(--text-disabled)" }}>
+              <span>ID</span><span>Feature</span><span>Capability</span><span>Layer</span><span>Priority</span><span>Status</span>
             </div>
             {directory.map((n, i) => (
-              <div key={n.id} onClick={() => { setSelected(n.id); setTab("graph"); }} style={{ display: "grid", gridTemplateColumns: "90px 1fr 120px 110px 120px", alignItems: "center", padding: "10px 16px", borderBottom: i < directory.length - 1 ? "1px solid var(--border-hairline)" : "none", cursor: "pointer", fontSize: "var(--text-sm)" }}>
+              <div key={n.id} onClick={() => { setSelected(n.id); setTab("graph"); }} style={{ display: "grid", gridTemplateColumns: "90px 1fr 160px 110px 110px 120px", alignItems: "center", padding: "10px 16px", borderBottom: i < directory.length - 1 ? "1px solid var(--border-hairline)" : "none", cursor: "pointer", fontSize: "var(--text-sm)" }}>
                 <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-secondary)" }}>{n.display_id}</span>
                 <span style={{ color: "var(--text-heading)", fontWeight: "var(--weight-medium)" }}>{n.name}</span>
-                <span><Tag type={n.type}>{n.type}</Tag></span>
+                <span style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>{capabilityById.get(n.capability_id)?.name ?? "—"}</span>
+                <span>{n.facets?.layer ? <Tag type={n.facets.layer}>{n.facets.layer}</Tag> : <span style={{ color: "var(--text-disabled)" }}>—</span>}</span>
                 <span>{n.priority != null ? <PriorityBadge priority={n.priority} /> : <span style={{ color: "var(--text-disabled)" }}>—</span>}</span>
                 <span><StatusBadge status={n.status} /></span>
               </div>
@@ -187,9 +202,11 @@ export default function FeaturesIsland() {
         }
       >
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-          <Input label="Name" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="Semantic feature search" />
+          <Input label="Name (a change, verb phrase)" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="Add Notion export backend" />
           <Input label="Description" value={draft.description} onChange={(e) => setDraft({ ...draft, description: e.target.value })} />
-          <Select label="Type" value={draft.type} onChange={(e) => setDraft({ ...draft, type: e.target.value })} options={["capability", "integration", "ui", "infra"]} />
+          <Select label="Realizes capability" value={draft.capabilityId} onChange={(e) => setDraft({ ...draft, capabilityId: e.target.value })}
+            options={capabilities.map((c) => ({ value: c.id, label: `${c.display_id} ${c.name}` }))} />
+          <Select label="Layer" value={draft.layer} onChange={(e) => setDraft({ ...draft, layer: e.target.value })} options={["ui", "service", "integration", "infra"]} />
           <Select label="Priority (1 hottest)" value={draft.priority} onChange={(e) => setDraft({ ...draft, priority: e.target.value })} options={["1", "2", "3", "4", "5"]} />
         </div>
       </Dialog>

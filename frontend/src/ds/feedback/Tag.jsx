@@ -1,7 +1,8 @@
 import React from "react";
 
+// Keyed by the feature's `layer` facet (classification, not taxonomy).
 const typeColors = {
-  capability: "var(--stage-feature)",
+  service: "var(--stage-feature)",
   integration: "var(--stage-spec)",
   ui: "var(--stage-goal)",
   infra: "var(--stage-ticket)",

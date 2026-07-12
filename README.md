@@ -3,12 +3,18 @@
 Metis turns org intent into scoped, executable work through one AI-assisted pipeline:
 
 ```
-OrgGoal → ProductGoal → Spec → FeatureGraph → PRD → Tickets
+OrgGoal → ProductGoal → Spec → Capability map + Feature graph → PRD → Tickets
 ```
 
 The terminal artifact — a **Ticket** — is sized to fit one Claude session: known context,
 clear inputs, a verifiable done condition. Named for the Titan of practical wisdom.
 The intelligence before the build.
+
+The taxonomy has two planes plus a why layer (full spec in `docs/`):
+**capabilities** are durable nouns that mature and never ship; **features** are verb
+phrases that `REALIZES` exactly one capability and do ship; **goals** motivate
+capabilities, never features directly. PRDs are versioned *snapshots* of the taxonomy —
+epics pin a capability, stories pin a feature — never a second hierarchy.
 
 ## Quick start
 
@@ -20,8 +26,10 @@ docker compose up --build
 - Web: http://localhost:4321
 - API: http://localhost:8000 (OpenAPI docs at /docs)
 
-First boot seeds demo data (goals, the PM-Export spec, a 12-ticket PRD, the feature
-graph) so every screen renders with real content. Set `SEED_DEMO_DATA=false` to skip.
+First boot seeds demo data (goals, the capability map, the PM-Export spec, a
+12-ticket PRD, the feature graph) so every screen renders with real content. Set
+`SEED_DEMO_DATA=false` to skip. The schema is `create_all` on boot — after pulling a
+schema change, reset the dev volume (`docker compose down -v`).
 
 The app runs with zero LLM keys — chat replies with a clear "provider not configured"
 notice, and everything else works. Add any subset of provider credentials to `.env`
@@ -37,13 +45,27 @@ Two services plus Postgres:
 | `backend/` | FastAPI + SQLAlchemy 2.0 async | Domain API, agents, and the in-memory feature graph. |
 | `postgres` | PostgreSQL 16 | System of record (JSONB PRD versions, ticket file arrays). |
 
-### The feature graph
+### The two planes
 
-Features and their typed edges (`DEPENDS_ON`, `BLOCKS`, `RELATES_TO`, `PART_OF`) live
-in Postgres and are mirrored into an in-memory networkx graph at startup. Every write
-commits to Postgres first, then write-through updates the graph. Impact queries
-("what breaks if this changes"), dependencies-first build order, cycle detection, and
-the server-computed graph layout all answer from memory.
+The **capability map** (slow plane) is a relational forest: `capabilities.parent_id`
+is `PART_OF`, single parent, cycle-guarded. Capabilities carry stored `maturity`
+(planned → alpha → beta → ga → deprecated → retired), facets, and evidence anchors;
+their progress is never stored — it is always the rollup over realizing features
+(`GET /api/capabilities/{id}/rollup`).
+
+The **feature graph** (fast plane) holds features and their typed edges
+(`DEPENDS_ON`, `BLOCKS`, `RELATES_TO`) in Postgres, mirrored into an in-memory
+networkx graph at startup. Every write commits to Postgres first, then write-through
+updates the graph. The *precedence graph* (`DEPENDS_ON ∪ reverse(BLOCKS)`) drives
+impact queries ("what breaks if this changes"), dependencies-first build order, the
+ready-work frontier (`/api/graph/ready`), and cycle detection — edge writes that
+would close a cycle are rejected at write time. `RELATES_TO` is annotation only.
+
+The bridge between planes is `features.capability_id` (`REALIZES`, exactly one,
+`NOT NULL`). Cross-plane queries: `GET /api/capabilities/{id}/impact` projects
+feature dependencies onto capabilities, `GET /api/features/{id}/why` prints a
+feature's provenance chain up to org intent, and `GET /api/capabilities/health`
+reports taxonomy findings (aspirational gaps, unmotivated capabilities, empty intent).
 
 Because the graph lives in process memory, the backend runs **exactly one uvicorn
 worker** (encoded in the Dockerfile).
@@ -55,9 +77,9 @@ second) to a specialist:
 
 | Agent | Role |
 |---|---|
-| `spec_decomposer` | ProductGoal → Spec → PRD (Epics → Stories → Tickets); enforces ticket sizing |
-| `feature_manager` | Feature CRUD, typed edges, duplicate-avoiding search |
-| `graph_agent` | Impact queries, build order, cycles |
+| `spec_decomposer` | ProductGoal → Spec → PRD (Epics → Stories → Tickets, pinned to the taxonomy); enforces ticket sizing |
+| `feature_manager` | Capability map + feature CRUD, `REALIZES`/`MOTIVATES` links, typed edges, duplicate-avoiding search; applies the noun/verb filing tests |
+| `graph_agent` | Impact queries, build order, ready frontier, cycles, capability rollups, provenance chains, taxonomy health |
 | `strategist` | RICE/MoSCoW priorities, versioned delivery strategies |
 
 Agents call the same service functions as the REST API (one write path), stream over

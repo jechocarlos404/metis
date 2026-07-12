@@ -11,7 +11,9 @@ from app.schemas.feature import (
     FeatureDetail,
     FeatureRead,
     FeatureUpdate,
+    WhyChain,
 )
+from app.services import capabilities as capability_service
 from app.services import features as feature_service
 from app.services import search as search_service
 
@@ -61,6 +63,13 @@ async def create_feature(
     data: FeatureCreate, request: Request, session: AsyncSession = Depends(get_db)
 ):
     return await feature_service.create_feature(session, data, get_graph(request))
+
+
+@router.get("/{feature_id}/why", response_model=WhyChain)
+async def why(feature_id: uuid.UUID, session: AsyncSession = Depends(get_db)):
+    """Provenance chain: feature -> capability path -> motivating goals."""
+    feature = await feature_service.get_feature(session, feature_id)
+    return await capability_service.why(session, feature)
 
 
 @router.get("/{feature_id}", response_model=FeatureDetail)

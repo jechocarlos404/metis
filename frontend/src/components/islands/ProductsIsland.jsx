@@ -10,6 +10,7 @@ export default function ProductsIsland() {
   const [tickets, setTickets] = React.useState([]);
   const [decompositions, setDecompositions] = React.useState([]);
   const [strategies, setStrategies] = React.useState([]);
+  const [capabilities, setCapabilities] = React.useState([]);
   const [tab, setTab] = React.useState("prd");
   const [toast, setToast] = React.useState(null);
   const [ticketDialog, setTicketDialog] = React.useState(null); // null | {mode:'new'} | {mode:'edit', ticket}
@@ -27,16 +28,18 @@ export default function ProductsIsland() {
 
   const loadDetail = React.useCallback(async (id) => {
     if (!id) return;
-    const [epicList, ticketList, prdList, strategyList] = await Promise.all([
+    const [epicList, ticketList, prdList, strategyList, capabilityList] = await Promise.all([
       api(`/products/${id}/epics`),
       api(`/products/${id}/tickets`),
       api(`/products/${id}/decompositions`),
       api(`/products/${id}/strategies`),
+      api("/capabilities"),
     ]);
     setEpics(epicList);
     setTickets(ticketList);
     setDecompositions(prdList);
     setStrategies(strategyList);
+    setCapabilities(capabilityList);
   }, []);
 
   React.useEffect(() => {
@@ -152,6 +155,14 @@ export default function ProductsIsland() {
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontSize: "var(--text-sm)", fontWeight: "var(--weight-semibold)", color: "var(--text-heading)" }}>Epic {i + 1} — {e.title}</div>
                         {e.acceptance_criteria && <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", marginTop: 2 }}>AC: {e.acceptance_criteria}</div>}
+                        {(() => {
+                          const cap = capabilities.find((c) => c.id === e.capability_id);
+                          return cap ? (
+                            <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-disabled)", marginTop: 2 }}>
+                              snapshots {cap.display_id} {cap.name}
+                            </div>
+                          ) : null;
+                        })()}
                       </div>
                       <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-secondary)" }}>{counts.done}/{counts.total}</span>
                       <Icon name="chevron-right" size={14} style={{ color: "var(--text-disabled)" }} />

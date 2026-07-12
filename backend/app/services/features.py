@@ -11,7 +11,7 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Feature, FeatureEdge
+from app.models import Capability, EdgeKind, Feature, FeatureEdge
 from app.schemas.feature import EdgeCreate, FeatureCreate, FeatureUpdate
 
 
@@ -29,9 +29,15 @@ async def get_feature(session: AsyncSession, feature_id: uuid.UUID) -> Feature:
     return feature
 
 
+async def _require_capability(session: AsyncSession, capability_id: uuid.UUID) -> None:
+    if await session.get(Capability, capability_id) is None:
+        raise HTTPException(404, f"Capability {capability_id} not found")
+
+
 async def create_feature(
     session: AsyncSession, data: FeatureCreate, graph=None
 ) -> Feature:
+    await _require_capability(session, data.capability_id)
     feature = Feature(**data.model_dump())
     session.add(feature)
     await session.commit()
@@ -45,7 +51,10 @@ async def update_feature(
     session: AsyncSession, feature_id: uuid.UUID, data: FeatureUpdate, graph=None
 ) -> Feature:
     feature = await get_feature(session, feature_id)
-    for key, value in data.model_dump(exclude_unset=True).items():
+    fields = data.model_dump(exclude_unset=True)
+    if fields.get("capability_id") is not None:
+        await _require_capability(session, fields["capability_id"])
+    for key, value in fields.items():
         setattr(feature, key, value)
     await session.commit()
     await session.refresh(feature)
@@ -72,6 +81,16 @@ async def create_edge(session: AsyncSession, data: EdgeCreate, graph=None) -> Fe
     for fid in (data.src_id, data.dst_id):
         if await session.get(Feature, fid) is None:
             raise HTTPException(404, f"Feature {fid} not found")
+    # Precedence edges (DEPENDS_ON, BLOCKS) are rejected at write time if they
+    # would close a cycle — the invariant lives here, not at topo time.
+    if graph is not None and data.kind != EdgeKind.RELATES_TO:
+        await graph.ensure_fresh()
+        if graph.would_create_cycle(data.src_id, data.dst_id, data.kind):
+            raise HTTPException(
+                422,
+                f"{data.kind} edge would create a dependency cycle — "
+                "break the existing chain first (see /api/graph/cycles).",
+            )
     existing = await session.scalar(
         select(FeatureEdge).where(
             FeatureEdge.src_id == data.src_id,

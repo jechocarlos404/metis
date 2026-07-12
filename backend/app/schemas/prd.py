@@ -17,13 +17,14 @@ class PRDTicket(BaseModel):
 class PRDStory(BaseModel):
     title: str
     description: str | None = None
+    feature_id: uuid.UUID | None = None  # pin: snapshot of a fast-plane node
     tickets: list[PRDTicket] = Field(default_factory=list)
 
 
 class PRDEpic(BaseModel):
     title: str
     acceptance_criteria: str | None = None
-    feature_ids: list[uuid.UUID] = Field(default_factory=list)
+    capability_id: uuid.UUID | None = None  # pin: snapshot of a slow-plane node
     stories: list[PRDStory] = Field(default_factory=list)
 
 

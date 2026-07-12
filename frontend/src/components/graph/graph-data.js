@@ -9,8 +9,9 @@ export const NODE_H = 56;
 // regardless of the angle they approach from.
 export const NODE_COLLIDE_R = 76;
 
-const TYPE_ACCENT = {
-  capability: "--stage-feature",
+// Keyed by the feature's `layer` facet.
+const LAYER_ACCENT = {
+  service: "--stage-feature",
   integration: "--stage-spec",
   ui: "--stage-goal",
   infra: "--stage-ticket",
@@ -23,7 +24,6 @@ const TYPE_ACCENT = {
 const EDGE_STYLE = {
   DEPENDS_ON: { distance: 130, strength: 0.5, dash: null, colorVar: "--ink-4" },
   BLOCKS: { distance: 150, strength: 0.35, dash: null, colorVar: "--danger-fg" },
-  PART_OF: { distance: 90, strength: 0.65, dash: null, colorVar: "--aegean-5" },
   RELATES_TO: { distance: 190, strength: 0.12, dash: "2,4", colorVar: "--ink-4" },
 };
 
@@ -31,8 +31,8 @@ export function edgeStyle(kind) {
   return EDGE_STYLE[kind] || EDGE_STYLE.RELATES_TO;
 }
 
-export function nodeAccentVar(type) {
-  return TYPE_ACCENT[type] || "--ink-5";
+export function nodeAccentVar(layer) {
+  return LAYER_ACCENT[layer] || "--ink-5";
 }
 
 /**
@@ -64,7 +64,8 @@ export function buildFeatureGraph(layout) {
       id: n.id,
       displayId: n.display_id,
       name: n.name,
-      type: n.type,
+      layer: n.facets?.layer,
+      capabilityId: n.capability_id,
       status: n.status,
       priority: n.priority,
       inDegree: d.in,

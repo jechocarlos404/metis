@@ -9,7 +9,7 @@ import { buildFeatureGraph, buildAdjacency, edgeStyle, nodeAccentVar, NODE_W, NO
 // this is the standard escape hatch.
 const useIsomorphicLayoutEffect = typeof window !== "undefined" ? React.useLayoutEffect : React.useEffect;
 
-const EDGE_KINDS = ["DEPENDS_ON", "BLOCKS", "PART_OF", "RELATES_TO"];
+const EDGE_KINDS = ["DEPENDS_ON", "BLOCKS", "RELATES_TO"];
 const STATUS_DOT = { pending: "var(--text-secondary)", in_progress: "var(--warn-fg)", done: "var(--ok-fg)" };
 
 export function FeatureGraphView({ layout, selectedId, onSelect, impactIds, style }) {
@@ -183,7 +183,7 @@ export function FeatureGraphView({ layout, selectedId, onSelect, impactIds, styl
 }
 
 function FeatureNode({ node, isSelected, isHovered, isDimmed, isImpacted, isPinned, onSelect, onHoverChange, registerEl }) {
-  const accent = `var(${nodeAccentVar(node.type)})`;
+  const accent = `var(${nodeAccentVar(node.layer)})`;
   const ring = isSelected ? "var(--accent)" : isImpacted ? "var(--danger-fg)" : isHovered ? "var(--border-default)" : "var(--border-hairline)";
   return (
     <g

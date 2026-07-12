@@ -1,3 +1,4 @@
+import asyncio
 import time
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -47,7 +48,9 @@ class ProviderRegistry:
     async def statuses(self, force: bool = False) -> list[ProviderStatus]:
         now = time.monotonic()
         if force or self._statuses is None or now - self._statuses_at > STATUS_TTL_SECONDS:
-            self._statuses = [await p.detect() for p in self.providers.values()]
+            self._statuses = list(
+                await asyncio.gather(*(p.detect() for p in self.providers.values()))
+            )
             self._statuses_at = now
         return self._statuses
 

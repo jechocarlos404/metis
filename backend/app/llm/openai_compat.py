@@ -5,6 +5,7 @@ from typing import Any
 import httpx
 import openai
 
+from app.llm.base import LiveModelCache, order_models
 from app.llm.types import (
     LLMEvent,
     ProviderStatus,
@@ -16,6 +17,12 @@ from app.llm.types import (
 )
 
 MAX_TOKENS = 8192
+
+# OpenAI's /models mixes in embedding/audio/image models; keep the dropdown chat-only.
+_NON_CHAT_MARKERS = (
+    "embedding", "whisper", "tts", "dall-e", "moderation", "audio", "realtime",
+    "transcribe", "image",
+)
 
 
 def to_openai_messages(system: str, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -60,6 +67,7 @@ class OpenAICompatProvider:
         self._base_url = base_url
         self._models = models_getter or (lambda: [])
         self._ollama_base = ollama_base_getter
+        self._live = LiveModelCache()
 
     @property
     def _is_ollama(self) -> bool:
@@ -72,7 +80,7 @@ class OpenAICompatProvider:
                 async with httpx.AsyncClient(timeout=1.5) as client:
                     resp = await client.get(f"{base}/api/tags")
                     resp.raise_for_status()
-                    models = [m["name"] for m in resp.json().get("models", [])]
+                    models = sorted(m["name"] for m in resp.json().get("models", []))
                 return ProviderStatus(
                     name=self.name, label=self.label, available=True, models=models,
                     detail=None if models else "Reachable, but no models pulled",
@@ -86,11 +94,22 @@ class OpenAICompatProvider:
         env_var = {"openai": "OPENAI_API_KEY", "openrouter": "OPENROUTER_API_KEY"}.get(
             self.name, "API key"
         )
+        models = self._models()
+        if available:
+            live = await self._live.get(self._fetch_models)
+            if live:
+                models = order_models(self._models(), live)
         return ProviderStatus(
             name=self.name, label=self.label, available=available,
             detail=None if available else f"Set {env_var}",
-            models=self._models(),
+            models=models,
         )
+
+    async def _fetch_models(self) -> list[str]:
+        ids = [m.id async for m in self._client().models.list(timeout=5)]
+        if self.name == "openai":
+            ids = [i for i in ids if not any(marker in i for marker in _NON_CHAT_MARKERS)]
+        return ids
 
     def _client(self) -> openai.AsyncOpenAI:
         if self._is_ollama:

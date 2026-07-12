@@ -20,7 +20,7 @@ export function Select({ label, options = [], style, ...rest }) {
           }}>
           {options.map((o) => {
             const opt = typeof o === "string" ? { value: o, label: o } : o;
-            return <option key={opt.value} value={opt.value}>{opt.label}</option>;
+            return <option key={opt.value} value={opt.value} disabled={opt.disabled}>{opt.label}</option>;
           })}
         </select>
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"

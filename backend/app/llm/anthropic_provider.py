@@ -3,6 +3,7 @@ from typing import Any
 
 import anthropic
 
+from app.llm.base import LiveModelCache, order_models
 from app.llm.types import (
     LLMEvent,
     ProviderStatus,
@@ -52,6 +53,7 @@ class AnthropicProvider:
         self._bedrock = bedrock
         self.name = "bedrock" if bedrock else "anthropic"
         self.label = "AWS Bedrock (Claude)" if bedrock else "Anthropic API"
+        self._live = LiveModelCache()
 
     def _models(self) -> list[str]:
         raw = self._settings.bedrock_models if self._bedrock else self._settings.anthropic_models
@@ -65,13 +67,22 @@ class AnthropicProvider:
         else:
             available = bool(self._settings.anthropic_api_key)
             detail = None if available else "Set ANTHROPIC_API_KEY"
+        models = self._models()
+        # Bedrock has no lightweight list-models call; it keeps the static catalog.
+        if available and not self._bedrock:
+            live = await self._live.get(self._fetch_models)
+            if live:
+                models = order_models(self._models(), live)
         return ProviderStatus(
             name=self.name,
             label=self.label,
             available=available,
             detail=detail,
-            models=self._models() if available else self._models(),
+            models=models,
         )
+
+    async def _fetch_models(self) -> list[str]:
+        return [m.id async for m in self._client().models.list(limit=100, timeout=5)]
 
     def _client(self):
         if self._bedrock:

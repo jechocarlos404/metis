@@ -2,6 +2,7 @@ import React from "react";
 import { PageHeader } from "../shell/PageHeader.jsx";
 import { Badge, Button, Card, Dialog, Icon, Input, Select, StatusBadge, Tabs, TicketCard, Toast } from "../../ds";
 import { api } from "../../lib/api.js";
+import { openChatWithPrompt } from "../../lib/chat-launch.js";
 
 export default function ProductsIsland({ canWrite = true }) {
   const [products, setProducts] = React.useState([]);
@@ -149,6 +150,12 @@ export default function ProductsIsland({ canWrite = true }) {
 
   const maxPhaseEnd = Math.max(1, ...(strategy?.phases ?? []).map((p) => (p.start || 0) + (p.length || 0)));
 
+  const decomposePrompt = () =>
+    `Decompose the Spec "${product.name}" (${product.display_id}, product id ${productId}) into a PRD: epics must pin capabilities, stories must pin features, tickets sized S/M/L for one Claude session each. Use the current capability map and feature graph.`;
+
+  const refreshPrdPrompt = () =>
+    `Refresh the draft PRD for "${product.name}" (${product.display_id}, product id ${productId}). Keep approved pins where still valid; update epics/stories/tickets to match the current taxonomy.`;
+
   return (
     <>
       <PageHeader
@@ -207,6 +214,18 @@ export default function ProductsIsland({ canWrite = true }) {
 
             {tab === "prd" && (
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {canWrite && (
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <Button size="sm" variant="secondary" style={{ gap: 6 }} onClick={() => openChatWithPrompt(decomposePrompt())}>
+                      <Icon name="sparkles" size={13} />{epics.length === 0 ? "Decompose spec" : "Regenerate PRD"}
+                    </Button>
+                    {prd && prd.status === "draft" && (
+                      <Button size="sm" variant="secondary" style={{ gap: 6 }} onClick={() => openChatWithPrompt(refreshPrdPrompt())}>
+                        <Icon name="sparkles" size={13} />Refresh PRD draft
+                      </Button>
+                    )}
+                  </div>
+                )}
                 {prd && prd.status === "draft" && canWrite && (
                   <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", background: "var(--accent-wash)", borderRadius: "var(--radius-md)", fontSize: "var(--text-sm)", color: "var(--text-accent)" }}>
                     <span style={{ fontFamily: "var(--font-mono)", fontSize: 11 }}>{prd.display_id} v{prd.version}</span>

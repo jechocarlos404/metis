@@ -46,6 +46,25 @@ export default function ChatIsland({ threadId: initialThreadId = null, canWrite 
     return () => abortRef.current?.abort();
   }, []);
 
+  // /chat?prompt=… — launch from Products (decompose, strategy, etc.)
+  const [launchPrompt, setLaunchPrompt] = React.useState(null);
+  React.useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const prompt = params.get("prompt");
+    if (!prompt || !canWrite) return;
+    setLaunchPrompt(prompt);
+    params.delete("prompt");
+    const qs = params.toString();
+    window.history.replaceState({}, "", window.location.pathname + (qs ? `?${qs}` : ""));
+  }, [canWrite]);
+
+  React.useEffect(() => {
+    if (!launchPrompt) return;
+    const prompt = launchPrompt;
+    setLaunchPrompt(null);
+    send(prompt);
+  }, [launchPrompt]);
+
   React.useEffect(() => {
     if (!threadId) {
       setMessages([]);
@@ -64,8 +83,8 @@ export default function ChatIsland({ threadId: initialThreadId = null, canWrite 
     window.history.replaceState({}, "", path);
   };
 
-  const send = async () => {
-    const content = draft.trim();
+  const send = async (overrideContent) => {
+    const content = (overrideContent ?? draft).trim();
     if (!content || busy) return;
     setBusy(true);
     setError(null);

@@ -229,6 +229,30 @@ export default function ProductsIsland({ canWrite = true }) {
     setSeedResult(null);
   };
 
+  const exportSeed = async () => {
+    if (!productId) return;
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/seed/export?productId=${encodeURIComponent(productId)}`);
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.detail || "Export failed");
+      const blob = new Blob([JSON.stringify(body.document, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = body.filename || "metis-seed.json";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      setToast({ tone: "ok", title: "Seed exported", detail: body.filename || "metis-seed.json" });
+    } catch (e) {
+      setToast({ tone: "danger", title: "Export failed", detail: String(e.message) });
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <>
       <PageHeader
@@ -243,6 +267,17 @@ export default function ProductsIsland({ canWrite = true }) {
             {canWrite && (
               <Button size="sm" variant="accent" style={{ gap: 6 }} onClick={openNewProduct}>
                 <Icon name="plus" size={13} />New spec
+              </Button>
+            )}
+            {canWrite && (
+              <Button
+                size="sm"
+                variant="secondary"
+                style={{ gap: 6 }}
+                disabled={!productId || saving}
+                onClick={exportSeed}
+              >
+                <Icon name="arrow-right" size={13} />Export seed
               </Button>
             )}
             {canWrite && (

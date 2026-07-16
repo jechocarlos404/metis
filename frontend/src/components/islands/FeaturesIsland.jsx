@@ -1,7 +1,7 @@
 import React from "react";
 import { PageHeader } from "../shell/PageHeader.jsx";
 import { Button, Dialog, Icon, IconButton, Input, PriorityBadge, Select, StatusBadge, Tabs, Tag } from "../../ds";
-import { api } from "../../lib/api.js";
+import { api, ApiError } from "../../lib/api.js";
 import { FeatureGraphView } from "../graph/FeatureGraphView.jsx";
 
 export default function FeaturesIsland({ canWrite = true }) {
@@ -27,20 +27,37 @@ export default function FeaturesIsland({ canWrite = true }) {
   const [cutting, setCutting] = React.useState(false);
   const [ready, setReady] = React.useState([]);
   const [why, setWhy] = React.useState(null);
+  const [cycles, setCycles] = React.useState([]);
+  const [topoOrder, setTopoOrder] = React.useState(null);
+  const [topoError, setTopoError] = React.useState(null);
 
   const load = React.useCallback(async () => {
-    const [data, caps, edges, productList, readyData] = await Promise.all([
+    const [data, caps, edges, productList, readyData, cyclesData] = await Promise.all([
       api("/graph/layout"),
       api("/capabilities"),
       api("/features/edges"),
       api("/products"),
       api("/graph/ready"),
+      api("/graph/cycles"),
     ]);
     setLayout(data);
     setCapabilities(caps);
     setEdgeList(edges);
     setProducts(productList);
     setReady(readyData.ready ?? []);
+    setCycles(cyclesData.cycles ?? []);
+    try {
+      const topoData = await api("/graph/topo");
+      setTopoOrder(topoData.order ?? []);
+      setTopoError(null);
+    } catch (e) {
+      setTopoOrder(null);
+      if (e instanceof ApiError && e.status === 409 && typeof e.detail === "object" && e.detail?.message) {
+        setTopoError(e.detail.message);
+      } else {
+        setTopoError(String(e.message));
+      }
+    }
     setSelected((sel) => sel && data.nodes.some((n) => n.id === sel) ? sel : data.nodes[0]?.id ?? null);
     setDraft((d) => (d.capabilityId ? d : { ...d, capabilityId: caps[0]?.id ?? "" }));
   }, []);
@@ -290,6 +307,13 @@ export default function FeaturesIsland({ canWrite = true }) {
           </div>
           <aside style={{ width: 280, flex: "none", margin: "20px 20px 20px 0", background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", padding: 16, display: "flex", flexDirection: "column", gap: 12, overflowY: "auto" }}>
             <ReadyFrontierPanel ready={ready} selectedId={selected} onSelect={setSelected} />
+            <GraphDiagnosticsPanel
+              cycles={cycles}
+              topoOrder={topoOrder}
+              topoError={topoError}
+              selectedId={selected}
+              onSelect={setSelected}
+            />
             <div style={{ borderTop: "1px solid var(--border-hairline)" }} />
             {canWrite && (
               <MVPCutPanel
@@ -491,6 +515,52 @@ function ReadyFrontierPanel({ ready, selectedId, onSelect }) {
             </button>
           );
         })
+      )}
+    </div>
+  );
+}
+
+function GraphDiagnosticsPanel({ cycles, topoOrder, topoError, selectedId, onSelect }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      <div style={CAPS_HEADER}>Cycles · {cycles.length}</div>
+      {cycles.length === 0 ? (
+        <div style={{ ...MONO_ROW, color: "var(--text-disabled)" }}>no dependency cycles</div>
+      ) : (
+        cycles.map((cycle, i) => (
+          <div key={i} style={{ ...MONO_ROW, color: "var(--danger-fg)", ...ELLIPSIS }}>
+            {cycle.map((f) => f.name).join(" → ")}
+          </div>
+        ))
+      )}
+      <div style={{ ...CAPS_HEADER, marginTop: 4 }}>Build order</div>
+      {topoError ? (
+        <div style={{ ...MONO_ROW, color: "var(--danger-fg)" }}>{topoError}</div>
+      ) : topoOrder?.length === 0 ? (
+        <div style={{ ...MONO_ROW, color: "var(--text-disabled)" }}>no features in graph</div>
+      ) : (
+        topoOrder?.slice(0, 12).map((f, i) => {
+          const active = f.id === selectedId;
+          return (
+            <button
+              key={f.id}
+              type="button"
+              onClick={() => onSelect(f.id)}
+              style={{
+                display: "flex", alignItems: "center", gap: 6, textAlign: "left",
+                padding: "2px 6px", margin: "0 -6px", border: "none", borderRadius: "var(--radius-sm)",
+                cursor: "pointer", background: active ? "var(--accent-wash)" : "transparent",
+                color: active ? "var(--text-heading)" : "var(--text-secondary)", ...MONO_ROW,
+              }}
+            >
+              <span style={{ color: "var(--text-disabled)", flex: "none", width: 16 }}>{i + 1}.</span>
+              <span style={{ flex: 1, ...ELLIPSIS }}>{f.name}</span>
+            </button>
+          );
+        })
+      )}
+      {topoOrder && topoOrder.length > 12 && (
+        <div style={{ ...MONO_ROW, color: "var(--text-disabled)" }}>+{topoOrder.length - 12} more</div>
       )}
     </div>
   );

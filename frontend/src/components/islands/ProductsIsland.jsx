@@ -18,6 +18,7 @@ export default function ProductsIsland({ canWrite = true }) {
   const [ticketDialog, setTicketDialog] = React.useState(null); // null | {mode:'new'} | {mode:'edit', ticket}
   const [productDialog, setProductDialog] = React.useState(null); // null | {mode:'new'} | {mode:'edit'}
   const [confirmingDelete, setConfirmingDelete] = React.useState(false);
+  const [confirmingTicketDelete, setConfirmingTicketDelete] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
 
   const product = products.find((p) => p.id === productId);
@@ -138,6 +139,24 @@ export default function ProductsIsland({ canWrite = true }) {
       await loadDetail(productId);
     } catch (e) {
       showError("Ticket save failed")(e);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const deleteTicket = async () => {
+    const t = ticketDialog?.ticket;
+    if (!t) return;
+    setSaving(true);
+    try {
+      await api(`/tickets/${t.id}`, { method: "DELETE" });
+      setTicketDialog(null);
+      setConfirmingTicketDelete(false);
+      setToast({ tone: "ok", title: "Ticket deleted" });
+      await loadDetail(productId);
+    } catch (e) {
+      showError("Delete failed")(e);
+      setConfirmingTicketDelete(false);
     } finally {
       setSaving(false);
     }
@@ -328,10 +347,17 @@ export default function ProductsIsland({ canWrite = true }) {
       <Dialog
         open={ticketDialog != null}
         title={ticketDialog?.mode === "new" ? "New ticket" : `Edit ${ticketDialog?.ticket?.display_id ?? ""}`}
-        onClose={() => setTicketDialog(null)}
+        onClose={() => { setTicketDialog(null); setConfirmingTicketDelete(false); }}
         footer={
           <>
-            <Button size="sm" variant="secondary" onClick={() => setTicketDialog(null)}>Cancel</Button>
+            {ticketDialog?.mode === "edit" && (
+              <Button size="sm" variant={confirmingTicketDelete ? "danger" : "secondary"} disabled={saving}
+                style={{ marginRight: "auto", gap: 6 }}
+                onClick={() => (confirmingTicketDelete ? deleteTicket() : setConfirmingTicketDelete(true))}>
+                <Icon name="trash" size={13} />{confirmingTicketDelete ? "Confirm delete" : "Delete"}
+              </Button>
+            )}
+            <Button size="sm" variant="secondary" onClick={() => { setTicketDialog(null); setConfirmingTicketDelete(false); }}>Cancel</Button>
             <Button size="sm" variant="accent" disabled={saving || !ticketDialog?.title?.trim()} onClick={saveTicket}>
               {ticketDialog?.mode === "new" ? "Create ticket" : "Save"}
             </Button>

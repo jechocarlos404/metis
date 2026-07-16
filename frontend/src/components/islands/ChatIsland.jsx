@@ -38,6 +38,7 @@ export default function ChatIsland({ threadId: initialThreadId = null, canWrite 
   const [draft, setDraft] = React.useState("");
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState(null);
+  const [confirmingDelete, setConfirmingDelete] = React.useState(false);
   const scrollRef = React.useRef(null);
   const abortRef = React.useRef(null);
 
@@ -79,8 +80,28 @@ export default function ChatIsland({ threadId: initialThreadId = null, canWrite 
 
   const switchThread = (id) => {
     setThreadId(id || null);
+    setConfirmingDelete(false);
     const path = id ? `/chat/${id}` : "/chat";
     window.history.replaceState({}, "", path);
+  };
+
+  const deleteThread = async () => {
+    if (!threadId) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await api(`/chat/threads/${threadId}`, { method: "DELETE" });
+      const remaining = threads.filter((t) => t.id !== threadId);
+      setThreads(remaining);
+      switchThread(remaining[0]?.id ?? null);
+      setMessages([]);
+      setConfirmingDelete(false);
+    } catch (e) {
+      setError(String(e.message));
+      setConfirmingDelete(false);
+    } finally {
+      setBusy(false);
+    }
   };
 
   const send = async (overrideContent) => {
@@ -162,6 +183,13 @@ export default function ChatIsland({ threadId: initialThreadId = null, canWrite 
                 ...threads.map((t) => ({ value: t.id, label: t.title })),
               ]}
             />
+            {canWrite && threadId && (
+              <Button size="sm" variant={confirmingDelete ? "danger" : "secondary"} disabled={busy}
+                style={{ gap: 6 }}
+                onClick={() => (confirmingDelete ? deleteThread() : setConfirmingDelete(true))}>
+                <Icon name="trash" size={13} />{confirmingDelete ? "Confirm" : "Delete thread"}
+              </Button>
+            )}
           </>
         }
       />

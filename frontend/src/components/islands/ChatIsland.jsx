@@ -30,7 +30,7 @@ function AgentMessage({ agent, text, viz, tools, streaming }) {
   );
 }
 
-export default function ChatIsland({ threadId: initialThreadId = null }) {
+export default function ChatIsland({ threadId: initialThreadId = null, canWrite = true }) {
   const [threads, setThreads] = React.useState([]);
   const [threadId, setThreadId] = React.useState(initialThreadId);
   const [messages, setMessages] = React.useState([]);
@@ -138,7 +138,10 @@ export default function ChatIsland({ threadId: initialThreadId = null }) {
               value={threadId ?? ""}
               onChange={(e) => switchThread(e.target.value)}
               style={{ width: 180 }}
-              options={[{ value: "", label: "New thread…" }, ...threads.map((t) => ({ value: t.id, label: t.title }))]}
+              options={[
+                ...(canWrite ? [{ value: "", label: "New thread…" }] : [{ value: "", label: "Select thread…" }]),
+                ...threads.map((t) => ({ value: t.id, label: t.title })),
+              ]}
             />
           </>
         }
@@ -165,24 +168,30 @@ export default function ChatIsland({ threadId: initialThreadId = null }) {
         </div>
       </div>
       <div style={{ flex: "none", padding: "0 24px 20px" }}>
-        <div style={{ maxWidth: 720, margin: "0 auto", display: "flex", alignItems: "flex-end", gap: 8, background: "var(--surface-card)", border: "1px solid var(--border-default)", borderRadius: "var(--radius-lg)", padding: "10px 12px", boxShadow: "var(--shadow-card)" }}>
-          <textarea
-            rows={1}
-            value={draft}
-            placeholder="Describe a goal, or ask the graph…"
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                send();
-              }
-            }}
-            style={{ flex: 1, resize: "none", border: "none", outline: "none", background: "transparent", fontFamily: "var(--font-body)", fontSize: "var(--text-sm)", color: "var(--text-heading)", lineHeight: 1.5, padding: "4px 0" }}
-          />
-          <Button size="sm" variant="accent" onClick={send} disabled={busy || !draft.trim()} style={{ gap: 6 }}>
-            Send <Icon name="send" size={12} />
-          </Button>
-        </div>
+        {canWrite ? (
+          <div style={{ maxWidth: 720, margin: "0 auto", display: "flex", alignItems: "flex-end", gap: 8, background: "var(--surface-card)", border: "1px solid var(--border-default)", borderRadius: "var(--radius-lg)", padding: "10px 12px", boxShadow: "var(--shadow-card)" }}>
+            <textarea
+              rows={1}
+              value={draft}
+              placeholder="Describe a goal, or ask the graph…"
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  send();
+                }
+              }}
+              style={{ flex: 1, resize: "none", border: "none", outline: "none", background: "transparent", fontFamily: "var(--font-body)", fontSize: "var(--text-sm)", color: "var(--text-heading)", lineHeight: 1.5, padding: "4px 0" }}
+            />
+            <Button size="sm" variant="accent" onClick={send} disabled={busy || !draft.trim()} style={{ gap: 6 }}>
+              Send <Icon name="send" size={12} />
+            </Button>
+          </div>
+        ) : (
+          <div style={{ maxWidth: 720, margin: "0 auto", padding: "12px 16px", background: "var(--surface-inset)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-lg)", fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>
+            View-only — viewers can read threads but not send messages.
+          </div>
+        )}
       </div>
     </>
   );

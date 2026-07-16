@@ -23,13 +23,28 @@ cp .env.example .env      # optional: add LLM provider keys
 docker compose up --build
 ```
 
-- Web: http://localhost:4321
+- Web: http://localhost:4321 — redirects to Keycloak login
 - API: http://localhost:8000 (OpenAPI docs at /docs)
+- Keycloak: http://localhost:8080 (admin console: `admin` / `admin`)
+
+Seeded realm users (temporary passwords — Keycloak will force a change on first login):
+
+| User | Password | Role |
+|---|---|---|
+| `admin@metis.local` | `admin` | admin (Users + LLM Config) |
+| `editor@metis.local` | `editor` | editor (read + write domain) |
+| `viewer@metis.local` | `viewer` | viewer (read-only) |
+
+For curl / seed scripts against the API without a browser session, set
+`AUTH_ENABLED=false` in `.env` (treats every request as admin). Leave it `true`
+for normal use.
 
 First boot seeds demo data (goals, the capability map, the PM-Export spec, a
 12-ticket PRD, the feature graph) so every screen renders with real content. Set
 `SEED_DEMO_DATA=false` to skip. The schema is `create_all` on boot — after pulling a
-schema change, reset the dev volume (`docker compose down -v`).
+schema change, reset the dev volume (`docker compose down -v`). Realm import only
+runs on a fresh Keycloak data directory; to re-import users/roles, recreate the
+Keycloak container without a persisted volume (compose already does that).
 
 The app runs with zero LLM keys — chat replies with a clear "provider not configured"
 notice, and everything else works. Add any subset of provider credentials to `.env`
@@ -42,6 +57,7 @@ The repo ships a two-skill pipeline for seeding an instance from real codebases
 
 - `.claude/skills/metis-seed-instance` loads a `metis-seed.json` into the running
   instance via the API — idempotent, add-only. Auto-available in this repo.
+  With auth enabled, set `AUTH_ENABLED=false` first (or pass a bearer token).
 - `skills/metis-export` analyzes *any* repository and writes a `metis-seed.json`.
   To use it from other repos, symlink it into your global skills once per machine:
 
@@ -51,12 +67,13 @@ The repo ships a two-skill pipeline for seeding an instance from real codebases
 
 ## Architecture
 
-Two services plus Postgres:
+Three services plus Postgres:
 
 | Service | Stack | Role |
 |---|---|---|
-| `frontend/` | Astro 5 (SSR, node adapter) + React islands | UI, built on the Metis design system. Proxies `/api/*` to the backend (same-origin, streams SSE through). |
-| `backend/` | FastAPI + SQLAlchemy 2.0 async | Domain API, agents, and the in-memory feature graph. |
+| `frontend/` | Astro 5 (SSR, node adapter) + React islands | UI + OIDC BFF (session cookies, `/api/*` proxy with bearer). |
+| `backend/` | FastAPI + SQLAlchemy 2.0 async | Domain API, JWT/RBAC, agents, in-memory feature graph. |
+| `keycloak` | Keycloak 26 | Identity provider (`metis` realm, admin/editor/viewer). |
 | `postgres` | PostgreSQL 16 | System of record (JSONB PRD versions, ticket file arrays). |
 
 ### The two planes

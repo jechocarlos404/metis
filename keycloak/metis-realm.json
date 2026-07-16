@@ -1,0 +1,111 @@
+{
+  "realm": "metis",
+  "enabled": true,
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": true,
+  "editUsernameAllowed": false,
+  "accessTokenLifespan": 300,
+  "ssoSessionIdleTimeout": 1800,
+  "ssoSessionMaxLifespan": 36000,
+  "roles": {
+    "realm": [
+      { "name": "admin", "description": "Full access: all domain CRUD, user management, LLM config" },
+      { "name": "editor", "description": "Create/edit/delete goals, capabilities, features, products, specs" },
+      { "name": "viewer", "description": "Read-only access to all domain data" }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "metis-web",
+      "name": "Metis Web (BFF)",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "secret": "dev-web-secret",
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "redirectUris": ["http://localhost:4321/auth/callback"],
+      "webOrigins": ["http://localhost:4321"],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "http://localhost:4321/*"
+      },
+      "protocolMappers": [
+        {
+          "name": "metis-backend-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "metis-backend",
+            "id.token.claim": "false",
+            "access.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "metis-backend",
+      "name": "Metis Backend (Admin API service account)",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "secret": "dev-backend-secret",
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true
+    }
+  ],
+  "users": [
+    {
+      "username": "admin@metis.local",
+      "email": "admin@metis.local",
+      "emailVerified": true,
+      "enabled": true,
+      "firstName": "Metis",
+      "lastName": "Admin",
+      "credentials": [
+        { "type": "password", "value": "admin", "temporary": true }
+      ],
+      "realmRoles": ["admin"]
+    },
+    {
+      "username": "editor@metis.local",
+      "email": "editor@metis.local",
+      "emailVerified": true,
+      "enabled": true,
+      "firstName": "Metis",
+      "lastName": "Editor",
+      "credentials": [
+        { "type": "password", "value": "editor", "temporary": true }
+      ],
+      "realmRoles": ["editor"]
+    },
+    {
+      "username": "viewer@metis.local",
+      "email": "viewer@metis.local",
+      "emailVerified": true,
+      "enabled": true,
+      "firstName": "Metis",
+      "lastName": "Viewer",
+      "credentials": [
+        { "type": "password", "value": "viewer", "temporary": true }
+      ],
+      "realmRoles": ["viewer"]
+    },
+    {
+      "username": "service-account-metis-backend",
+      "enabled": true,
+      "serviceAccountClientId": "metis-backend",
+      "clientRoles": {
+        "realm-management": ["manage-users", "view-users", "query-users"]
+      }
+    }
+  ]
+}

@@ -34,7 +34,7 @@ function subtreeIds(node, out = new Set()) {
 
 const EMPTY_DRAFT = { name: "", description: "", parentId: "", maturity: "planned" };
 
-export default function CapabilitiesIsland() {
+export default function CapabilitiesIsland({ canWrite = true }) {
   const [tree, setTree] = React.useState([]);
   const [goals, setGoals] = React.useState([]);
   const [selected, setSelected] = React.useState(null);
@@ -174,9 +174,11 @@ export default function CapabilitiesIsland() {
         title="Capabilities"
         meta={`${flat.length} capabilities · containment map`}
         actions={
-          <Button size="sm" variant="accent" style={{ gap: 6 }} onClick={openNew}>
-            <Icon name="plus" size={13} />New capability
-          </Button>
+          canWrite && (
+            <Button size="sm" variant="accent" style={{ gap: 6 }} onClick={openNew}>
+              <Icon name="plus" size={13} />New capability
+            </Button>
+          )
         }
       />
       {error && <div style={{ padding: "8px 24px", fontSize: "var(--text-sm)", color: "var(--danger-fg)" }}>{error}</div>}
@@ -213,7 +215,9 @@ export default function CapabilitiesIsland() {
             <>
               <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
                 <div style={{ flex: 1, fontSize: "var(--text-md)", fontWeight: "var(--weight-semibold)", color: "var(--text-heading)" }}>{detail.name}</div>
-                <IconButton size="sm" label="Edit capability" onClick={openEdit}><Icon name="pencil" size={13} /></IconButton>
+                {canWrite && (
+                  <IconButton size="sm" label="Edit capability" onClick={openEdit}><Icon name="pencil" size={13} /></IconButton>
+                )}
               </div>
               {detail.description && (
                 <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", lineHeight: "var(--leading-snug)" }}>{detail.description}</div>
@@ -238,13 +242,15 @@ export default function CapabilitiesIsland() {
                   <div key={g.id} style={{ display: "flex", alignItems: "center", gap: 6 }}>
                     <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-secondary)", flex: "none" }}>{g.display_id}</span>
                     <span style={{ fontSize: "var(--text-xs)", color: "var(--text-body)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{g.title}</span>
-                    <IconButton size="sm" label="Remove motivation" onClick={() => removeMotivation(g.id)}><Icon name="x" size={12} /></IconButton>
+                    {canWrite && (
+                      <IconButton size="sm" label="Remove motivation" onClick={() => removeMotivation(g.id)}><Icon name="x" size={12} /></IconButton>
+                    )}
                   </div>
                 ))}
                 {motivations.length === 0 && (
                   <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-disabled)" }}>no motivating goals</div>
                 )}
-                {addableGoals.length > 0 && (
+                {canWrite && addableGoals.length > 0 && (
                   <Select value="" onChange={(e) => e.target.value && addMotivation(e.target.value)}
                     options={[{ value: "", label: "Link a goal…" },
                       ...addableGoals.map((g) => ({ value: g.id, label: `${g.display_id} ${g.title}` }))]} />

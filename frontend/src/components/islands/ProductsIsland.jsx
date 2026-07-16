@@ -3,7 +3,7 @@ import { PageHeader } from "../shell/PageHeader.jsx";
 import { Badge, Button, Card, Dialog, Icon, Input, Select, StatusBadge, Tabs, TicketCard, Toast } from "../../ds";
 import { api } from "../../lib/api.js";
 
-export default function ProductsIsland() {
+export default function ProductsIsland({ canWrite = true }) {
   const [products, setProducts] = React.useState([]);
   const [productId, setProductId] = React.useState(null);
   const [goals, setGoals] = React.useState([]);
@@ -160,9 +160,11 @@ export default function ProductsIsland() {
               <Select value={productId ?? ""} onChange={(e) => setProductId(e.target.value)} style={{ width: 240 }}
                 options={products.map((p) => ({ value: p.id, label: p.name }))} />
             )}
-            <Button size="sm" variant="accent" style={{ gap: 6 }} onClick={openNewProduct}>
-              <Icon name="plus" size={13} />New spec
-            </Button>
+            {canWrite && (
+              <Button size="sm" variant="accent" style={{ gap: 6 }} onClick={openNewProduct}>
+                <Icon name="plus" size={13} />New spec
+              </Button>
+            )}
           </>
         }
       />
@@ -177,10 +179,12 @@ export default function ProductsIsland() {
                   <StatusBadge status={product.status} />
                   {prd && <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-disabled)" }}>{prd.display_id} v{prd.version} · {prd.created_by}</span>}
                   <span style={{ flex: 1 }} />
-                  <Button size="sm" variant="secondary" style={{ gap: 6 }} onClick={openEditProduct}>
-                    <Icon name="pencil" size={13} />Edit
-                  </Button>
-                  {product.status === "draft" && (
+                  {canWrite && (
+                    <Button size="sm" variant="secondary" style={{ gap: 6 }} onClick={openEditProduct}>
+                      <Icon name="pencil" size={13} />Edit
+                    </Button>
+                  )}
+                  {canWrite && product.status === "draft" && (
                     <Button size="sm" onClick={approveProduct}>Approve</Button>
                   )}
                 </>
@@ -203,11 +207,17 @@ export default function ProductsIsland() {
 
             {tab === "prd" && (
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {prd && prd.status === "draft" && (
+                {prd && prd.status === "draft" && canWrite && (
                   <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", background: "var(--accent-wash)", borderRadius: "var(--radius-md)", fontSize: "var(--text-sm)", color: "var(--text-accent)" }}>
                     <span style={{ fontFamily: "var(--font-mono)", fontSize: 11 }}>{prd.display_id} v{prd.version}</span>
                     <span style={{ flex: 1 }}>Draft until approved. L tickets must be split first.</span>
                     <Button size="sm" onClick={approvePrd}>Approve PRD</Button>
+                  </div>
+                )}
+                {prd && prd.status === "draft" && !canWrite && (
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", background: "var(--accent-wash)", borderRadius: "var(--radius-md)", fontSize: "var(--text-sm)", color: "var(--text-accent)" }}>
+                    <span style={{ fontFamily: "var(--font-mono)", fontSize: 11 }}>{prd.display_id} v{prd.version}</span>
+                    <span style={{ flex: 1 }}>Draft PRD — awaiting approval.</span>
                   </div>
                 )}
                 {epics.map((e, i) => {
@@ -245,12 +255,14 @@ export default function ProductsIsland() {
                 {tickets.map((t) => (
                   <TicketCard key={t.id} id={t.display_id} title={t.title} description={t.description}
                     status={t.status} budget={t.context_budget} files={t.affected_files}
-                    onClick={() => setTicketDialog({ mode: "edit", ticket: t, title: t.title, description: t.description || "", budget: t.context_budget, status: t.status, files: (t.affected_files || []).join(", ") })} />
+                    onClick={canWrite ? () => setTicketDialog({ mode: "edit", ticket: t, title: t.title, description: t.description || "", budget: t.context_budget, status: t.status, files: (t.affected_files || []).join(", ") }) : undefined} />
                 ))}
-                <div onClick={() => setTicketDialog({ mode: "new", title: "", description: "", budget: "M", files: "" })}
-                  style={{ border: "1px dashed var(--border-default)", borderRadius: "var(--radius-md)", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, color: "var(--text-disabled)", fontSize: "var(--text-sm)", minHeight: 90, cursor: "pointer" }}>
-                  <Icon name="plus" size={14} /> New ticket
-                </div>
+                {canWrite && (
+                  <div onClick={() => setTicketDialog({ mode: "new", title: "", description: "", budget: "M", files: "" })}
+                    style={{ border: "1px dashed var(--border-default)", borderRadius: "var(--radius-md)", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, color: "var(--text-disabled)", fontSize: "var(--text-sm)", minHeight: 90, cursor: "pointer" }}>
+                    <Icon name="plus" size={14} /> New ticket
+                  </div>
+                )}
               </div>
             )}
 

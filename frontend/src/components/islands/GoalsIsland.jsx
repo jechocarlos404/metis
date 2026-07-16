@@ -5,7 +5,7 @@ import { api } from "../../lib/api.js";
 
 const EMPTY_DRAFT = { goal_type: "product", title: "", description: "", success_criteria: "", priority: "3", status: "pending" };
 
-export default function GoalsIsland() {
+export default function GoalsIsland({ canWrite = true }) {
   const [goals, setGoals] = React.useState([]);
   const [productCounts, setProductCounts] = React.useState({});
   const [dialog, setDialog] = React.useState(null); // null | {mode:"new"} | {mode:"edit", goal}
@@ -104,12 +104,13 @@ export default function GoalsIsland() {
     }
   };
 
-  const editButton = (goal) => (
-    <IconButton size="sm" label="Edit goal"
-      onClick={(e) => { e.preventDefault(); e.stopPropagation(); openEdit(goal); }}>
-      <Icon name="pencil" size={13} />
-    </IconButton>
-  );
+  const editButton = (goal) =>
+    canWrite ? (
+      <IconButton size="sm" label="Edit goal"
+        onClick={(e) => { e.preventDefault(); e.stopPropagation(); openEdit(goal); }}>
+        <Icon name="pencil" size={13} />
+      </IconButton>
+    ) : null;
 
   return (
     <>
@@ -117,9 +118,11 @@ export default function GoalsIsland() {
         title="Goals"
         meta={`${org ? 1 : 0} org · ${productGoals.length} product`}
         actions={
-          <Button size="sm" variant="accent" style={{ gap: 6 }} onClick={openNew}>
-            <Icon name="plus" size={13} />New goal
-          </Button>
+          canWrite && (
+            <Button size="sm" variant="accent" style={{ gap: 6 }} onClick={openNew}>
+              <Icon name="plus" size={13} />New goal
+            </Button>
+          )
         }
       />
       <div style={{ flex: 1, overflowY: "auto", padding: 24 }}>
@@ -135,10 +138,12 @@ export default function GoalsIsland() {
                 <div style={{ fontFamily: "var(--font-display)", fontSize: "var(--text-xl)", fontWeight: "var(--weight-semibold)", color: "var(--text-inverse)", letterSpacing: "var(--tracking-tight)" }}>{org.title}</div>
               </div>
               <StatusBadge status={org.status} />
-              <IconButton size="sm" label="Edit goal" style={{ color: "var(--aegean-4)" }}
-                onClick={() => openEdit(org)}>
-                <Icon name="pencil" size={13} />
-              </IconButton>
+              {canWrite && (
+                <IconButton size="sm" label="Edit goal" style={{ color: "var(--aegean-4)" }}
+                  onClick={() => openEdit(org)}>
+                  <Icon name="pencil" size={13} />
+                </IconButton>
+              )}
             </div>
           ) : (
             <div style={{ border: "1px dashed var(--border-default)", borderRadius: "var(--radius-lg)", padding: "20px 24px", color: "var(--text-disabled)", fontSize: "var(--text-sm)" }}>

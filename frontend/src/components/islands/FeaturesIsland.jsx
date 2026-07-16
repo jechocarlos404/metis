@@ -4,7 +4,7 @@ import { Badge, Button, Dialog, Icon, IconButton, Input, PriorityBadge, Select, 
 import { api } from "../../lib/api.js";
 import { FeatureGraphView } from "../graph/FeatureGraphView.jsx";
 
-export default function FeaturesIsland() {
+export default function FeaturesIsland({ canWrite = true }) {
   const [tab, setTab] = React.useState("graph");
   const [layout, setLayout] = React.useState({ nodes: [], edges: [] });
   const [selected, setSelected] = React.useState(null);
@@ -259,9 +259,11 @@ export default function FeaturesIsland() {
             <Input placeholder="Find features like…" style={{ width: 220 }} inputStyle={{ height: 30 }}
               value={query}
               onChange={(e) => { setQuery(e.target.value); if (e.target.value.trim()) setTab("directory"); }} />
-            <Button size="sm" variant="accent" style={{ gap: 6 }} onClick={openNew}>
-              <Icon name="plus" size={13} />New feature
-            </Button>
+            {canWrite && (
+              <Button size="sm" variant="accent" style={{ gap: 6 }} onClick={openNew}>
+                <Icon name="plus" size={13} />New feature
+              </Button>
+            )}
           </>
         }
       />
@@ -276,25 +278,29 @@ export default function FeaturesIsland() {
             <FeatureGraphView layout={layout} selectedId={selected} onSelect={setSelected} impactIds={impactIds} cutStates={cutStates} fadedIds={fadedIds} />
           </div>
           <aside style={{ width: 280, flex: "none", margin: "20px 20px 20px 0", background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", padding: 16, display: "flex", flexDirection: "column", gap: 12, overflowY: "auto" }}>
-            <MVPCutPanel
-              capabilities={capabilities}
-              nodeById={nodeById}
-              capabilityById={capabilityById}
-              selectedId={selected}
-              targets={cutTargets}
-              onAddTarget={addCutTarget}
-              onRemoveTarget={removeCutTarget}
-              onRun={runCut}
-              onClear={clearCut}
-              cut={cut}
-              cutting={cutting}
-            />
-            <div style={{ borderTop: "1px solid var(--border-hairline)" }} />
+            {canWrite && (
+              <MVPCutPanel
+                capabilities={capabilities}
+                nodeById={nodeById}
+                capabilityById={capabilityById}
+                selectedId={selected}
+                targets={cutTargets}
+                onAddTarget={addCutTarget}
+                onRemoveTarget={removeCutTarget}
+                onRun={runCut}
+                onClear={clearCut}
+                cut={cut}
+                cutting={cutting}
+              />
+            )}
+            {canWrite && <div style={{ borderTop: "1px solid var(--border-hairline)" }} />}
             {detail ? (
               <>
                 <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
                   <div style={{ flex: 1, fontSize: "var(--text-md)", fontWeight: "var(--weight-semibold)", color: "var(--text-heading)" }}>{detail.name}</div>
-                  <IconButton size="sm" label="Edit feature" onClick={openEdit}><Icon name="pencil" size={13} /></IconButton>
+                  {canWrite && (
+                    <IconButton size="sm" label="Edit feature" onClick={openEdit}><Icon name="pencil" size={13} /></IconButton>
+                  )}
                 </div>
                 {detail.description && <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", lineHeight: "var(--leading-snug)" }}>{detail.description}</div>}
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -325,28 +331,34 @@ export default function FeaturesIsland() {
                   {detail.outgoing.map((r, i) => (
                     <div key={`o${i}`} style={{ display: "flex", alignItems: "center", gap: 6 }}>
                       <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-body)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.kind} → {r.feature.name}</span>
-                      <IconButton size="sm" label="Remove edge" onClick={() => removeEdge(detail.id, r.feature.id, r.kind)}><Icon name="x" size={12} /></IconButton>
+                      {canWrite && (
+                        <IconButton size="sm" label="Remove edge" onClick={() => removeEdge(detail.id, r.feature.id, r.kind)}><Icon name="x" size={12} /></IconButton>
+                      )}
                     </div>
                   ))}
                   {detail.incoming.map((r, i) => (
                     <div key={`i${i}`} style={{ display: "flex", alignItems: "center", gap: 6 }}>
                       <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-body)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.feature.name} → {r.kind}</span>
-                      <IconButton size="sm" label="Remove edge" onClick={() => removeEdge(r.feature.id, detail.id, r.kind)}><Icon name="x" size={12} /></IconButton>
+                      {canWrite && (
+                        <IconButton size="sm" label="Remove edge" onClick={() => removeEdge(r.feature.id, detail.id, r.kind)}><Icon name="x" size={12} /></IconButton>
+                      )}
                     </div>
                   ))}
                   {detail.outgoing.length + detail.incoming.length === 0 && (
                     <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-disabled)" }}>no edges</div>
                   )}
-                  <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 4 }}>
-                    <Select value={edgeDraft.kind} onChange={(e) => setEdgeDraft({ ...edgeDraft, kind: e.target.value })}
-                      options={["DEPENDS_ON", "BLOCKS", "RELATES_TO"]} />
-                    <Select value={edgeDraft.targetId} onChange={(e) => setEdgeDraft({ ...edgeDraft, targetId: e.target.value })}
-                      options={[{ value: "", label: "Target feature…" },
-                        ...layout.nodes.filter((n) => n.id !== detail.id).map((n) => ({ value: n.id, label: n.name }))]} />
-                    <Button size="sm" variant="secondary" disabled={!edgeDraft.targetId} onClick={addEdge} style={{ gap: 6 }}>
-                      <Icon name="plus" size={13} />Add edge
-                    </Button>
-                  </div>
+                  {canWrite && (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 4 }}>
+                      <Select value={edgeDraft.kind} onChange={(e) => setEdgeDraft({ ...edgeDraft, kind: e.target.value })}
+                        options={["DEPENDS_ON", "BLOCKS", "RELATES_TO"]} />
+                      <Select value={edgeDraft.targetId} onChange={(e) => setEdgeDraft({ ...edgeDraft, targetId: e.target.value })}
+                        options={[{ value: "", label: "Target feature…" },
+                          ...layout.nodes.filter((n) => n.id !== detail.id).map((n) => ({ value: n.id, label: n.name }))]} />
+                      <Button size="sm" variant="secondary" disabled={!edgeDraft.targetId} onClick={addEdge} style={{ gap: 6 }}>
+                        <Icon name="plus" size={13} />Add edge
+                      </Button>
+                    </div>
+                  )}
                 </div>
                 {impact && (
                   <div style={{ borderTop: "1px solid var(--border-hairline)", paddingTop: 12, display: "flex", flexDirection: "column", gap: 6 }}>

@@ -8,7 +8,21 @@ class Settings(BaseSettings):
 
     database_url: str = "postgresql+asyncpg://metis:metis@localhost:5432/metis"
     seed_demo_data: bool = True
-    cors_origins: str = "*"
+    cors_origins: str = "http://localhost:4321"
+
+    # --- Auth (Keycloak / OIDC) ---
+    # auth_enabled=false is a dev/test escape hatch: every request is treated as an
+    # admin and no token is required. Keep it true anywhere real.
+    auth_enabled: bool = True
+    # Public issuer — must equal the token's `iss` (Keycloak's KC_HOSTNAME pins this
+    # to the browser-facing URL even for back-channel calls).
+    keycloak_issuer: str = "http://localhost:8080/realms/metis"
+    # Back-channel base the backend uses to reach Keycloak (JWKS + Admin API).
+    keycloak_internal_url: str = "http://localhost:8080"
+    keycloak_realm: str = "metis"
+    keycloak_audience: str = "metis-backend"
+    keycloak_admin_client_id: str = "metis-backend"
+    keycloak_admin_client_secret: str = "dev-backend-secret"
 
     # LLM providers — presence of a credential marks the provider available.
     anthropic_api_key: str = ""

@@ -1,8 +1,10 @@
 ---
 import AppLayout from "../layouts/AppLayout.astro";
 import FeaturesIsland from "../components/islands/FeaturesIsland.jsx";
+
+const canWrite = ["editor", "admin"].includes(Astro.locals.user?.role);
 ---
 
 <AppLayout title="Features">
-  <FeaturesIsland client:load />
+  <FeaturesIsland client:load canWrite={canWrite} />
 </AppLayout>

@@ -1,8 +1,10 @@
 ---
 import AppLayout from "../layouts/AppLayout.astro";
 import ProductsIsland from "../components/islands/ProductsIsland.jsx";
+
+const canWrite = ["editor", "admin"].includes(Astro.locals.user?.role);
 ---
 
 <AppLayout title="Products">
-  <ProductsIsland client:load />
+  <ProductsIsland client:load canWrite={canWrite} />
 </AppLayout>

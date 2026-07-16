@@ -1,8 +1,9 @@
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.auth import TokenVerifier, enforce_rbac, require_admin
 from app.config import get_settings
 from app.db import init_db, make_engine
 from app.llm.registry import ProviderRegistry
@@ -16,6 +17,7 @@ from app.routers import (
     health,
     products,
     strategies,
+    users,
     work,
 )
 from app.services.graph_service import FeatureGraph
@@ -34,6 +36,7 @@ async def lifespan(app: FastAPI):
     app.state.graph = FeatureGraph(sessionmaker)
     await app.state.graph.load()
     app.state.llm = ProviderRegistry(settings)
+    app.state.verifier = TokenVerifier(settings) if settings.auth_enabled else None
     yield
     await engine.dispose()
 
@@ -47,16 +50,22 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    # /health stays public — Docker's healthcheck hits it with no token.
     app.include_router(health.router)
-    app.include_router(goals.router)
-    app.include_router(capabilities.router)
-    app.include_router(products.router)
-    app.include_router(work.router)
-    app.include_router(features.router)
-    app.include_router(graph.router)
-    app.include_router(strategies.router)
-    app.include_router(admin_llm.router)
-    app.include_router(chat.router)
+    # Domain routers: viewer reads (GET), editor/admin writes (enforced per method).
+    rbac = [Depends(enforce_rbac)]
+    app.include_router(goals.router, dependencies=rbac)
+    app.include_router(capabilities.router, dependencies=rbac)
+    app.include_router(products.router, dependencies=rbac)
+    app.include_router(work.router, dependencies=rbac)
+    app.include_router(features.router, dependencies=rbac)
+    app.include_router(graph.router, dependencies=rbac)
+    app.include_router(strategies.router, dependencies=rbac)
+    app.include_router(chat.router, dependencies=rbac)
+    # Admin-only: user management and LLM provider config.
+    admin_only = [Depends(require_admin)]
+    app.include_router(users.router, dependencies=admin_only)
+    app.include_router(admin_llm.router, dependencies=admin_only)
     return app
 
 

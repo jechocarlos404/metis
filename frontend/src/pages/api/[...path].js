@@ -6,7 +6,7 @@ export const prerender = false;
 const backend = () =>
   (process.env.API_INTERNAL_URL || "http://localhost:8000").replace(/\/$/, "");
 
-export async function ALL({ params, request }) {
+export async function ALL({ params, request, locals }) {
   const url = new URL(request.url);
   const target = `${backend()}/api/${params.path}${url.search}`;
 
@@ -14,6 +14,10 @@ export async function ALL({ params, request }) {
   headers.delete("host");
   headers.delete("connection");
   headers.delete("content-length");
+  // BFF: never trust a client-supplied Authorization; inject the session's
+  // bearer (set by middleware). Absent for public routes like /api/health.
+  headers.delete("authorization");
+  if (locals.accessToken) headers.set("authorization", `Bearer ${locals.accessToken}`);
 
   const init = {
     method: request.method,

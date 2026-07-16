@@ -1,8 +1,10 @@
 ---
 import AppLayout from "../layouts/AppLayout.astro";
 import GoalsIsland from "../components/islands/GoalsIsland.jsx";
+
+const canWrite = ["editor", "admin"].includes(Astro.locals.user?.role);
 ---
 
 <AppLayout title="Goals">
-  <GoalsIsland client:load />
+  <GoalsIsland client:load canWrite={canWrite} />
 </AppLayout>

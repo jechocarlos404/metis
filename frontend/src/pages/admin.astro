@@ -1,6 +1,10 @@
 ---
 import AppLayout from "../layouts/AppLayout.astro";
 import AdminIsland from "../components/islands/AdminIsland.jsx";
+
+// Admin-only. The API enforces this too (require_admin on /api/admin); this
+// redirect just avoids rendering a page that would only 403.
+if (Astro.locals.user?.role !== "admin") return Astro.redirect("/");
 ---
 
 <AppLayout title="LLM Config">

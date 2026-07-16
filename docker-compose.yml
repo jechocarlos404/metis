@@ -15,6 +15,27 @@ services:
       timeout: 3s
       retries: 10
 
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.3
+    command: ["start-dev", "--import-realm", "--health-enabled=true"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      # Pin the public issuer so a token's `iss` is identical whether it was
+      # obtained via the browser (localhost) or a back-channel container call.
+      KC_HOSTNAME: http://localhost:8080
+      KC_HTTP_ENABLED: "true"
+    volumes:
+      - ./keycloak/metis-realm.json:/opt/keycloak/data/import/metis-realm.json:ro
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/localhost/9000 && printf 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && grep -q '200' <&3"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 40s
+
   backend:
     build: ./backend
     env_file:
@@ -23,12 +44,23 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://metis:metis@postgres:5432/metis
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      # Auth — browser-facing issuer is fixed to localhost (see keycloak.KC_HOSTNAME);
+      # the backend reaches Keycloak over the compose network for JWKS + Admin API.
+      KEYCLOAK_ISSUER: ${KEYCLOAK_ISSUER:-http://localhost:8080/realms/metis}
+      KEYCLOAK_INTERNAL_URL: http://keycloak:8080
+      KEYCLOAK_REALM: metis
+      KEYCLOAK_AUDIENCE: metis-backend
+      KEYCLOAK_ADMIN_CLIENT_ID: metis-backend
+      KEYCLOAK_ADMIN_CLIENT_SECRET: ${METIS_BACKEND_CLIENT_SECRET:-dev-backend-secret}
+      AUTH_ENABLED: ${AUTH_ENABLED:-true}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
       - "8000:8000"
     depends_on:
       postgres:
+        condition: service_healthy
+      keycloak:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
@@ -40,10 +72,21 @@ services:
     build: ./frontend
     environment:
       API_INTERNAL_URL: http://backend:8000
+      # Browser-facing issuer (localhost) for authorize/logout redirects; the
+      # internal URL is used for server-side (back-channel) token exchange.
+      KEYCLOAK_ISSUER: ${KEYCLOAK_ISSUER:-http://localhost:8080/realms/metis}
+      KEYCLOAK_INTERNAL_URL: http://keycloak:8080
+      KEYCLOAK_REALM: metis
+      METIS_WEB_CLIENT_ID: metis-web
+      METIS_WEB_CLIENT_SECRET: ${METIS_WEB_CLIENT_SECRET:-dev-web-secret}
+      SESSION_SECRET: ${SESSION_SECRET:-dev-session-secret-change-me-32bytes!}
+      PUBLIC_APP_URL: ${PUBLIC_APP_URL:-http://localhost:4321}
     ports:
       - "4321:4321"
     depends_on:
       backend:
+        condition: service_healthy
+      keycloak:
         condition: service_healthy
 
 volumes:

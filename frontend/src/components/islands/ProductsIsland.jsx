@@ -156,6 +156,9 @@ export default function ProductsIsland({ canWrite = true }) {
   const refreshPrdPrompt = () =>
     `Refresh the draft PRD for "${product.name}" (${product.display_id}, product id ${productId}). Keep approved pins where still valid; update epics/stories/tickets to match the current taxonomy.`;
 
+  const strategyPrompt = () =>
+    `Create a delivery strategy for "${product.name}" (${product.display_id}, product id ${productId}): phased Gantt plan aligned to the current PRD and feature graph.${strategy ? " Replace the existing strategy with a new version." : ""}`;
+
   return (
     <>
       <PageHeader
@@ -287,6 +290,12 @@ export default function ProductsIsland({ canWrite = true }) {
 
             {tab === "strategy" && (
               <div style={{ background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", padding: 20, display: "flex", flexDirection: "column", gap: 10 }}>
+                {canWrite && (
+                  <Button size="sm" variant="secondary" style={{ alignSelf: "flex-start", gap: 6 }}
+                    onClick={() => openChatWithPrompt(strategyPrompt())}>
+                    <Icon name="sparkles" size={13} />{strategy ? "Regenerate strategy" : "Create strategy"}
+                  </Button>
+                )}
                 {(strategy?.phases ?? []).map((p, i) => (
                   <div key={i} style={{ display: "flex", alignItems: "center", gap: 12 }}>
                     <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-disabled)", width: 16 }}>{i + 1}</span>

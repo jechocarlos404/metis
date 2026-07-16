@@ -50,20 +50,43 @@ The app runs with zero LLM keys — chat replies with a clear "provider not conf
 notice, and everything else works. Add any subset of provider credentials to `.env`
 and pick provider + model per agent in **LLM Config**.
 
+### Seed workflows
+
+Metis now supports both **in-app** and **skill-driven** seed round-trips
+(seed file format: `skills/metis-export/references/seed-format.md`):
+
+- In the **Products** page, admins/editors can:
+  - **Export seed**: download the selected Spec as a `metis-seed/v1` JSON file,
+    including its attributed goals, capabilities, features, edges, and optional PRD.
+  - **Import seed**: paste or upload a `metis-seed.json`, run a dry-run validation,
+    then import it with the same **idempotent, add-only** identity rules as the
+    seed loader.
+- Imports validate the seed shape before writing anything, show reuse/create counts,
+  and surface expected notes/warnings such as "product already has a PRD".
+
 ### Claude Code skills
 
 The repo ships a two-skill pipeline for seeding an instance from real codebases
-(seed file format: `skills/metis-export/references/seed-format.md`):
+(using the same seed format and add-only semantics as the in-app flow):
 
 - `.claude/skills/metis-seed-instance` loads a `metis-seed.json` into the running
   instance via the API — idempotent, add-only. Auto-available in this repo.
-  With auth enabled, set `AUTH_ENABLED=false` first (or pass a bearer token).
+  With auth enabled, either use a browser session through the UI, set
+  `AUTH_ENABLED=false`, or pass a bearer token.
 - `skills/metis-export` analyzes *any* repository and writes a `metis-seed.json`.
   To use it from other repos, symlink it into your global skills once per machine:
 
   ```sh
   ./scripts/install-skills.sh
   ```
+
+For scripted/manual verification after an import:
+
+```sh
+curl -s http://localhost:8000/api/capabilities/map
+curl -s http://localhost:8000/api/graph/ready
+curl -s http://localhost:8000/api/capabilities/health
+```
 
 ## Architecture
 

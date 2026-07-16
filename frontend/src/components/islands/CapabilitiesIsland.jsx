@@ -13,6 +13,19 @@ const MATURITY_TONES = {
 };
 const MATURITIES = ["planned", "alpha", "beta", "ga", "deprecated", "retired"];
 
+const FINDING_KINDS = [
+  { value: "", label: "All findings" },
+  { value: "aspirational_gap", label: "Aspirational gaps" },
+  { value: "unmotivated_capability", label: "Unmotivated" },
+  { value: "empty_intent", label: "Empty intent" },
+];
+
+const FINDING_TONES = {
+  aspirational_gap: "warn",
+  unmotivated_capability: "danger",
+  empty_intent: "neutral",
+};
+
 const CAPS_HEADER = {
   fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: "var(--tracking-caps)",
   textTransform: "uppercase", color: "var(--text-disabled)",
@@ -45,14 +58,26 @@ export default function CapabilitiesIsland({ canWrite = true }) {
   const [confirmingDelete, setConfirmingDelete] = React.useState(false);
   const [dialogError, setDialogError] = React.useState(null);
   const [error, setError] = React.useState(null);
+  const [healthFindings, setHealthFindings] = React.useState([]);
+  const [healthFilter, setHealthFilter] = React.useState("");
 
   const flat = React.useMemo(() => flatten(tree), [tree]);
   const detail = flat.find((c) => c.id === selected) ?? null;
 
+  const filteredFindings = React.useMemo(
+    () => healthFindings.filter((f) => !healthFilter || f.kind === healthFilter),
+    [healthFindings, healthFilter],
+  );
+
   const load = React.useCallback(async () => {
-    const [map, goalList] = await Promise.all([api("/capabilities/map"), api("/goals")]);
+    const [map, goalList, findings] = await Promise.all([
+      api("/capabilities/map"),
+      api("/goals"),
+      api("/capabilities/health"),
+    ]);
     setTree(map);
     setGoals(goalList);
+    setHealthFindings(findings);
     const ids = new Set(flatten(map).map((c) => c.id));
     setSelected((sel) => (sel && ids.has(sel) ? sel : (flatten(map)[0]?.id ?? null)));
   }, []);
@@ -172,7 +197,7 @@ export default function CapabilitiesIsland({ canWrite = true }) {
     <>
       <PageHeader
         title="Capabilities"
-        meta={`${flat.length} capabilities · containment map`}
+        meta={`${flat.length} capabilities · ${healthFindings.length} health finding${healthFindings.length === 1 ? "" : "s"}`}
         actions={
           canWrite && (
             <Button size="sm" variant="accent" style={{ gap: 6 }} onClick={openNew}>
@@ -183,7 +208,14 @@ export default function CapabilitiesIsland({ canWrite = true }) {
       />
       {error && <div style={{ padding: "8px 24px", fontSize: "var(--text-sm)", color: "var(--danger-fg)" }}>{error}</div>}
       <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
-        <div style={{ flex: 1, overflowY: "auto", margin: 20, minWidth: 0 }}>
+        <div style={{ flex: 1, overflowY: "auto", margin: 20, minWidth: 0, display: "flex", flexDirection: "column", gap: 12 }}>
+          <HealthFindingsPanel
+            findings={filteredFindings}
+            total={healthFindings.length}
+            filter={healthFilter}
+            onFilterChange={setHealthFilter}
+            onSelectCapability={setSelected}
+          />
           <div style={{ background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", overflow: "hidden" }}>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 90px 110px", padding: "8px 16px", borderBottom: "1px solid var(--border-hairline)", ...CAPS_HEADER }}>
               <span>Capability</span><span>Scope</span><span>Maturity</span>
@@ -296,5 +328,54 @@ export default function CapabilitiesIsland({ canWrite = true }) {
         </div>
       </Dialog>
     </>
+  );
+}
+
+function HealthFindingsPanel({ findings, total, filter, onFilterChange, onSelectCapability }) {
+  return (
+    <div style={{ background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", padding: 16, display: "flex", flexDirection: "column", gap: 10 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <div style={CAPS_HEADER}>Taxonomy health · {total}</div>
+        <div style={{ marginLeft: "auto", minWidth: 180 }}>
+          <Select value={filter} onChange={(e) => onFilterChange(e.target.value)} options={FINDING_KINDS} />
+        </div>
+      </div>
+      {total === 0 ? (
+        <div style={{ fontSize: "var(--text-sm)", color: "var(--text-disabled)" }}>no findings — taxonomy looks healthy</div>
+      ) : findings.length === 0 ? (
+        <div style={{ fontSize: "var(--text-sm)", color: "var(--text-disabled)" }}>no findings match this filter</div>
+      ) : (
+        findings.map((f) => {
+          const isCapability = f.kind !== "empty_intent";
+          const label = f.subject_display_id ? `${f.subject_display_id} ${f.subject_name}` : f.subject_name;
+          const row = (
+            <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <Badge tone={FINDING_TONES[f.kind] ?? "neutral"}>{f.kind.replace(/_/g, " ")}</Badge>
+                <span style={{ fontSize: "var(--text-sm)", fontWeight: "var(--weight-medium)", color: "var(--text-heading)" }}>{label}</span>
+              </div>
+              <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", lineHeight: "var(--leading-snug)" }}>{f.detail}</div>
+            </div>
+          );
+          if (isCapability) {
+            return (
+              <button
+                key={`${f.kind}-${f.subject_id}`}
+                type="button"
+                onClick={() => onSelectCapability(f.subject_id)}
+                style={{ textAlign: "left", padding: "8px 10px", margin: "0 -10px", border: "none", borderRadius: "var(--radius-sm)", cursor: "pointer", background: "transparent" }}
+              >
+                {row}
+              </button>
+            );
+          }
+          return (
+            <a key={`${f.kind}-${f.subject_id}`} href="/goals" style={{ textDecoration: "none", color: "inherit", padding: "8px 10px", margin: "0 -10px", display: "block", borderRadius: "var(--radius-sm)" }}>
+              {row}
+            </a>
+          );
+        })
+      )}
+    </div>
   );
 }

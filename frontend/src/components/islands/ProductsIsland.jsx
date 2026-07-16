@@ -21,6 +21,10 @@ export default function ProductsIsland({ canWrite = true }) {
   const [seedText, setSeedText] = React.useState("");
   const [seedResult, setSeedResult] = React.useState(null);
   const [seedAction, setSeedAction] = React.useState(null); // null | "validate" | "import"
+  const [unseedDialog, setUnseedDialog] = React.useState(false);
+  const [unseedText, setUnseedText] = React.useState("");
+  const [unseedResult, setUnseedResult] = React.useState(null);
+  const [unseedAction, setUnseedAction] = React.useState(null); // null | "preview" | "delete"
   const [confirmingDelete, setConfirmingDelete] = React.useState(false);
   const [confirmingTicketDelete, setConfirmingTicketDelete] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
@@ -229,6 +233,42 @@ export default function ProductsIsland({ canWrite = true }) {
     setSeedResult(null);
   };
 
+  const runUnseed = async (dryRun) => {
+    if (!unseedText.trim()) return;
+    setUnseedAction(dryRun ? "preview" : "delete");
+    try {
+      const result = await api("/seed/unseed", {
+        method: "POST",
+        body: { document: unseedText, dryRun },
+      });
+      setUnseedResult(result);
+      if (!dryRun) {
+        setToast({
+          tone: result.warnings?.length ? "danger" : "ok",
+          title: result.warnings?.length ? "Unseed completed with warnings" : "Seed removed",
+          detail: summarizeCounts(result.counts).join(" · "),
+        });
+        await loadProducts();
+        if (productId) await loadDetail(productId);
+      }
+    } catch (e) {
+      setToast({
+        tone: "danger",
+        title: dryRun ? "Preview failed" : "Delete failed",
+        detail: String(e.message),
+      });
+    } finally {
+      setUnseedAction(null);
+    }
+  };
+
+  const loadUnseedFile = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setUnseedText(await file.text());
+    setUnseedResult(null);
+  };
+
   const exportSeed = async () => {
     if (!productId) return;
     setSaving(true);
@@ -291,6 +331,19 @@ export default function ProductsIsland({ canWrite = true }) {
                 }}
               >
                 <Icon name="paperclip" size={13} />Import seed
+              </Button>
+            )}
+            {canWrite && (
+              <Button
+                size="sm"
+                variant="secondary"
+                style={{ gap: 6 }}
+                onClick={() => {
+                  setUnseedDialog(true);
+                  setUnseedResult(null);
+                }}
+              >
+                <Icon name="trash" size={13} />Remove seeded project
               </Button>
             )}
           </>
@@ -534,6 +587,106 @@ export default function ProductsIsland({ canWrite = true }) {
                 <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                   <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--danger-fg)" }}>Warnings</div>
                   {seedResult.warnings.map((warning, i) => (
+                    <div key={i} style={{ fontSize: "var(--text-xs)", color: "var(--danger-fg)" }}>{warning}</div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </Dialog>
+
+      <Dialog
+        open={unseedDialog}
+        title="Remove seeded project"
+        onClose={() => {
+          setUnseedDialog(false);
+          setUnseedAction(null);
+        }}
+        footer={
+          <>
+            <Button size="sm" variant="secondary" onClick={() => setUnseedResult(null)}>
+              Clear summary
+            </Button>
+            <Button size="sm" variant="secondary" onClick={() => setUnseedDialog(false)}>
+              Close
+            </Button>
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={unseedAction != null || !unseedText.trim()}
+              onClick={() => runUnseed(true)}
+            >
+              {unseedAction === "preview" ? "Previewing..." : "Preview delete"}
+            </Button>
+            <Button
+              size="sm"
+              variant="danger"
+              disabled={unseedAction != null || !unseedText.trim() || !unseedResult?.dryRun}
+              onClick={() => runUnseed(false)}
+            >
+              {unseedAction === "delete" ? "Deleting..." : "Delete now"}
+            </Button>
+          </>
+        }
+      >
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <div style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)", lineHeight: "var(--leading-body)" }}>
+            Paste or upload the same `metis-seed/v1` slice you want removed. Always preview first:
+            the app will keep shared capabilities/goals and report warnings instead of deleting them blindly.
+          </div>
+          <input type="file" accept=".json,application/json" onChange={loadUnseedFile} />
+          <textarea
+            rows={14}
+            value={unseedText}
+            onChange={(e) => {
+              setUnseedText(e.target.value);
+              setUnseedResult(null);
+            }}
+            placeholder='{"format":"metis-seed/v1", ...}'
+            style={{
+              width: "100%",
+              resize: "vertical",
+              border: "1px solid var(--border-default)",
+              borderRadius: "var(--radius-md)",
+              background: "var(--surface-card)",
+              color: "var(--text-body)",
+              fontFamily: "var(--font-mono)",
+              fontSize: "var(--text-xs)",
+              padding: 12,
+              lineHeight: 1.5,
+            }}
+          />
+          {unseedResult && (
+            <div
+              style={{
+                border: "1px solid var(--border-hairline)",
+                borderRadius: "var(--radius-md)",
+                background: "var(--surface-inset)",
+                padding: 12,
+                display: "flex",
+                flexDirection: "column",
+                gap: 8,
+              }}
+            >
+              <div style={{ fontSize: "var(--text-sm)", fontWeight: "var(--weight-semibold)", color: "var(--text-heading)" }}>
+                {unseedResult.dryRun ? "Preview" : "Deleted"}
+              </div>
+              <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", lineHeight: "var(--leading-snug)" }}>
+                {summarizeCounts(unseedResult.counts).join(" · ")}
+              </div>
+              {(unseedResult.notes || []).length > 0 && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-disabled)" }}>Notes</div>
+                  {unseedResult.notes.map((note, i) => (
+                    <div key={i} style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>{note}</div>
+                  ))}
+                </div>
+              )}
+              {(unseedResult.warnings || []).length > 0 && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--danger-fg)" }}>Warnings</div>
+                  {unseedResult.warnings.map((warning, i) => (
                     <div key={i} style={{ fontSize: "var(--text-xs)", color: "var(--danger-fg)" }}>{warning}</div>
                   ))}
                 </div>

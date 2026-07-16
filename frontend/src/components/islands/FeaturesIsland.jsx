@@ -1,6 +1,6 @@
 import React from "react";
 import { PageHeader } from "../shell/PageHeader.jsx";
-import { Badge, Button, Dialog, Icon, IconButton, Input, PriorityBadge, Select, StatusBadge, Tabs, Tag } from "../../ds";
+import { Button, Dialog, Icon, IconButton, Input, PriorityBadge, Select, StatusBadge, Tabs, Tag } from "../../ds";
 import { api } from "../../lib/api.js";
 import { FeatureGraphView } from "../graph/FeatureGraphView.jsx";
 
@@ -25,18 +25,21 @@ export default function FeaturesIsland({ canWrite = true }) {
   const [cutTargets, setCutTargets] = React.useState([]); // {kind: "feature"|"capability", id}
   const [cut, setCut] = React.useState(null);
   const [cutting, setCutting] = React.useState(false);
+  const [ready, setReady] = React.useState([]);
 
   const load = React.useCallback(async () => {
-    const [data, caps, edges, productList] = await Promise.all([
+    const [data, caps, edges, productList, readyData] = await Promise.all([
       api("/graph/layout"),
       api("/capabilities"),
       api("/features/edges"),
       api("/products"),
+      api("/graph/ready"),
     ]);
     setLayout(data);
     setCapabilities(caps);
     setEdgeList(edges);
     setProducts(productList);
+    setReady(readyData.ready ?? []);
     setSelected((sel) => sel && data.nodes.some((n) => n.id === sel) ? sel : data.nodes[0]?.id ?? null);
     setDraft((d) => (d.capabilityId ? d : { ...d, capabilityId: caps[0]?.id ?? "" }));
   }, []);
@@ -247,7 +250,7 @@ export default function FeaturesIsland({ canWrite = true }) {
     <>
       <PageHeader
         title="Features"
-        meta={`${layout.nodes.length} nodes · ${layout.edges.length} edges · in-memory graph`}
+        meta={`${layout.nodes.length} nodes · ${layout.edges.length} edges · ${ready.length} ready`}
         actions={
           <>
             {products.length > 0 && (
@@ -278,6 +281,8 @@ export default function FeaturesIsland({ canWrite = true }) {
             <FeatureGraphView layout={layout} selectedId={selected} onSelect={setSelected} impactIds={impactIds} cutStates={cutStates} fadedIds={fadedIds} />
           </div>
           <aside style={{ width: 280, flex: "none", margin: "20px 20px 20px 0", background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", padding: 16, display: "flex", flexDirection: "column", gap: 12, overflowY: "auto" }}>
+            <ReadyFrontierPanel ready={ready} selectedId={selected} onSelect={setSelected} />
+            <div style={{ borderTop: "1px solid var(--border-hairline)" }} />
             {canWrite && (
               <MVPCutPanel
                 capabilities={capabilities}
@@ -448,6 +453,39 @@ const CAPS_HEADER = {
 };
 const MONO_ROW = { fontFamily: "var(--font-mono)", fontSize: 11 };
 const ELLIPSIS = { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
+
+function ReadyFrontierPanel({ ready, selectedId, onSelect }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      <div style={CAPS_HEADER}>Ready now · {ready.length}</div>
+      {ready.length === 0 ? (
+        <div style={{ ...MONO_ROW, color: "var(--text-disabled)" }}>
+          Nothing ready — pending work is blocked or already done.
+        </div>
+      ) : (
+        ready.map((f) => {
+          const active = f.id === selectedId;
+          return (
+            <button
+              key={f.id}
+              type="button"
+              onClick={() => onSelect(f.id)}
+              style={{
+                display: "flex", alignItems: "center", gap: 6, textAlign: "left",
+                padding: "4px 6px", margin: "0 -6px", border: "none", borderRadius: "var(--radius-sm)",
+                cursor: "pointer", background: active ? "var(--accent-wash)" : "transparent",
+                color: active ? "var(--text-heading)" : "var(--text-body)", ...MONO_ROW,
+              }}
+            >
+              <span style={{ flex: 1, ...ELLIPSIS }}>{f.name}</span>
+              {f.priority != null && <PriorityBadge priority={f.priority} />}
+            </button>
+          );
+        })
+      )}
+    </div>
+  );
+}
 
 // Schedule-free MVP scoping: pick targets, run the prerequisite closure,
 // read back essential (build order) vs deferrable (priority order).

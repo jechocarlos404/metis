@@ -26,6 +26,7 @@ export default function FeaturesIsland({ canWrite = true }) {
   const [cut, setCut] = React.useState(null);
   const [cutting, setCutting] = React.useState(false);
   const [ready, setReady] = React.useState([]);
+  const [why, setWhy] = React.useState(null);
 
   const load = React.useCallback(async () => {
     const [data, caps, edges, productList, readyData] = await Promise.all([
@@ -56,12 +57,19 @@ export default function FeaturesIsland({ canWrite = true }) {
   const refreshDetail = React.useCallback(async (id) => {
     if (!id) {
       setDetail(null);
+      setWhy(null);
       return;
     }
     try {
-      setDetail(await api(`/features/${id}`));
+      const [feature, whyChain] = await Promise.all([
+        api(`/features/${id}`),
+        api(`/features/${id}/why`),
+      ]);
+      setDetail(feature);
+      setWhy(whyChain);
     } catch {
       setDetail(null);
+      setWhy(null);
     }
   }, []);
 
@@ -331,6 +339,7 @@ export default function FeaturesIsland({ canWrite = true }) {
                   )
                 )}
                 {detail.priority != null && <PriorityBadge priority={detail.priority} rationale={detail.priority_rationale} />}
+                <WhyChainPanel chain={why?.chain} />
                 <div style={{ borderTop: "1px solid var(--border-hairline)", paddingTop: 12, display: "flex", flexDirection: "column", gap: 6 }}>
                   <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: "var(--tracking-caps)", textTransform: "uppercase", color: "var(--text-disabled)" }}>Relationships</div>
                   {detail.outgoing.map((r, i) => (
@@ -482,6 +491,45 @@ function ReadyFrontierPanel({ ready, selectedId, onSelect }) {
             </button>
           );
         })
+      )}
+    </div>
+  );
+}
+
+function WhyChainPanel({ chain }) {
+  if (!chain) return null;
+  const goals = chain.filter((s) => s.kind === "goal");
+  const caps = chain.filter((s) => s.kind === "capability");
+  return (
+    <div style={{ borderTop: "1px solid var(--border-hairline)", paddingTop: 12, display: "flex", flexDirection: "column", gap: 6 }}>
+      <div style={CAPS_HEADER}>Why</div>
+      {chain.map((step, i) => {
+        const label = step.display_id ? `${step.display_id} ${step.name}` : step.name;
+        const prefix = step.relation ? `${step.relation} → ` : "";
+        const href =
+          step.kind === "capability" ? "/capabilities"
+            : step.kind === "goal" ? "/goals"
+              : null;
+        const row = (
+          <span style={{ ...MONO_ROW, color: step.kind === "feature" ? "var(--text-heading)" : "var(--text-body)", ...ELLIPSIS, display: "block" }}>
+            {prefix}{label}
+          </span>
+        );
+        return (
+          <div key={`${step.kind}-${step.id}-${i}`}>
+            {href ? (
+              <a href={href} style={{ textDecoration: "none", color: "inherit" }} title={`Open ${step.kind}s`}>
+                {row}
+              </a>
+            ) : row}
+          </div>
+        );
+      })}
+      {caps.length === 0 && (
+        <div style={{ ...MONO_ROW, color: "var(--text-disabled)" }}>no capability linked</div>
+      )}
+      {caps.length > 0 && goals.length === 0 && (
+        <div style={{ ...MONO_ROW, color: "var(--text-disabled)" }}>no motivating goals</div>
       )}
     </div>
   );

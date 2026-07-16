@@ -60,6 +60,7 @@ export default function CapabilitiesIsland({ canWrite = true }) {
   const [error, setError] = React.useState(null);
   const [healthFindings, setHealthFindings] = React.useState([]);
   const [healthFilter, setHealthFilter] = React.useState("");
+  const [impact, setImpact] = React.useState(null);
 
   const flat = React.useMemo(() => flatten(tree), [tree]);
   const detail = flat.find((c) => c.id === selected) ?? null;
@@ -95,8 +96,14 @@ export default function CapabilitiesIsland({ canWrite = true }) {
   }, []);
 
   React.useEffect(() => {
+    setImpact(null);
     loadMotivations(selected).catch(() => setMotivations([]));
   }, [selected, loadMotivations]);
+
+  const runImpact = async () => {
+    if (!selected) return;
+    setImpact(await api(`/capabilities/${selected}/impact`));
+  };
 
   const openNew = () => {
     setDraft({ ...EMPTY_DRAFT, parentId: detail?.id ?? "" });
@@ -288,6 +295,39 @@ export default function CapabilitiesIsland({ canWrite = true }) {
                       ...addableGoals.map((g) => ({ value: g.id, label: `${g.display_id} ${g.title}` }))]} />
                 )}
               </div>
+              {impact && (
+                <div style={{ borderTop: "1px solid var(--border-hairline)", paddingTop: 12, display: "flex", flexDirection: "column", gap: 6 }}>
+                  <div style={CAPS_HEADER}>Coupling impact</div>
+                  <div style={{ fontSize: "var(--text-xs)", color: "var(--text-body)" }}>
+                    {impact.dependents.length} dependent{impact.dependents.length === 1 ? "" : "s"} break if this changes; needs {impact.dependencies.length}.
+                  </div>
+                  {impact.dependents.length > 0 && (
+                    <>
+                      <div style={{ ...CAPS_HEADER, marginTop: 4 }}>Dependents</div>
+                      {impact.dependents.map((c) => (
+                        <button key={c.id} type="button" onClick={() => setSelected(c.id)}
+                          style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--danger-fg)", textAlign: "left", border: "none", background: "transparent", cursor: "pointer", padding: 0 }}>
+                          {c.name}
+                        </button>
+                      ))}
+                    </>
+                  )}
+                  {impact.dependencies.length > 0 && (
+                    <>
+                      <div style={{ ...CAPS_HEADER, marginTop: 4 }}>Dependencies</div>
+                      {impact.dependencies.map((c) => (
+                        <button key={c.id} type="button" onClick={() => setSelected(c.id)}
+                          style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-secondary)", textAlign: "left", border: "none", background: "transparent", cursor: "pointer", padding: 0 }}>
+                          {c.name}
+                        </button>
+                      ))}
+                    </>
+                  )}
+                </div>
+              )}
+              <Button size="sm" variant="secondary" style={{ marginTop: "auto", gap: 6 }} onClick={runImpact}>
+                <Icon name="git-branch" size={13} />Impact query
+              </Button>
             </>
           ) : (
             <div style={{ fontSize: "var(--text-sm)", color: "var(--text-disabled)" }}>Select a capability.</div>

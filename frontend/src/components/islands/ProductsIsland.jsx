@@ -17,6 +17,10 @@ export default function ProductsIsland({ canWrite = true }) {
   const [toast, setToast] = React.useState(null);
   const [ticketDialog, setTicketDialog] = React.useState(null); // null | {mode:'new'} | {mode:'edit', ticket}
   const [productDialog, setProductDialog] = React.useState(null); // null | {mode:'new'} | {mode:'edit'}
+  const [seedDialog, setSeedDialog] = React.useState(false);
+  const [seedText, setSeedText] = React.useState("");
+  const [seedResult, setSeedResult] = React.useState(null);
+  const [seedAction, setSeedAction] = React.useState(null); // null | "validate" | "import"
   const [confirmingDelete, setConfirmingDelete] = React.useState(false);
   const [confirmingTicketDelete, setConfirmingTicketDelete] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
@@ -178,6 +182,53 @@ export default function ProductsIsland({ canWrite = true }) {
   const strategyPrompt = () =>
     `Create a delivery strategy for "${product.name}" (${product.display_id}, product id ${productId}): phased Gantt plan aligned to the current PRD and feature graph.${strategy ? " Replace the existing strategy with a new version." : ""}`;
 
+  const summarizeCounts = (counts) =>
+    [
+      formatCounts("goals", counts?.goals),
+      formatCounts("capabilities", counts?.capabilities),
+      formatCounts("motivations", counts?.motivations),
+      formatCounts("features", counts?.features),
+      formatCounts("edges", counts?.edges),
+      formatCounts("products", counts?.products),
+      formatCounts("decompositions", counts?.decompositions),
+    ].filter(Boolean);
+
+  const runSeedImport = async (dryRun) => {
+    if (!seedText.trim()) return;
+    setSeedAction(dryRun ? "validate" : "import");
+    try {
+      const result = await api("/seed/import", {
+        method: "POST",
+        body: { document: seedText, dryRun },
+      });
+      setSeedResult(result);
+      if (!dryRun) {
+        setToast({
+          tone: "ok",
+          title: "Seed imported",
+          detail: summarizeCounts(result.counts).join(" · "),
+        });
+        await loadProducts();
+        if (productId) await loadDetail(productId);
+      }
+    } catch (e) {
+      setToast({
+        tone: "danger",
+        title: dryRun ? "Validation failed" : "Import failed",
+        detail: String(e.message),
+      });
+    } finally {
+      setSeedAction(null);
+    }
+  };
+
+  const loadSeedFile = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setSeedText(await file.text());
+    setSeedResult(null);
+  };
+
   return (
     <>
       <PageHeader
@@ -192,6 +243,19 @@ export default function ProductsIsland({ canWrite = true }) {
             {canWrite && (
               <Button size="sm" variant="accent" style={{ gap: 6 }} onClick={openNewProduct}>
                 <Icon name="plus" size={13} />New spec
+              </Button>
+            )}
+            {canWrite && (
+              <Button
+                size="sm"
+                variant="secondary"
+                style={{ gap: 6 }}
+                onClick={() => {
+                  setSeedDialog(true);
+                  setSeedResult(null);
+                }}
+              >
+                <Icon name="paperclip" size={13} />Import seed
               </Button>
             )}
           </>
@@ -345,6 +409,106 @@ export default function ProductsIsland({ canWrite = true }) {
       </div>
 
       <Dialog
+        open={seedDialog}
+        title="Import metis-seed.json"
+        onClose={() => {
+          setSeedDialog(false);
+          setSeedAction(null);
+        }}
+        footer={
+          <>
+            <Button size="sm" variant="secondary" onClick={() => setSeedResult(null)}>
+              Clear summary
+            </Button>
+            <Button size="sm" variant="secondary" onClick={() => setSeedDialog(false)}>
+              Close
+            </Button>
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={seedAction != null || !seedText.trim()}
+              onClick={() => runSeedImport(true)}
+            >
+              {seedAction === "validate" ? "Validating..." : "Validate"}
+            </Button>
+            <Button
+              size="sm"
+              variant="accent"
+              disabled={seedAction != null || !seedText.trim()}
+              onClick={() => runSeedImport(false)}
+            >
+              {seedAction === "import" ? "Importing..." : "Import"}
+            </Button>
+          </>
+        }
+      >
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <div style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)", lineHeight: "var(--leading-body)" }}>
+            Paste a `metis-seed/v1` document or load a local `.json` file. Validate runs the
+            same seed-format checks as the loader; import uses the same add-only identity rules.
+          </div>
+          <input type="file" accept=".json,application/json" onChange={loadSeedFile} />
+          <textarea
+            rows={14}
+            value={seedText}
+            onChange={(e) => {
+              setSeedText(e.target.value);
+              setSeedResult(null);
+            }}
+            placeholder='{"format":"metis-seed/v1", ...}'
+            style={{
+              width: "100%",
+              resize: "vertical",
+              border: "1px solid var(--border-default)",
+              borderRadius: "var(--radius-md)",
+              background: "var(--surface-card)",
+              color: "var(--text-body)",
+              fontFamily: "var(--font-mono)",
+              fontSize: "var(--text-xs)",
+              padding: 12,
+              lineHeight: 1.5,
+            }}
+          />
+          {seedResult && (
+            <div
+              style={{
+                border: "1px solid var(--border-hairline)",
+                borderRadius: "var(--radius-md)",
+                background: "var(--surface-inset)",
+                padding: 12,
+                display: "flex",
+                flexDirection: "column",
+                gap: 8,
+              }}
+            >
+              <div style={{ fontSize: "var(--text-sm)", fontWeight: "var(--weight-semibold)", color: "var(--text-heading)" }}>
+                {seedResult.dryRun ? "Dry run" : "Imported"}
+              </div>
+              <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", lineHeight: "var(--leading-snug)" }}>
+                {summarizeCounts(seedResult.counts).join(" · ")}
+              </div>
+              {(seedResult.notes || []).length > 0 && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-disabled)" }}>Notes</div>
+                  {seedResult.notes.map((note, i) => (
+                    <div key={i} style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>{note}</div>
+                  ))}
+                </div>
+              )}
+              {(seedResult.warnings || []).length > 0 && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--danger-fg)" }}>Warnings</div>
+                  {seedResult.warnings.map((warning, i) => (
+                    <div key={i} style={{ fontSize: "var(--text-xs)", color: "var(--danger-fg)" }}>{warning}</div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </Dialog>
+
+      <Dialog
         open={ticketDialog != null}
         title={ticketDialog?.mode === "new" ? "New ticket" : `Edit ${ticketDialog?.ticket?.display_id ?? ""}`}
         onClose={() => { setTicketDialog(null); setConfirmingTicketDelete(false); }}
@@ -417,4 +581,13 @@ export default function ProductsIsland({ canWrite = true }) {
       )}
     </>
   );
+}
+
+function formatCounts(collection, counts) {
+  if (!counts) return null;
+  const detail = Object.entries(counts)
+    .filter(([, value]) => value > 0)
+    .map(([action, value]) => `${value} ${action}`)
+    .join(", ");
+  return detail ? `${collection}: ${detail}` : null;
 }

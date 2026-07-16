@@ -195,6 +195,13 @@ function validateSeed(doc) {
     if (product.goal_ref != null && !goalRefs.has(product.goal_ref)) {
       errors.push(`${where}: unknown goal_ref ${JSON.stringify(product.goal_ref)}`);
     }
+    if (
+      product.bundle_refs != null &&
+      (!Array.isArray(product.bundle_refs) ||
+        product.bundle_refs.some((ref) => typeof ref !== "string" || !capRefs.has(ref)))
+    ) {
+      errors.push(`${where}: bundle_refs must be capability refs`);
+    }
     const decomp = product.decomposition;
     if (!decomp) continue;
     for (const [j, epic] of (decomp.epics || []).entries()) {
@@ -512,6 +519,23 @@ class Loader {
         }, product.name);
       }
       const decomposition = product.decomposition;
+      for (const capabilityRef of product.bundle_refs || []) {
+        const capabilityId = this.capIds.get(capabilityRef);
+        const existing = await this.api.get(`/api/products/${productId}/bundles`);
+        if (existing.some((cap) => cap.id === capabilityId)) {
+          this.note("bundles", "reused");
+        } else if (this.dryRun) {
+          this.note("bundles", "would create");
+        } else {
+          const { status, body } = await this.api.post(`/api/products/${productId}/bundles`, {
+            capability_id: capabilityId,
+          });
+          if (status !== 201) {
+            throw new Error(`bundle ${capabilityRef} for ${product.name} returned ${status}: ${JSON.stringify(body)}`);
+          }
+          this.note("bundles", "created");
+        }
+      }
       if (!decomposition) continue;
       if (String(productId).startsWith("dry-run:")) {
         this.note("decompositions", "would create");
@@ -555,6 +579,7 @@ class Loader {
         features: this.count("features"),
         edges: this.count("edges"),
         products: this.count("products"),
+        bundles: this.count("bundles"),
         decompositions: this.count("decompositions"),
       },
       notes: this.notes,

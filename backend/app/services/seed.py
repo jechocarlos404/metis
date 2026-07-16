@@ -25,6 +25,7 @@ from app.models import (
     GoalType,
     Motivation,
     Product,
+    ProductBundle,
     ProductDecomposition,
     Story,
     Ticket,
@@ -146,6 +147,7 @@ async def seed_demo_data(sessionmaker: async_sessionmaker[AsyncSession]) -> bool
             [
                 Motivation(goal_id=product_goals[0].id, capability_id=cap_export.id),
                 Motivation(goal_id=product_goals[1].id, capability_id=cap_graph.id),
+                ProductBundle(product_id=product.id, capability_id=cap_export.id),
             ]
         )
 

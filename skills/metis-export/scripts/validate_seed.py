@@ -194,6 +194,12 @@ def validate(doc):
             errors.append(f"{where}: 'name' is required")
         if p.get("goal_ref") is not None and p["goal_ref"] not in goal_refs:
             errors.append(f"{where}: unknown goal_ref {p['goal_ref']!r}")
+        bundle_refs = p.get("bundle_refs")
+        if bundle_refs is not None and (
+            not isinstance(bundle_refs, list)
+            or any(not isinstance(ref, str) or ref not in cap_refs for ref in bundle_refs)
+        ):
+            errors.append(f"{where}: bundle_refs must be capability refs")
         decomp = p.get("decomposition")
         if decomp is None:
             continue

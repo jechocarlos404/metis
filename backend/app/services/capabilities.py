@@ -14,7 +14,16 @@ from fastapi import HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Capability, Feature, Goal, GoalType, Motivation, Product, WorkStatus
+from app.models import (
+    Capability,
+    Feature,
+    Goal,
+    GoalType,
+    Motivation,
+    Product,
+    ProductBundle,
+    WorkStatus,
+)
 from app.schemas.capability import (
     CapabilityCreate,
     CapabilityNode,
@@ -319,19 +328,63 @@ async def motivating_goals(session: AsyncSession, capability_id: uuid.UUID) -> l
     return list((await session.scalars(stmt)).all())
 
 
+async def bundled_capabilities(
+    session: AsyncSession, product_id: uuid.UUID
+) -> list[Capability]:
+    stmt = (
+        select(Capability)
+        .join(ProductBundle, ProductBundle.capability_id == Capability.id)
+        .where(ProductBundle.product_id == product_id)
+        .order_by(Capability.seq)
+    )
+    return list((await session.scalars(stmt)).all())
+
+
+async def bundle_product(
+    session: AsyncSession, product_id: uuid.UUID, capability_id: uuid.UUID
+) -> ProductBundle:
+    if await session.get(Product, product_id) is None:
+        raise HTTPException(404, "Product not found")
+    if await session.get(Capability, capability_id) is None:
+        raise HTTPException(404, "Capability not found")
+    existing = await session.scalar(
+        select(ProductBundle).where(
+            ProductBundle.product_id == product_id,
+            ProductBundle.capability_id == capability_id,
+        )
+    )
+    if existing is not None:
+        return existing
+    bundle = ProductBundle(product_id=product_id, capability_id=capability_id)
+    session.add(bundle)
+    await session.commit()
+    await session.refresh(bundle)
+    return bundle
+
+
+async def unbundle_product(
+    session: AsyncSession, product_id: uuid.UUID, capability_id: uuid.UUID
+) -> None:
+    bundle = await session.scalar(
+        select(ProductBundle).where(
+            ProductBundle.product_id == product_id,
+            ProductBundle.capability_id == capability_id,
+        )
+    )
+    if bundle is None:
+        raise HTTPException(404, "Bundle not found")
+    await session.delete(bundle)
+    await session.commit()
+
+
 async def product_attribution(session: AsyncSession) -> dict[str, list[str]]:
-    """Derived capability -> products map, mirroring why(): a capability is
-    attributed to every Spec whose goal motivates it or any containment
-    ancestor. Keys and values are strings, ready to stamp onto layout JSON;
-    capabilities with no path to a product map to an empty list."""
+    """Derived capability -> products map from explicit product bundles.
+    A bundled capability attributes its product to itself and every child in its
+    PART_OF subtree. Keys and values are strings, ready for layout JSON."""
     parent_of = {c.id: c.parent_id for c in await list_capabilities(session)}
-    cap_goals: dict[uuid.UUID, set[uuid.UUID]] = defaultdict(set)
-    for m in (await session.scalars(select(Motivation))).all():
-        cap_goals[m.capability_id].add(m.goal_id)
-    goal_products: dict[uuid.UUID, set[uuid.UUID]] = defaultdict(set)
-    products = await session.scalars(select(Product).where(Product.goal_id.is_not(None)))
-    for p in products.all():
-        goal_products[p.goal_id].add(p.id)
+    cap_products: dict[uuid.UUID, set[uuid.UUID]] = defaultdict(set)
+    for bundle in (await session.scalars(select(ProductBundle))).all():
+        cap_products[bundle.capability_id].add(bundle.product_id)
 
     attribution: dict[str, list[str]] = {}
     for cap_id in parent_of:
@@ -339,8 +392,7 @@ async def product_attribution(session: AsyncSession) -> dict[str, list[str]]:
         cursor, seen = cap_id, set()
         while cursor is not None and cursor not in seen:
             seen.add(cursor)
-            for goal_id in cap_goals.get(cursor, ()):
-                found.update(goal_products.get(goal_id, ()))
+            found.update(cap_products.get(cursor, ()))
             cursor = parent_of.get(cursor)
         attribution[str(cap_id)] = sorted(str(pid) for pid in found)
     return attribution

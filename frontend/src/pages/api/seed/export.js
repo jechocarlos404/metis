@@ -87,13 +87,14 @@ export async function GET({ request, locals }) {
   }
 
   try {
-    const [product, productsGoals, capabilityTree, features, edges, decompositions] = await Promise.all([
+    const [product, productsGoals, capabilityTree, features, edges, decompositions, bundles] = await Promise.all([
       api(`/api/products/${productId}`),
       api("/api/goals"),
       api("/api/capabilities/map"),
       api("/api/features"),
       api("/api/features/edges"),
       api(`/api/products/${productId}/decompositions`),
+      api(`/api/products/${productId}/bundles`),
     ]);
 
     const goals = productsGoals;
@@ -189,6 +190,7 @@ export async function GET({ request, locals }) {
           name: product.name,
           summary: product.summary,
           body: product.body,
+          bundle_refs: bundles.map((capability) => capRef.get(capability.id)).filter(Boolean),
           decomposition: latestDecomposition
             ? {
                 summary: latestDecomposition.summary,

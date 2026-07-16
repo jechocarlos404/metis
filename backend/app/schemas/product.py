@@ -4,7 +4,7 @@ from typing import Any
 from pydantic import BaseModel, computed_field
 
 from app.models.enums import DocStatus
-from app.schemas.common import Stamped, display
+from app.schemas.common import ORMModel, Stamped, display
 from app.schemas.prd import PRDDocument
 
 
@@ -34,6 +34,15 @@ class ProductRead(Stamped):
     @property
     def display_id(self) -> str:
         return display("SPEC", self.seq, 3)
+
+
+class ProductBundleCreate(BaseModel):
+    capability_id: uuid.UUID
+
+
+class ProductBundleRead(ORMModel):
+    product_id: uuid.UUID
+    capability_id: uuid.UUID
 
 
 class DecompositionCreate(BaseModel):

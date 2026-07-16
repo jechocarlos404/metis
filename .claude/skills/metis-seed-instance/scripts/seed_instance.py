@@ -202,6 +202,12 @@ def validate(doc):
             errors.append(f"{where}: 'name' is required")
         if p.get("goal_ref") is not None and p["goal_ref"] not in goal_refs:
             errors.append(f"{where}: unknown goal_ref {p['goal_ref']!r}")
+        bundle_refs = p.get("bundle_refs")
+        if bundle_refs is not None and (
+            not isinstance(bundle_refs, list)
+            or any(not isinstance(ref, str) or ref not in cap_refs for ref in bundle_refs)
+        ):
+            errors.append(f"{where}: bundle_refs must be capability refs")
         decomp = p.get("decomposition")
         if decomp is None:
             continue
@@ -459,6 +465,25 @@ class Loader:
                     },
                     p["name"],
                 )
+            existing_bundles = []
+            if not str(pid).startswith(DRY_PREFIX):
+                existing_bundles = self.api.get(f"/api/products/{pid}/bundles")
+            for cap_ref in p.get("bundle_refs") or []:
+                cap_id = self.cap_ids[cap_ref]
+                if any(c["id"] == cap_id for c in existing_bundles):
+                    self.note("bundles", "reused")
+                elif self.dry_run:
+                    self.note("bundles", "would create")
+                else:
+                    status, body = self.api.post(
+                        f"/api/products/{pid}/bundles", {"capability_id": cap_id}
+                    )
+                    if status != 201:
+                        sys.exit(
+                            f"error: bundle {cap_ref!r} for {p['name']!r} "
+                            f"returned {status}: {body}"
+                        )
+                    self.note("bundles", "created")
             decomp = p.get("decomposition")
             if decomp is None:
                 continue
@@ -533,6 +558,7 @@ class Loader:
             "features",
             "edges",
             "products",
+            "bundles",
             "decompositions",
         ]
         for collection in order:

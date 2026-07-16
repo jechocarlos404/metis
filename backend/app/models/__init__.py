@@ -11,7 +11,7 @@ from app.models.enums import (
 from app.models.feature import Feature, FeatureEdge
 from app.models.goal import Goal
 from app.models.llm import AgentLLMConfig
-from app.models.product import Product, ProductDecomposition
+from app.models.product import Product, ProductBundle, ProductDecomposition
 from app.models.strategy import DeliveryStrategy
 from app.models.work import Epic, Story, Ticket
 
@@ -32,6 +32,7 @@ __all__ = [
     "GoalType",
     "Motivation",
     "Product",
+    "ProductBundle",
     "ProductDecomposition",
     "Story",
     "Ticket",

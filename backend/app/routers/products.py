@@ -6,13 +6,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
 from app.models import Goal, Product
+from app.schemas.capability import CapabilityRead
 from app.schemas.product import (
     DecompositionCreate,
     DecompositionRead,
+    ProductBundleCreate,
+    ProductBundleRead,
     ProductCreate,
     ProductRead,
     ProductUpdate,
 )
+from app.services import capabilities as capability_service
 from app.services import decomposition as decomposition_service
 
 router = APIRouter(prefix="/api", tags=["products"])
@@ -64,6 +68,36 @@ async def delete_product(product_id: uuid.UUID, session: AsyncSession = Depends(
 @router.post("/products/{product_id}/approve", response_model=ProductRead)
 async def approve_product(product_id: uuid.UUID, session: AsyncSession = Depends(get_db)):
     return await decomposition_service.approve_product(session, product_id)
+
+
+@router.get("/products/{product_id}/bundles", response_model=list[CapabilityRead])
+async def list_bundles(product_id: uuid.UUID, session: AsyncSession = Depends(get_db)):
+    return await capability_service.bundled_capabilities(session, product_id)
+
+
+@router.post(
+    "/products/{product_id}/bundles",
+    response_model=ProductBundleRead,
+    status_code=201,
+)
+async def create_bundle(
+    product_id: uuid.UUID,
+    data: ProductBundleCreate,
+    session: AsyncSession = Depends(get_db),
+):
+    return await capability_service.bundle_product(session, product_id, data.capability_id)
+
+
+@router.delete(
+    "/products/{product_id}/bundles/{capability_id}",
+    status_code=204,
+)
+async def delete_bundle(
+    product_id: uuid.UUID,
+    capability_id: uuid.UUID,
+    session: AsyncSession = Depends(get_db),
+):
+    await capability_service.unbundle_product(session, product_id, capability_id)
 
 
 @router.get("/products/{product_id}/decompositions", response_model=list[DecompositionRead])

@@ -13,6 +13,7 @@ export default function ProductsIsland({ canWrite = true }) {
   const [decompositions, setDecompositions] = React.useState([]);
   const [strategies, setStrategies] = React.useState([]);
   const [capabilities, setCapabilities] = React.useState([]);
+  const [bundles, setBundles] = React.useState([]);
   const [tab, setTab] = React.useState("prd");
   const [toast, setToast] = React.useState(null);
   const [ticketDialog, setTicketDialog] = React.useState(null); // null | {mode:'new'} | {mode:'edit', ticket}
@@ -42,18 +43,20 @@ export default function ProductsIsland({ canWrite = true }) {
 
   const loadDetail = React.useCallback(async (id) => {
     if (!id) return;
-    const [epicList, ticketList, prdList, strategyList, capabilityList] = await Promise.all([
+    const [epicList, ticketList, prdList, strategyList, capabilityList, bundleList] = await Promise.all([
       api(`/products/${id}/epics`),
       api(`/products/${id}/tickets`),
       api(`/products/${id}/decompositions`),
       api(`/products/${id}/strategies`),
       api("/capabilities"),
+      api(`/products/${id}/bundles`),
     ]);
     setEpics(epicList);
     setTickets(ticketList);
     setDecompositions(prdList);
     setStrategies(strategyList);
     setCapabilities(capabilityList);
+    setBundles(bundleList);
   }, []);
 
   React.useEffect(() => {
@@ -127,6 +130,36 @@ export default function ProductsIsland({ canWrite = true }) {
     }
   };
 
+  const bundleIds = new Set(bundles.map((capability) => capability.id));
+  const addableBundles = capabilities.filter((capability) => !bundleIds.has(capability.id));
+
+  const addBundle = async (capabilityId) => {
+    setSaving(true);
+    try {
+      await api(`/products/${productId}/bundles`, {
+        method: "POST",
+        body: { capability_id: capabilityId },
+      });
+      await loadDetail(productId);
+    } catch (e) {
+      showError("Bundle save failed")(e);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const removeBundle = async (capabilityId) => {
+    setSaving(true);
+    try {
+      await api(`/products/${productId}/bundles/${capabilityId}`, { method: "DELETE" });
+      await loadDetail(productId);
+    } catch (e) {
+      showError("Bundle remove failed")(e);
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const saveTicket = async () => {
     const d = ticketDialog;
     if (!d?.title?.trim()) return;
@@ -194,6 +227,7 @@ export default function ProductsIsland({ canWrite = true }) {
       formatCounts("features", counts?.features),
       formatCounts("edges", counts?.edges),
       formatCounts("products", counts?.products),
+      formatCounts("bundles", counts?.bundles),
       formatCounts("decompositions", counts?.decompositions),
     ].filter(Boolean);
 
@@ -374,6 +408,42 @@ export default function ProductsIsland({ canWrite = true }) {
               <span style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)", lineHeight: "var(--leading-body)" }}>
                 {product.summary}
               </span>
+              <div style={{ marginTop: 14, display: "flex", flexDirection: "column", gap: 8 }}>
+                <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-disabled)", letterSpacing: "var(--tracking-caps)", textTransform: "uppercase" }}>
+                  Bundled capabilities
+                </div>
+                {bundles.length > 0 ? (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                    {bundles.map((capability) => (
+                      <Tag
+                        key={capability.id}
+                        onRemove={canWrite ? () => removeBundle(capability.id) : undefined}
+                      >
+                        {capability.name}
+                      </Tag>
+                    ))}
+                  </div>
+                ) : (
+                  <div style={{ fontSize: "var(--text-xs)", color: "var(--text-disabled)" }}>
+                    No explicit bundles yet. Add capabilities this product offers.
+                  </div>
+                )}
+                {canWrite && addableBundles.length > 0 && (
+                  <div style={{ maxWidth: 320 }}>
+                    <Select
+                      value=""
+                      onChange={(e) => e.target.value && addBundle(e.target.value)}
+                      options={[
+                        { value: "", label: "Bundle a capability..." },
+                        ...addableBundles.map((capability) => ({
+                          value: capability.id,
+                          label: capability.name,
+                        })),
+                      ]}
+                    />
+                  </div>
+                )}
+              </div>
             </Card>
 
             <Tabs

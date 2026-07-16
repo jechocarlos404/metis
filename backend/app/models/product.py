@@ -30,6 +30,9 @@ class Product(PKMixin, TimestampMixin, Base):
     decompositions: Mapped[list["ProductDecomposition"]] = relationship(
         back_populates="product", cascade="all, delete-orphan"
     )
+    bundles: Mapped[list["ProductBundle"]] = relationship(
+        back_populates="product", cascade="all, delete-orphan"
+    )
 
 
 class ProductDecomposition(PKMixin, TimestampMixin, Base):
@@ -49,3 +52,19 @@ class ProductDecomposition(PKMixin, TimestampMixin, Base):
     created_by: Mapped[str] = mapped_column(Text, default="user")
 
     product: Mapped[Product] = relationship(back_populates="decompositions")
+
+
+class ProductBundle(PKMixin, Base):
+    """Product BUNDLES Capability: explicit product surface / packaging edge."""
+
+    __tablename__ = "product_bundles"
+    __table_args__ = (UniqueConstraint("product_id", "capability_id"),)
+
+    product_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("products.id", ondelete="CASCADE")
+    )
+    capability_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("capabilities.id", ondelete="CASCADE")
+    )
+
+    product: Mapped[Product] = relationship(back_populates="bundles")

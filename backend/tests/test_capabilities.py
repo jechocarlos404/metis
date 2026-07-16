@@ -106,7 +106,7 @@ async def test_why_chain_reaches_org_intent(db):
 
 
 @pytest.mark.asyncio
-async def test_product_attribution_follows_containment(db):
+async def test_product_attribution_follows_bundles_and_containment(db):
     async with db() as session:
         root = await make_capability(session, "feature intelligence")
         child = await make_capability(session, "feature search", parent_id=root.id)
@@ -117,11 +117,11 @@ async def test_product_attribution_follows_containment(db):
         spec = Product(name="Search Spec", goal_id=pg.id)
         session.add(spec)
         await session.commit()
-        await capability_service.add_motivation(session, root.id, pg.id)
+        await capability_service.bundle_product(session, spec.id, root.id)
 
         attribution = await capability_service.product_attribution(session)
         assert attribution[str(root.id)] == [str(spec.id)]
-        # children inherit attribution through PART_OF, like why() does
+        # bundled capability children inherit attribution through PART_OF
         assert attribution[str(child.id)] == [str(spec.id)]
         assert attribution[str(stray.id)] == []
 

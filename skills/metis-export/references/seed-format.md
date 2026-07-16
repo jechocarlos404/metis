@@ -126,6 +126,7 @@ snapshots of the taxonomy, never a second hierarchy.
   "name": "PM Export",             // required
   "summary": "…",
   "body": "Markdown spec body…",
+  "bundle_refs": ["cap-graph"],    // optional: capability refs this product explicitly offers
   "decomposition": {
     "summary": "…",
     "epics": [

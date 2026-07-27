@@ -34,6 +34,9 @@ class Settings(BaseSettings):
     # a chat transcript and an API log line up — and so the write boundary is
     # inherited rather than re-implemented.
     mcp_api_base_url: str = "http://localhost:8000"
+    # Required to serve MCP over SSE. Empty means stdio only — a listening
+    # socket with no gate would lend this process's API token to any caller.
+    mcp_sse_token: str = ""
 
     # LLM providers — presence of a credential marks the provider available.
     anthropic_api_key: str = ""

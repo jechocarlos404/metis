@@ -29,7 +29,23 @@ def main() -> None:
         import uvicorn
         from mcp.server.sse import SseServerTransport
         from starlette.applications import Starlette
+        from starlette.middleware import Middleware
         from starlette.routing import Mount, Route
+
+        from app.config import get_settings
+        from app.mcp.auth import BearerGate
+
+        # stdio inherits the identity of whoever launched it. A listening
+        # socket does not — and this process holds a service token, so an
+        # unauthenticated listener would lend that token to anyone who can
+        # reach the port. Refuse to start rather than serve it open.
+        token = get_settings().mcp_sse_token
+        if not token:
+            raise SystemExit(
+                "MCP_SSE_TOKEN is required for --sse. Without it this port "
+                "hands the server's API token to any caller that reaches it. "
+                "Use stdio for local agents, which needs no token."
+            )
 
         transport = SseServerTransport("/messages/")
 
@@ -43,7 +59,8 @@ def main() -> None:
             routes=[
                 Route("/sse", endpoint=handle_sse),
                 Mount("/messages/", app=transport.handle_post_message),
-            ]
+            ],
+            middleware=[Middleware(BearerGate, token=token)],
         )
         uvicorn.run(app, host=args.host, port=args.port)
     else:

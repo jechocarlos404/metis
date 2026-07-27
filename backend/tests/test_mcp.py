@@ -200,6 +200,59 @@ def test_a_refused_write_is_rendered_with_its_href():
     assert text.endswith("Open: /stacks?slot=api::Auth")
 
 
+@pytest.mark.parametrize(
+    "hostile",
+    [
+        "../../admin/llm",
+        "..%2f..%2fadmin",
+        "qdrant/../../users",
+        "qdrant?x=1",
+        "http://evil.example/x",
+        "",
+        "Qdrant",
+    ],
+)
+def test_resource_uris_cannot_walk_out_of_their_path(hostile):
+    """Everything interpolated into a request path has to be shaped like what
+    it claims to be — otherwise a resource URI addresses the rest of the API
+    with this server's token."""
+    from app.mcp.server import _safe_slug
+
+    with pytest.raises(ValueError):
+        _safe_slug(hostile)
+
+
+def test_slot_ids_must_be_uuids():
+    from app.mcp.server import _safe_id
+
+    assert _safe_id("16ce952e-44cd-4317-9176-b3c7de518d9f")
+    with pytest.raises(ValueError):
+        _safe_id("../../admin")
+
+
+@pytest.mark.asyncio
+async def test_sse_requires_a_bearer_token():
+    """stdio inherits the launcher's identity; a listening socket inherits
+    nothing, and this process holds an API token."""
+    from starlette.applications import Starlette
+    from starlette.middleware import Middleware
+    from starlette.responses import PlainTextResponse
+    from starlette.routing import Route
+
+    from app.mcp.auth import BearerGate
+
+    app = Starlette(
+        routes=[Route("/sse", lambda r: PlainTextResponse("ok"))],
+        middleware=[Middleware(BearerGate, token="s3cret")],
+    )
+    from httpx import ASGITransport, AsyncClient
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        assert (await c.get("/sse")).status_code == 401
+        assert (await c.get("/sse", headers={"Authorization": "Bearer wrong"})).status_code == 401
+        assert (await c.get("/sse", headers={"Authorization": "Bearer s3cret"})).status_code == 200
+
+
 def test_proposal_says_it_applied_nothing():
     text = render.propose_binding(
         "metis::data::Vector index", "pgvector", "rides existing Postgres.", "/stacks?x=1"

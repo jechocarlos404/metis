@@ -261,6 +261,11 @@ export default function CapabilitiesIsland({ canWrite = true }) {
               {detail.description && (
                 <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", lineHeight: "var(--leading-snug)" }}>{detail.description}</div>
               )}
+              {/* The supply frame is where build-vs-buy gets argued; this is
+                  how you arrive there holding a need. */}
+              <a href={`/capabilities/${detail.slug}`} style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-accent)", textDecoration: "none" }}>
+                build or buy →
+              </a>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 <Badge tone={MATURITY_TONES[detail.maturity] ?? "neutral"}>{detail.maturity}</Badge>
                 {Object.entries(detail.facets ?? {}).map(([k, v]) => (

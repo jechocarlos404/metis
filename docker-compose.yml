@@ -53,6 +53,10 @@ services:
       KEYCLOAK_ADMIN_CLIENT_ID: metis-backend
       KEYCLOAK_ADMIN_CLIENT_SECRET: ${METIS_BACKEND_CLIENT_SECRET:-dev-backend-secret}
       AUTH_ENABLED: ${AUTH_ENABLED:-true}
+      # The demo seed is skipped when any goal exists. A database where the
+      # goals were removed but their capabilities were not will try to seed
+      # again and collide, so this needs to be turnable off from outside.
+      SEED_DEMO_DATA: ${SEED_DEMO_DATA:-true}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
@@ -85,9 +89,15 @@ services:
       KEYCLOAK_REALM: metis
       KEYCLOAK_MCP_CLIENT: metis-mcp
       KEYCLOAK_MCP_CLIENT_SECRET: ${METIS_MCP_CLIENT_SECRET:-dev-mcp-secret}
+      # Callers must present this. The server refuses to start SSE without it,
+      # because this process holds an API token and an open port would lend it
+      # to anyone who can reach the address.
+      MCP_SSE_TOKEN: ${METIS_MCP_SSE_TOKEN:-dev-mcp-sse-token}
       AUTH_ENABLED: ${AUTH_ENABLED:-true}
-    ports:
-      - "8001:8001"
+    # Reachable on the compose network only. Publish deliberately, with a real
+    # MCP_SSE_TOKEN, if something outside needs it.
+    expose:
+      - "8001"
     depends_on:
       backend:
         condition: service_healthy

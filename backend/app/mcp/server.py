@@ -15,6 +15,8 @@ a 403 naming the screen that can act.
 """
 
 import json
+import re
+import uuid
 
 from mcp.server import Server
 from mcp.types import (
@@ -208,7 +210,7 @@ async def _dispatch(name: str, args: dict) -> str:
         return render.tech_search(page, args.get("q"))
 
     if name == "capability_supply":
-        slug = args["capability"]
+        slug = _safe_slug(args["capability"])
         envelope = await client.get(
             f"/api/capabilities/{slug}/supply",
             {"include_unadopted": str(args.get("include_unadopted", True)).lower()},
@@ -218,7 +220,7 @@ async def _dispatch(name: str, args: dict) -> str:
 
     if name == "tech_blast_radius":
         return render.tech_blast_radius(
-            await client.get(f"/api/tech/{args['tech']}/blast-radius")
+            await client.get(f"/api/tech/{_safe_slug(args['tech'])}/blast-radius")
         )
 
     if name == "tech_exposure":
@@ -227,25 +229,25 @@ async def _dispatch(name: str, args: dict) -> str:
                 "/api/exposure",
                 {
                     "window_days": args.get("window_days", 180),
-                    "product": args.get("product"),
+                    "product": _safe_slug(args["product"]) if args.get("product") else None,
                 },
             )
         )
 
     if name == "stack_redundancy":
         return render.stack_redundancy(
-            await client.get(f"/api/stacks/{args['product']}/redundancy")
+            await client.get(f"/api/stacks/{_safe_slug(args['product'])}/redundancy")
         )
 
     if name == "tech_encounters":
         return render.tech_encounters(
-            await client.get(f"/api/tech/{args['tech']}/encounters")
+            await client.get(f"/api/tech/{_safe_slug(args['tech'])}/encounters")
         )
 
     if name == "stack_recommend":
         body = {k: args[k] for k in ("slot", "archetype") if args.get(k)}
         return render.stack_recommend(
-            await client.post(f"/api/stacks/{args['product']}/recommend", body)
+            await client.post(f"/api/stacks/{_safe_slug(args['product'])}/recommend", body)
         )
 
     if name == "propose_binding":
@@ -278,7 +280,7 @@ async def _propose(args: dict) -> str:
     """Check the slot's offers before proposing. Proposing a technology the
     bind endpoint would reject is worse than proposing nothing — it costs the
     human a click to find out the agent was wrong."""
-    slot, tech = args["slot"], args["tech"]
+    slot, tech = _safe_id(args["slot"]), _safe_slug(args["tech"])
     href = f"/stacks?slot={slot}&propose={tech}"
     offers = await client.get(f"/api/stacks/slots/{slot}/offers")
     slugs = [o["slug"] for o in offers["offers"]]
@@ -353,6 +355,24 @@ async def list_resource_templates() -> list[ResourceTemplate]:
     return RESOURCE_TEMPLATES
 
 
+#: A slug is lowercase, digits and dashes — the same shape `slugify` produces.
+#: Interpolating anything else into a request path lets a resource URI walk out
+#: of `/api/tech/` and address the rest of the API with this server's token.
+_SLUG = re.compile(r"[a-z0-9][a-z0-9-]*\Z")
+
+
+def _safe_slug(value: str) -> str:
+    if not _SLUG.match(value):
+        raise ValueError(f"Not a slug: {value!r}")
+    return value
+
+
+def _safe_id(value: str) -> str:
+    """Slot ids are UUIDs. Same reason as _safe_slug: everything interpolated
+    into a request path has to be shaped like what it claims to be."""
+    return str(uuid.UUID(str(value)))
+
+
 @server.read_resource()
 async def read_resource(uri: AnyUrl) -> str:
     raw = str(uri)
@@ -361,11 +381,10 @@ async def read_resource(uri: AnyUrl) -> str:
     if raw == "metis://policy/adoptions":
         return await client.text("/api/ontology/adoptions")
     if raw.startswith("metis://tech/"):
-        return json.dumps(
-            await client.get(f"/api/tech/{raw.removeprefix('metis://tech/')}"), indent=2
-        )
+        slug = _safe_slug(raw.removeprefix("metis://tech/"))
+        return json.dumps(await client.get(f"/api/tech/{slug}"), indent=2)
     if raw.startswith("metis://stacks/"):
-        product = raw.removeprefix("metis://stacks/")
+        product = _safe_slug(raw.removeprefix("metis://stacks/"))
         stacks = await client.get("/api/stacks")
         views = []
         for stack in stacks:

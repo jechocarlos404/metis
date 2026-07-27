@@ -1,0 +1,37 @@
+---
+import { ICONS } from "../../ds/Icons.jsx";
+
+const { href, label, icon, active } = Astro.props;
+---
+
+<a
+  href={href}
+  style={`display:flex; align-items:center; gap:10px; padding:8px 10px; text-decoration:none;
+    background:${active ? "var(--surface-inset)" : "transparent"};
+    color:${active ? "var(--text-heading)" : "var(--text-secondary)"};
+    font-weight:${active ? "var(--weight-semibold)" : "var(--weight-regular)"};
+    border-radius:var(--radius-sm); font-family:var(--font-body); font-size:var(--text-sm);`}
+>
+  <svg
+    width="15"
+    height="15"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    stroke-width="2"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    style={`flex:none; color:${active ? "var(--text-accent)" : "var(--text-disabled)"};`}
+  >
+    {(ICONS[icon] || []).map((n) =>
+      n[0] === "path" ? (
+        <path d={n[1]} />
+      ) : n[0] === "circle" ? (
+        <circle cx={n[1]} cy={n[2]} r={n[3]} />
+      ) : (
+        <rect x={n[1]} y={n[2]} width={n[3]} height={n[4]} rx={n[5]} />
+      ),
+    )}
+  </svg>
+  {label}
+</a>

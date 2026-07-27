@@ -1,0 +1,11 @@
+---
+import AppLayout from "../../layouts/AppLayout.astro";
+import TechDetailIsland from "../../components/islands/TechDetailIsland.jsx";
+
+const { slug } = Astro.params;
+const canWrite = ["editor", "admin"].includes(Astro.locals.user?.role);
+---
+
+<AppLayout title={`Tech · ${slug}`}>
+  <TechDetailIsland client:load slug={slug} canWrite={canWrite} />
+</AppLayout>

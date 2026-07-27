@@ -1,0 +1,143 @@
+---
+import { marked } from "marked";
+import AppLayout from "../layouts/AppLayout.astro";
+
+/**
+ * `/ontology` — one document that teaches the model, served three ways: this
+ * route, `GET /api/ontology/model`, and the `metis://ontology/model` MCP
+ * resource. Written once, in the repo, and rendered here.
+ *
+ * The frontend container cannot read the backend's filesystem, which is
+ * exactly why the endpoint exists — this page fetches rather than imports, so
+ * there is no second copy to drift.
+ */
+const backend = (process.env.API_INTERNAL_URL || "http://localhost:8000").replace(/\/$/, "");
+
+let markdown = "";
+let error = null;
+try {
+  const res = await fetch(`${backend}/api/ontology/model`, {
+    headers: Astro.locals.accessToken
+      ? { authorization: `Bearer ${Astro.locals.accessToken}` }
+      : {},
+  });
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  markdown = await res.text();
+} catch (e) {
+  error = e.message;
+}
+
+// The source is a file in our own image, not user content — there is nothing
+// here for an outside author to inject.
+const html = markdown ? marked.parse(markdown) : "";
+
+const RENDERINGS = [
+  { label: "/ontology", active: true },
+  { label: "GET /api/ontology/model", active: false },
+  { label: "metis://ontology/model", active: false },
+];
+---
+
+<AppLayout title="Ontology">
+  <div style="display:flex; flex-direction:column; min-height:0;">
+    <div style="display:flex; align-items:center; gap:12px; padding:14px 24px; border-bottom:1px solid var(--border-hairline); background:var(--surface-card); flex:none;">
+      <h2 style="font-size:var(--text-lg); font-weight:var(--weight-semibold);">Ontology</h2>
+      <span style="flex:1;"></span>
+      {/* Not interactive — a statement that this text has no second version. */}
+      <div style="display:flex; gap:6px; flex-wrap:wrap;">
+        {RENDERINGS.map((r) => (
+          <span
+            style={`font-family:var(--font-mono); font-size:var(--text-2xs); padding:3px 8px; border-radius:var(--radius-xs); border:1px solid ${r.active ? "var(--accent)" : "var(--border-default)"}; background:${r.active ? "var(--accent-wash)" : "transparent"}; color:${r.active ? "var(--text-accent)" : "var(--text-secondary)"};`}
+          >{r.label}</span>
+        ))}
+      </div>
+    </div>
+
+    <div style="padding:var(--space-6) var(--space-6) var(--space-12); overflow-y:auto;">
+      {error ? (
+        <div style="color:var(--danger-fg); font-size:var(--text-sm);">
+          Could not load the ontology document: {error}
+        </div>
+      ) : (
+        <article class="ontology-doc" set:html={html} />
+      )}
+    </div>
+  </div>
+</AppLayout>
+
+<style is:global>
+  /* Prose for one long document. Tokens only — the values live in
+     src/styles/tokens, and nothing here invents a colour. */
+  .ontology-doc {
+    max-width: 76ch;
+    color: var(--text-body);
+    font-size: var(--text-md);
+    line-height: var(--leading-body);
+  }
+  .ontology-doc h1,
+  .ontology-doc h2,
+  .ontology-doc h3 {
+    color: var(--text-heading);
+    font-weight: var(--weight-semibold);
+    letter-spacing: var(--tracking-tight);
+    margin: var(--space-8) 0 var(--space-3);
+  }
+  .ontology-doc h1 { font-size: var(--text-2xl); margin-top: 0; }
+  .ontology-doc h2 { font-size: var(--text-xl); }
+  .ontology-doc h3 { font-size: var(--text-lg); }
+  .ontology-doc p { margin: 0 0 var(--space-4); text-wrap: pretty; }
+  .ontology-doc ul,
+  .ontology-doc ol { margin: 0 0 var(--space-4); padding-left: var(--space-5); }
+  .ontology-doc li { margin-bottom: var(--space-1); }
+  .ontology-doc blockquote {
+    margin: 0 0 var(--space-4);
+    padding: var(--space-3) var(--space-4);
+    border-left: 2px solid var(--accent);
+    background: var(--accent-wash);
+    color: var(--text-heading);
+  }
+  .ontology-doc blockquote p:last-child { margin-bottom: 0; }
+  .ontology-doc code {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    background: var(--surface-inset);
+    border-radius: var(--radius-xs);
+    padding: 1px 5px;
+  }
+  .ontology-doc pre {
+    background: var(--surface-inset);
+    border: 1px solid var(--border-hairline);
+    border-radius: var(--radius-sm);
+    padding: var(--space-3) var(--space-4);
+    overflow-x: auto;
+    margin: 0 0 var(--space-4);
+  }
+  .ontology-doc pre code { background: none; padding: 0; }
+  /* Wide tables scroll inside their own wrapper; the page never does. */
+  .ontology-doc table {
+    display: block;
+    overflow-x: auto;
+    max-width: 100%;
+    border-collapse: collapse;
+    margin: 0 0 var(--space-4);
+    font-size: var(--text-sm);
+  }
+  .ontology-doc th,
+  .ontology-doc td {
+    border: 1px solid var(--border-hairline);
+    padding: 6px 10px;
+    text-align: left;
+    vertical-align: top;
+  }
+  .ontology-doc th {
+    background: var(--surface-inset);
+    color: var(--text-heading);
+    font-weight: var(--weight-semibold);
+  }
+  .ontology-doc hr {
+    border: none;
+    border-top: 1px solid var(--border-hairline);
+    margin: var(--space-8) 0;
+  }
+  .ontology-doc a { color: var(--text-accent); }
+</style>

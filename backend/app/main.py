@@ -13,10 +13,13 @@ from app.routers import (
     chat,
     features,
     goals,
+    governance,
     graph,
     health,
     products,
+    stacks,
     strategies,
+    tech,
     users,
     work,
 )
@@ -61,6 +64,10 @@ def create_app() -> FastAPI:
     app.include_router(features.router, dependencies=rbac)
     app.include_router(graph.router, dependencies=rbac)
     app.include_router(strategies.router, dependencies=rbac)
+    app.include_router(tech.router, dependencies=rbac)
+    app.include_router(stacks.router, dependencies=rbac)
+    app.include_router(governance.constraints_router, dependencies=rbac)
+    app.include_router(governance.concerns_router, dependencies=rbac)
     app.include_router(chat.router, dependencies=rbac)
     # Admin-only: user management and LLM provider config.
     admin_only = [Depends(require_admin)]

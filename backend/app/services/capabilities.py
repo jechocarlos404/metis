@@ -22,6 +22,7 @@ from app.models import (
     Motivation,
     Product,
     ProductBundle,
+    TechSatisfaction,
     WorkStatus,
 )
 from app.schemas.capability import (
@@ -100,6 +101,19 @@ async def delete_capability(session: AsyncSession, capability_id: uuid.UUID) -> 
             409,
             f"{realizing} feature(s) realize this capability — re-point or delete "
             "them first (features may not be orphaned).",
+        )
+    # Buy side of the same currency: tech_satisfactions.capability_id is
+    # RESTRICT, mirroring the feature FK. Report it rather than let the FK raise.
+    satisfying = await session.scalar(
+        select(func.count())
+        .select_from(TechSatisfaction)
+        .where(TechSatisfaction.capability_id == capability_id)
+    )
+    if satisfying:
+        raise HTTPException(
+            409,
+            f"{satisfying} technolog(ies) satisfy this capability — a capability "
+            "with supply cannot be deleted out from under a stack.",
         )
     await session.delete(capability)
     await session.commit()

@@ -38,7 +38,10 @@ capabilities leaf-first, goals children-first) and protects anything the seed
 shares with the rest of the instance:
 
 - a **capability is kept** (warning, not deleted) if features outside the
-  seed realize it, or if any child capability is outside the seed or kept
+  seed realize it, if any technology satisfies it, or if any child capability
+  is outside the seed or kept. A seed carries no tech, so a satisfaction on a
+  seeded capability was recorded by someone else — deleting it would drop data
+  the seed never created, and would strand any stack slot bound through it
 - a **goal is kept** if it has child goals outside the seed, or a product
   outside the seed points at it
 - deleting a **feature cascades its edges**, including edges a foreign

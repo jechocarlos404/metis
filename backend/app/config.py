@@ -23,6 +23,11 @@ class Settings(BaseSettings):
     keycloak_audience: str = "metis-backend"
     keycloak_admin_client_id: str = "metis-backend"
     keycloak_admin_client_secret: str = "dev-backend-secret"
+    # Which client a token was issued to decides its surface, and the surface
+    # decides whether it may write. A service or MCP token cannot claim to be
+    # the desktop, because `azp` is signed.
+    keycloak_desktop_client: str = "metis-web"
+    keycloak_mcp_client: str = "metis-mcp"
 
     # LLM providers — presence of a credential marks the provider available.
     anthropic_api_key: str = ""

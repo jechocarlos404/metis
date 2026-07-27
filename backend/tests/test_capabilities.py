@@ -114,7 +114,7 @@ async def test_product_attribution_follows_bundles_and_containment(db):
         pg = Goal(goal_type=GoalType.product, title="Ship search")
         session.add(pg)
         await session.flush()
-        spec = Product(name="Search Spec", goal_id=pg.id)
+        spec = Product(slug="search-spec", name="Search Spec", goal_id=pg.id)
         session.add(spec)
         await session.commit()
         await capability_service.bundle_product(session, spec.id, root.id)

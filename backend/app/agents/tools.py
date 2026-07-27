@@ -28,6 +28,7 @@ from app.services import features as feature_service
 from app.services import search as search_service
 from app.services import strategies as strategy_service
 from app.services import tickets as ticket_service
+from app.services.slugs import unique_slug
 
 
 @dataclass
@@ -179,7 +180,13 @@ async def create_product_spec(
     if goal:
         goal_obj = await _resolve(ctx.session, Goal, goal, "(?:PG|OG)", Goal.title)
         goal_id = goal_obj.id
-    product = Product(goal_id=goal_id, name=name, summary=summary, body=body or None)
+    product = Product(
+        goal_id=goal_id,
+        slug=await unique_slug(ctx.session, Product, name),
+        name=name,
+        summary=summary,
+        body=body or None,
+    )
     ctx.session.add(product)
     await ctx.session.commit()
     await ctx.session.refresh(product)

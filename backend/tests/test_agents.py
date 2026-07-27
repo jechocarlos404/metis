@@ -82,7 +82,7 @@ async def test_plain_text_turn(db):
 async def test_tool_call_turn_creates_ticket_and_viz(db):
     thread_id = await make_thread(db)
     async with db() as session:
-        product = Product(name="PM Export", summary="s")
+        product = Product(slug="pm-export", name="PM Export", summary="s")
         session.add(product)
         await session.commit()
         await session.refresh(product)

@@ -9,6 +9,8 @@ from app.schemas.common import Stamped
 class CapabilityCreate(BaseModel):
     parent_id: uuid.UUID | None = None
     name: str
+    #: Derived from the name when omitted. Set it explicitly to pin the address.
+    slug: str | None = None
     description: str | None = None
     maturity: CapabilityMaturity = CapabilityMaturity.planned
     facets: dict[str, str] = Field(default_factory=dict)
@@ -26,6 +28,7 @@ class CapabilityUpdate(BaseModel):
 
 class CapabilityRead(Stamped):
     parent_id: uuid.UUID | None
+    slug: str
     name: str
     description: str | None
     maturity: CapabilityMaturity

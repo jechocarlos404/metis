@@ -22,6 +22,7 @@ from app.models import (
     Motivation,
     Product,
     ProductBundle,
+    TechSatisfaction,
     WorkStatus,
 )
 from app.schemas.capability import (
@@ -33,6 +34,7 @@ from app.schemas.capability import (
     Rollup,
 )
 from app.schemas.feature import WhyChain, WhyStep
+from app.services.slugs import unique_slug
 
 GA_OR_LATER = {"ga", "deprecated", "retired"}
 
@@ -69,7 +71,9 @@ async def _forbid_forest_cycle(
 async def create_capability(session: AsyncSession, data: CapabilityCreate) -> Capability:
     if data.parent_id is not None and await session.get(Capability, data.parent_id) is None:
         raise HTTPException(404, f"Capability {data.parent_id} not found")
-    capability = Capability(**data.model_dump())
+    fields = data.model_dump()
+    fields["slug"] = await unique_slug(session, Capability, data.name, data.slug)
+    capability = Capability(**fields)
     session.add(capability)
     await session.commit()
     await session.refresh(capability)
@@ -100,6 +104,19 @@ async def delete_capability(session: AsyncSession, capability_id: uuid.UUID) -> 
             409,
             f"{realizing} feature(s) realize this capability — re-point or delete "
             "them first (features may not be orphaned).",
+        )
+    # Buy side of the same currency: tech_satisfactions.capability_id is
+    # RESTRICT, mirroring the feature FK. Report it rather than let the FK raise.
+    satisfying = await session.scalar(
+        select(func.count())
+        .select_from(TechSatisfaction)
+        .where(TechSatisfaction.capability_id == capability_id)
+    )
+    if satisfying:
+        raise HTTPException(
+            409,
+            f"{satisfying} technolog(ies) satisfy this capability — a capability "
+            "with supply cannot be deleted out from under a stack.",
         )
     await session.delete(capability)
     await session.commit()

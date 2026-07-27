@@ -19,6 +19,8 @@ class Product(PKMixin, TimestampMixin, Base):
     goal_id: Mapped[uuid.UUID | None] = mapped_column(
         PGUUID(as_uuid=True), ForeignKey("goals.id", ondelete="SET NULL")
     )
+    #: Canonical address, stable across renames. See Capability.slug.
+    slug: Mapped[str] = mapped_column(Text, unique=True)
     name: Mapped[str] = mapped_column(Text)
     summary: Mapped[str | None] = mapped_column(Text)
     body: Mapped[str | None] = mapped_column(Text)

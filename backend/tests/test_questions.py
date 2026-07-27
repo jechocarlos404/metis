@@ -443,6 +443,42 @@ async def test_recommend_names_the_rule_that_pruned_each_offer(db, client):
 
 
 @pytest.mark.asyncio
+async def test_reads_are_cacheable_for_a_minute(db, client):
+    """Paired with as_of in the body, which is what tells a caller how stale
+    the copy in front of them is."""
+    await seed(db)
+    for path in (
+        "/api/capabilities/semantic-search/supply",
+        "/api/exposure",
+        "/api/ontology/model",
+    ):
+        response = await client.get(path)
+        assert response.headers["cache-control"] == "max-age=60", path
+
+
+@pytest.mark.asyncio
+async def test_people_lookups_are_throttled_and_logged(db, client, caplog):
+    """The one endpoint returning people. The limit bounds enumeration; the
+    log is what makes an unusual pattern visible after the fact."""
+    from app.auth import throttle
+
+    throttle.reset()
+    await seed(db)
+    with caplog.at_level("INFO", logger="metis.access"):
+        first = await client.get("/api/tech/qdrant/encounters")
+    assert first.status_code == 200
+    assert "encounters read caller=dev" in caplog.text
+
+    for _ in range(throttle.LIMIT):
+        last = await client.get("/api/tech/qdrant/encounters")
+    assert last.status_code == 429
+    assert int(last.headers["retry-after"]) > 0
+    # Only this endpoint is throttled — the rest of the catalog is not people.
+    assert (await client.get("/api/tech/qdrant/blast-radius")).status_code == 200
+    throttle.reset()
+
+
+@pytest.mark.asyncio
 async def test_ontology_model_is_served_verbatim(db, client):
     """One file, three readers. A copy would fork."""
     from app.routers.questions import ONTOLOGY_MODEL

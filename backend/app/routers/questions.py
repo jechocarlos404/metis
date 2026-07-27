@@ -12,11 +12,12 @@ and says why; 404 is reserved for a subject that does not exist.
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi.responses import PlainTextResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth.throttle import throttle_people
 from app.db import get_db
 from app.models import Capability, Product, StackSlot, TechFit, Technology, TechStack
 from app.schemas.envelope import (
@@ -31,7 +32,18 @@ from app.services import stacks as stack_service
 from app.services import technologies as tech_service
 from app.services.slugs import by_slug
 
-router = APIRouter(prefix="/api", tags=["questions"])
+#: Every question is a read, and the spec makes them cacheable for a minute.
+#: Applied once here rather than per endpoint, so a new question cannot forget
+#: it — and paired with `as_of` in the body, which is what tells a caller how
+#: stale the copy in front of them actually is.
+CACHE_SECONDS = 60
+
+
+async def cacheable(response: Response) -> None:
+    response.headers["Cache-Control"] = f"max-age={CACHE_SECONDS}"
+
+
+router = APIRouter(prefix="/api", tags=["questions"], dependencies=[Depends(cacheable)])
 
 #: One document, three readers: this endpoint, the /ontology route, and the
 #: `metis://ontology/model` MCP resource. Not a copy and not a summary — if it
@@ -46,8 +58,11 @@ ONTOLOGY_MODEL = Path(__file__).resolve().parent.parent / "ontology" / "model.md
 async def ontology_model():
     if not ONTOLOGY_MODEL.is_file():
         raise HTTPException(404, "Ontology model document is not on disk")
+    # A custom Response bypasses the injected one, so the header is set here.
     return PlainTextResponse(
-        ONTOLOGY_MODEL.read_text(encoding="utf-8"), media_type="text/markdown"
+        ONTOLOGY_MODEL.read_text(encoding="utf-8"),
+        media_type="text/markdown",
+        headers={"Cache-Control": f"max-age={CACHE_SECONDS}"},
     )
 
 
@@ -249,7 +264,11 @@ async def _layer_by_capability(
     return {cid: str(layer) for cid, layer in await session.execute(stmt)}
 
 
-@router.get("/tech/{slug}/encounters", response_model=Answer)
+@router.get(
+    "/tech/{slug}/encounters",
+    response_model=Answer,
+    dependencies=[Depends(throttle_people)],
+)
 async def tech_encounters(slug: str, session: AsyncSession = Depends(get_db)):
     """Question 5 — who here has touched this.
 

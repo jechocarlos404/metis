@@ -63,6 +63,12 @@ class Api:
             sys.exit(f"error: GET {path} returned {status}: {body}")
         return body
 
+    def get_optional(self, path):
+        """For endpoints an older instance may not have yet. Absent is [],
+        which is the same thing as "nothing there" for every caller."""
+        status, body = self.request("GET", path)
+        return body if status == 200 else []
+
     def delete(self, path):
         return self.request("DELETE", path)
 
@@ -82,6 +88,11 @@ class Unseeder:
         self.inst_feats = api.get("/api/features")
         self.inst_edges = api.get("/api/features/edges")
         self.inst_prods = api.get("/api/products")
+        # Buy-side supply. A seed carries no tech, so any satisfaction on a
+        # seeded capability was recorded by someone else — it is shared state,
+        # like a foreign feature, and the capability is kept rather than
+        # deleted. Older instances predate the endpoint; treat that as none.
+        self.inst_sats = api.get_optional("/api/tech/satisfactions")
 
         # seed ref -> matched instance entity
         self.goals = self._match(
@@ -143,11 +154,13 @@ class Unseeder:
         """Matched capabilities safe to delete, leaves before parents."""
         matched_ids = {c["id"] for c in self.caps.values()}
         matched_feat_ids = {f["id"] for f in self.feats.values()}
-        children, feats_of = {}, {}
+        children, feats_of, sats_of = {}, {}, {}
         for c in self.inst_caps:
             children.setdefault(c["parent_id"], []).append(c)
         for f in self.inst_feats:
             feats_of.setdefault(f["capability_id"], []).append(f)
+        for s in self.inst_sats:
+            sats_of.setdefault(s["capability_id"], []).append(s)
 
         verdict = {}  # cap id -> bool
 
@@ -161,6 +174,12 @@ class Unseeder:
             ]
             if foreign_feats:
                 reasons.append(f"{len(foreign_feats)} feature(s) outside the seed realize it")
+            sats = sats_of.get(cid, [])
+            if sats:
+                reasons.append(
+                    f"{len(sats)} technolog(ies) satisfy it — remove the satisfactions "
+                    "first if you really mean to drop it"
+                )
             for child in children.get(cid, []):
                 if child["id"] not in matched_ids:
                     reasons.append(f"child capability {child['name']!r} is not in the seed")

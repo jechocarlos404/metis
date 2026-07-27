@@ -17,6 +17,7 @@ from app.routers import (
     graph,
     health,
     products,
+    questions,
     stacks,
     strategies,
     tech,
@@ -66,6 +67,9 @@ def create_app() -> FastAPI:
     app.include_router(strategies.router, dependencies=rbac)
     app.include_router(tech.router, dependencies=rbac)
     app.include_router(stacks.router, dependencies=rbac)
+    # The six questions, in the shared envelope. Registered after the CRUD
+    # routers so their static paths win where the two overlap.
+    app.include_router(questions.router, dependencies=rbac)
     app.include_router(governance.constraints_router, dependencies=rbac)
     app.include_router(governance.concerns_router, dependencies=rbac)
     app.include_router(chat.router, dependencies=rbac)

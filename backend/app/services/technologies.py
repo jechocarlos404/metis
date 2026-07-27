@@ -29,17 +29,22 @@ from app.models import (
     ConstraintSeverity,
     Encounter,
     EncounterDepth,
+    Epic,
+    Feature,
     Product,
     ProductTechnology,
     StackSlot,
+    Story,
     TechEdge,
     TechEdgeKind,
     TechFit,
     TechKind,
     TechLayer,
     TechSatisfaction,
+    TechStack,
     Technology,
     TechVersion,
+    Ticket,
     Vendor,
 )
 from app.schemas.technology import (
@@ -77,7 +82,7 @@ DEPTH_RANK = [EncounterDepth.evaluated, EncounterDepth.touched, EncounterDepth.s
 ACYCLIC_KINDS = {TechEdgeKind.REQUIRES, TechEdgeKind.RUNS_ON}
 
 #: A release line inside this window counts as exposure, not as a surprise.
-EOL_HORIZON = timedelta(days=180)
+EOL_HORIZON_DAYS = 180
 
 
 def _rank(order: list, value) -> int:
@@ -632,12 +637,17 @@ async def dependents(session: AsyncSession, tech_id: uuid.UUID) -> list[ProductB
     return breaks
 
 
-async def exposure(session: AsyncSession, today: date | None = None) -> list[Exposure]:
+async def exposure(
+    session: AsyncSession, window_days: int = EOL_HORIZON_DAYS, today: date | None = None
+) -> list[Exposure]:
     """Question 3, as a view would be: three independent death modes, each
     sufficient on its own. A stance of `deprecated` with no version rows still
-    surfaces — the modes do not depend on each other."""
+    surfaces — the modes do not depend on each other.
+
+    `window_days` moves only the EOL clock. The other two modes are already
+    true today and have no window to widen."""
     today = today or date.today()
-    horizon = today + EOL_HORIZON
+    horizon = today + timedelta(days=window_days)
 
     adoptions = await _adoption_index(session)
     vendors = {v.id: v for v in (await session.scalars(select(Vendor))).all()}
@@ -729,14 +739,15 @@ def _violates(constraint: Constraint, technology: Technology) -> bool:
     return (technology.facets or {}).get(field) in forbidden
 
 
-async def offers(
+async def ranked_offers(
     session: AsyncSession,
     capability_id: uuid.UUID,
     product_id: uuid.UUID | None = None,
     stack_id: uuid.UUID | None = None,
-) -> list[Offer]:
+) -> tuple[list[Offer], list[Offer]]:
     """Question 1, and steps 3–5 of the stack recommendation: every technology
-    that satisfies this capability, pruned by blocking constraints and ranked.
+    that satisfies this capability, ranked — and, separately, the ones a
+    blocking constraint killed, each carrying the rule that killed it.
 
     The ordering is fit, then the group's stance, then prior experience, then
     ops burden, then slug. All of it is computed — if the ordering came out of a
@@ -762,27 +773,28 @@ async def offers(
         .where(TechSatisfaction.capability_id == capability_id)
     )
     candidates: list[Offer] = []
+    pruned: list[Offer] = []
     for satisfaction, technology in await session.execute(stmt):
         violated = [c for c in constraints if _violates(c, technology)]
         blocked = [c.name for c in violated if c.severity == ConstraintSeverity.block]
-        if blocked:
-            continue  # pruned before fit is scored, per the constraint contract
         stance = adoptions.get(technology.id)
-        candidates.append(
-            Offer(
-                tech_id=technology.id,
-                slug=technology.slug,
-                name=technology.name,
-                kind=technology.kind,
-                fit=satisfaction.fit,
-                stance=stance.status if stance else None,
-                cost=satisfaction.cost or {},
-                notes=satisfaction.notes,
-                experience=depth_by_tech.get(technology.id),
-                rank=0,
-                warned_by=[c.name for c in violated if c.severity == ConstraintSeverity.warn],
-            )
+        offer = Offer(
+            tech_id=technology.id,
+            slug=technology.slug,
+            name=technology.name,
+            kind=technology.kind,
+            fit=satisfaction.fit,
+            stance=stance.status if stance else None,
+            cost=satisfaction.cost or {},
+            notes=satisfaction.notes,
+            experience=depth_by_tech.get(technology.id),
+            rank=0,
+            blocked_by=blocked,
+            warned_by=[c.name for c in violated if c.severity == ConstraintSeverity.warn],
         )
+        # Pruned before fit is scored — but kept, with the rule that killed it.
+        # A silent filter is how a constraint gets re-litigated in six months.
+        (pruned if blocked else candidates).append(offer)
 
     candidates.sort(
         key=lambda o: (
@@ -795,7 +807,83 @@ async def offers(
     )
     for position, offer in enumerate(candidates, start=1):
         offer.rank = position
-    return candidates
+    pruned.sort(key=lambda o: o.slug)
+    return candidates, pruned
+
+
+async def offers(
+    session: AsyncSession,
+    capability_id: uuid.UUID,
+    product_id: uuid.UUID | None = None,
+    stack_id: uuid.UUID | None = None,
+) -> list[Offer]:
+    """The surviving offers alone, for callers that do not render the pruned."""
+    surviving, _ = await ranked_offers(session, capability_id, product_id, stack_id)
+    return surviving
+
+
+async def bindings_by_tech(session: AsyncSession) -> dict[uuid.UUID, list[str]]:
+    """Where each technology is currently bound, as `product::layer::role`.
+
+    The bound offer is never filtered out of a supply answer — you cannot
+    re-evaluate a decision you cannot see. It is marked and left in place."""
+    stmt = (
+        select(StackSlot, TechStack, Product)
+        .join(TechStack, TechStack.id == StackSlot.stack_id)
+        .outerjoin(Product, Product.id == TechStack.product_id)
+        .where(StackSlot.tech_id.is_not(None))
+    )
+    bound: dict[uuid.UUID, list[str]] = defaultdict(list)
+    for slot, stack, product in await session.execute(stmt):
+        scope = product.slug if product is not None else stack.name
+        bound[slot.tech_id].append(f"{scope}::{slot.layer}::{slot.role}")
+    for entries in bound.values():
+        entries.sort()
+    return bound
+
+
+async def realizations(session: AsyncSession, capability_id: uuid.UUID) -> list[dict]:
+    """The build side of the same question. A feature realizes exactly one
+    capability, so this is a direct lookup — and it is what the desktop's
+    supply frame renders opposite the buy side."""
+    stmt = (
+        select(Feature)
+        .where(Feature.capability_id == capability_id)
+        .order_by(Feature.seq)
+    )
+    features = list((await session.scalars(stmt)).all())
+    if not features:
+        return []
+    # Feature -> Story -> Ticket; a feature with no stories has no tickets.
+    counts: dict[uuid.UUID, int] = defaultdict(int)
+    ticket_stmt = (
+        select(Story.feature_id, func.count())
+        .join(Ticket, Ticket.story_id == Story.id)
+        .where(Story.feature_id.in_([f.id for f in features]))
+        .group_by(Story.feature_id)
+    )
+    for feature_id, count in await session.execute(ticket_stmt):
+        counts[feature_id] = count
+    products = {
+        p.id: p.slug for p in (await session.scalars(select(Product))).all()
+    }
+    owners: dict[uuid.UUID, str | None] = {}
+    epic_stmt = (
+        select(Story.feature_id, Epic.product_id)
+        .join(Epic, Epic.id == Story.epic_id)
+        .where(Story.feature_id.in_([f.id for f in features]))
+    )
+    for feature_id, product_id in await session.execute(epic_stmt):
+        owners.setdefault(feature_id, products.get(product_id))
+    return [
+        {
+            "feature": f.name,
+            "product": owners.get(f.id),
+            "status": f.status,
+            "tickets": counts.get(f.id, 0),
+        }
+        for f in features
+    ]
 
 
 async def blocked_reason(
@@ -806,16 +894,5 @@ async def blocked_reason(
 ) -> list[str]:
     """Names of the blocking constraints that pruned every offer, so an empty
     resolver can say why instead of just being empty."""
-    constraints = await _blocking_constraints(session, product_id, stack_id)
-    blocking = [c for c in constraints if c.severity == ConstraintSeverity.block]
-    if not blocking:
-        return []
-    stmt = (
-        select(Technology)
-        .join(TechSatisfaction, TechSatisfaction.tech_id == Technology.id)
-        .where(TechSatisfaction.capability_id == capability_id)
-    )
-    names: list[str] = []
-    for technology in await session.scalars(stmt):
-        names.extend(c.name for c in blocking if _violates(c, technology))
-    return sorted(set(names))
+    _, pruned = await ranked_offers(session, capability_id, product_id, stack_id)
+    return sorted({name for offer in pruned for name in offer.blocked_by})

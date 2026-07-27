@@ -1,8 +1,15 @@
 # The Tech Plane — Buy-Side Ontology
 
-Status: **implemented, backend only.** The two routes (`/tech`, `/stacks`) described in
-the design handoff are not built; the API contract they need is. Extends
-`ontology-graph-spec.md` with a fourth plane.
+This document is served three ways: at `GET /api/ontology/model`, by the `/ontology`
+route, and as the `metis://ontology/model` MCP resource. It is one file — not a copy and
+not a summary. If it forks, agents start inventing private words for `SATISFIES` and the
+transcripts stop being comparable. It lives inside `backend/app/` rather than `docs/`
+because the image ships only `app/`, and a document that cannot deploy cannot be the
+source of truth.
+
+Status: **implemented, backend only.** The six routes in the design handoff are not
+built; the API contract they need is. Extends `ontology-graph-spec.md` with a fourth
+plane.
 
 ## The organising idea
 
@@ -126,6 +133,88 @@ guarantees they go stale — the same trap the PG↔Neo4j dual-write already spr
 The ranking is entirely computed, with no model in the loop. If the ordering came out of
 a prompt nobody could audit it, and the same question would answer differently on Tuesday.
 
+## One answer, three surfaces
+
+The desktop, the HTTP API and the MCP server are three renderings of one answer, not
+three products. A surface may change the presentation — a table, a JSON body, a line an
+agent reads aloud. It may not change the vocabulary, the row set, or what counts as an
+answer.
+
+Every question endpoint returns the same six keys:
+
+```json
+{ "question": "capability_supply",
+  "subject": { "kind": "capability", "slug": "semantic-search" },
+  "answer": [], "unresolved": [],
+  "as_of": "2026-07-27T09:14:03Z",
+  "href": "/capabilities/semantic-search" }
+```
+
+A question may *add* a key — `realizations` on supply, `alternatives` on blast radius,
+`pruned` on recommend — but never replace one. Enum values are verbatim everywhere:
+`standard`, `workaround`, `in_progress`, `off_stack`, exactly as they sit in the
+database, so a screenshot, a log line and a chat transcript stay greppable against each
+other. Nothing title-cases a status.
+
+`href` is not a convenience. Nothing outside the desktop writes, so the last useful thing
+a read surface does is hand a human the screen that can act — and it is how an agent
+cites its reasoning.
+
+| Question | Endpoint |
+|---|---|
+| `capability_supply` | `GET /api/capabilities/{slug}/supply` |
+| `tech_blast_radius` | `GET /api/tech/{slug}/blast-radius` |
+| `tech_exposure` | `GET /api/exposure?window_days=180&product=` |
+| `stack_redundancy` | `GET /api/stacks/{product}/redundancy` |
+| `tech_encounters` | `GET /api/tech/{slug}/encounters` |
+| `stack_recommend` | `POST /api/stacks/{product}/recommend` |
+
+`stack_recommend` is a POST because its input is a body, not because it writes. Nothing
+is persisted; the response is an argument.
+
+### A gap is an answer
+
+The rule most likely to be eroded by a well-meaning refactor. An empty `answer` with a
+populated `unresolved` is the most useful response the system gives — a capability
+nothing satisfies, a required slot no offer survives for. It ships in the payload. It
+does not become a log line, a 404, or an omission.
+
+- `404` means the subject does not exist. "Exists but has no rows" is a `200`.
+- The currently-bound technology is never filtered out of a supply answer. It is marked
+  in `bound_in` and left in place — you cannot re-evaluate a decision you cannot see.
+- `workaround`-fit offers are graded, never hidden.
+- `required: true` and `required: false` blast-radius rows are never collapsed into a
+  count or a score.
+
+### The write boundary
+
+**Read-only everywhere except the desktop.** A write from any other surface is:
+
+```
+403 { "error": "human_action_required",
+      "message": "Binding a slot is a human action.",
+      "href": "/stacks?slot=api::Auth" }
+```
+
+Not `401` — the caller is who they say. Not `405` — the route exists. The refusal names
+the reason and hands over the screen that can act.
+
+Surface comes from the token's signed `azp`, so a service or MCP token cannot present
+itself as the desktop. An unrecognised client gets `api`, the surface with the fewest
+rights; a token naming no client never gains write access by omission.
+
+An agent that can bind a slot can silence a gap, and the gaps are the product. The estate
+is still explainable a year later only because every binding carries a person and a
+reason — an automated writer strips both while looking like progress.
+
+## Slugs
+
+Capabilities, products and technologies are addressed by a unique kebab-case slug.
+Derived from the name once, on create, and **never moved by a rename** — otherwise every
+`href` and MCP URI ever logged stops resolving. Two subjects may share a name, so a
+derived slug that collides gets `-2`; an *explicit* slug that collides is a 409, because
+the caller named it on purpose.
+
 ## Invariants
 
 1. `features.capability_id` stays `NOT NULL`. The build plane's one-to-one is what makes
@@ -144,6 +233,9 @@ a prompt nobody could audit it, and the same question would answer differently o
    expresses it. Archetypes are exempt — they have no Product to check against, which is
    what makes them a shape.
 7. No stored score anywhere. If a number can be recomputed, recompute it.
+8. All six question endpoints return the identical envelope shape, with `href` and
+   `as_of` present on every response.
+9. No write succeeds from the API or MCP surface, and the 403 carries an `href`.
 
 ## Where this diverges from the design handoff
 
@@ -153,7 +245,8 @@ a prompt nobody could audit it, and the same question would answer differently o
 | `product_technologies` is a composite-PK join "following `product_bundles`" | `ProductBundle` is `PKMixin` + `UniqueConstraint`; the new join tables match that | Follow the codebase, not the description of it |
 | `v_exposure` / `v_redundancy` as SQL views; `adoption_rank()` as a SQL function | Service functions in Python | `create_all` makes no views or functions, and this matches how `capabilities.health()` and `graph_service` already compute derived data |
 | `tech_edges` "reuses the `feature_edges` acyclicity code unchanged" | A local check that builds a `DiGraph` from SQL per call | `FeatureGraph` is a stateful `app.state` singleton keyed on `DEPENDS_ON`/`BLOCKS` with dirty-flag write-through. The buy plane runs no topo order, ready set or cut, so there is nothing to keep warm and nothing to go stale |
-| A `stack_recommender` agent | Its deterministic steps 3–5 (supply, prune, rank) shipped as `GET /api/stacks/slots/{id}/offers`; step 2 (shape) is `POST /api/stacks/instantiate` | Those steps need no model. Step 1's archetype auto-selection and step 6's generated rationale are not built, nor is the chat routing |
+| A `stack_recommender` agent | Steps 2–5 shipped deterministically as `POST /api/stacks/{product}/recommend`, with no model in the loop | The ranking is computed, so the `why` sentence is assembled from the same keys the ranking used — the argument and the order cannot disagree. Step 1's archetype auto-selection and the chat routing are not built |
+| `GET /api/stacks?product_id=` (line 203) vs `/api/stacks/{product}/redundancy` (line 137) | Stacks are addressed by stack id; products by slug | The spec contradicts itself here. Picked one convention: `{slug}` under `/api/stacks/` is a **product** slug on the two question endpoints, a stack UUID on the CRUD ones |
 | Frontend is "Next.js App Router" | Astro | — |
 
 `v_exposure` as written in the handoff inner-joins `tech_versions`, so a `deprecated`
@@ -163,9 +256,16 @@ independent.
 
 ## Not built
 
-- `/tech` and `/stacks` routes (UI decisions pending).
-- The `stack_recommender` agent and its chat routing.
+- **The six UI routes** — `/tech`, `/stacks`, `/capabilities/[slug]`, `/tech/[slug]`,
+  `?view=exposure`, `/ontology`. UI decisions pending. Every endpoint they need exists.
+- **The MCP server** — 8 tools, 4 resources, 3 prompts. The envelope it renders is here;
+  the server, its transport and its read-scoped token are not.
+- The `stack_recommender` agent's step 1 (archetype auto-selection by best capability
+  cover) and its chat routing.
 - The `catalog_sync` job that refreshes `technologies` and `eol_on` from upstream
   registries. Until it exists, the catalog is populated by hand or by import script.
 - Lockfile/Dockerfile/Terraform import into `product_technologies`. The endpoint
   (`PUT /api/stacks/usage`) is there for it.
+- Rate limiting and per-caller logging on `tech_encounters`. It is the one endpoint that
+  returns people; there is deliberately no unfiltered collection route, but the throttle
+  the spec asks for needs a limiter this repo does not yet have.

@@ -11,7 +11,6 @@ from app.schemas.technology import (
     EncounterRead,
     Exposure,
     Offer,
-    ProductBreak,
     SatisfactionCreate,
     SatisfactionRead,
     SatisfactionUpdate,
@@ -30,9 +29,15 @@ from app.schemas.technology import (
     VersionRead,
     VersionUpdate,
 )
+from app.models import Technology
 from app.services import technologies as tech_service
+from app.services.slugs import by_slug
 
 router = APIRouter(prefix="/api/tech", tags=["tech"])
+
+
+async def _id(session: AsyncSession, slug: str) -> uuid.UUID:
+    return (await by_slug(session, Technology, slug, "Technology")).id
 
 
 def _row(entry: dict) -> TechnologyRow:
@@ -67,7 +72,9 @@ async def create_technology(data: TechnologyCreate, session: AsyncSession = Depe
     return await tech_service.create_technology(session, data)
 
 
-# NB: static routes must be registered before /{tech_id}.
+# NB: static routes must be registered before /{slug}. A technology is
+# addressed by its slug everywhere a human or an agent quotes it; the UUID
+# stays the key, but it is not the name.
 @router.get("/vendors", response_model=list[VendorRead])
 async def list_vendors(session: AsyncSession = Depends(get_db)):
     return await tech_service.list_vendors(session)
@@ -179,9 +186,9 @@ async def delete_version(version_id: uuid.UUID, session: AsyncSession = Depends(
     await tech_service.delete_version(session, version_id)
 
 
-@router.get("/{tech_id}", response_model=TechnologyDetail)
-async def get_technology(tech_id: uuid.UUID, session: AsyncSession = Depends(get_db)):
-    entry = await tech_service.detail(session, tech_id)
+@router.get("/{slug}", response_model=TechnologyDetail)
+async def get_technology(slug: str, session: AsyncSession = Depends(get_db)):
+    entry = await tech_service.detail(session, await _id(session, slug))
     return TechnologyDetail(
         **_row(entry).model_dump(),
         vendor=entry["vendor"],
@@ -193,55 +200,43 @@ async def get_technology(tech_id: uuid.UUID, session: AsyncSession = Depends(get
     )
 
 
-@router.patch("/{tech_id}", response_model=TechnologyRead)
+@router.patch("/{slug}", response_model=TechnologyRead)
 async def update_technology(
-    tech_id: uuid.UUID, data: TechnologyUpdate, session: AsyncSession = Depends(get_db)
+    slug: str, data: TechnologyUpdate, session: AsyncSession = Depends(get_db)
 ):
-    return await tech_service.update_technology(session, tech_id, data)
+    return await tech_service.update_technology(session, await _id(session, slug), data)
 
 
-@router.delete("/{tech_id}", status_code=204)
-async def delete_technology(tech_id: uuid.UUID, session: AsyncSession = Depends(get_db)):
-    await tech_service.delete_technology(session, tech_id)
+@router.delete("/{slug}", status_code=204)
+async def delete_technology(slug: str, session: AsyncSession = Depends(get_db)):
+    await tech_service.delete_technology(session, await _id(session, slug))
 
 
-@router.get("/{tech_id}/dependents", response_model=list[ProductBreak])
-async def dependents(tech_id: uuid.UUID, session: AsyncSession = Depends(get_db)):
-    """Which products break if we drop this."""
-    return await tech_service.dependents(session, tech_id)
+@router.get("/{slug}/versions", response_model=list[VersionRead])
+async def versions(slug: str, session: AsyncSession = Depends(get_db)):
+    return await tech_service.list_versions(session, await _id(session, slug))
 
 
-@router.get("/{tech_id}/encounters", response_model=list[EncounterRead])
-async def encounters(tech_id: uuid.UUID, session: AsyncSession = Depends(get_db)):
-    """Who here has used this before."""
-    return await tech_service.list_encounters(session, tech_id)
-
-
-@router.get("/{tech_id}/versions", response_model=list[VersionRead])
-async def versions(tech_id: uuid.UUID, session: AsyncSession = Depends(get_db)):
-    return await tech_service.list_versions(session, tech_id)
-
-
-@router.post("/{tech_id}/versions", response_model=VersionRead, status_code=201)
+@router.post("/{slug}/versions", response_model=VersionRead, status_code=201)
 async def create_version(
-    tech_id: uuid.UUID, data: VersionCreate, session: AsyncSession = Depends(get_db)
+    slug: str, data: VersionCreate, session: AsyncSession = Depends(get_db)
 ):
-    return await tech_service.create_version(session, tech_id, data)
+    return await tech_service.create_version(session, await _id(session, slug), data)
 
 
-@router.get("/{tech_id}/adoption", response_model=AdoptionRead | None)
-async def get_adoption(tech_id: uuid.UUID, session: AsyncSession = Depends(get_db)):
+@router.get("/{slug}/adoption", response_model=AdoptionRead | None)
+async def get_adoption(slug: str, session: AsyncSession = Depends(get_db)):
     """None means no stance has been taken — which is itself an answer."""
-    return await tech_service.get_adoption(session, tech_id)
+    return await tech_service.get_adoption(session, await _id(session, slug))
 
 
-@router.put("/{tech_id}/adoption", response_model=AdoptionRead)
+@router.put("/{slug}/adoption", response_model=AdoptionRead)
 async def set_adoption(
-    tech_id: uuid.UUID, data: AdoptionWrite, session: AsyncSession = Depends(get_db)
+    slug: str, data: AdoptionWrite, session: AsyncSession = Depends(get_db)
 ):
-    return await tech_service.set_adoption(session, tech_id, data)
+    return await tech_service.set_adoption(session, await _id(session, slug), data)
 
 
-@router.delete("/{tech_id}/adoption", status_code=204)
-async def clear_adoption(tech_id: uuid.UUID, session: AsyncSession = Depends(get_db)):
-    await tech_service.clear_adoption(session, tech_id)
+@router.delete("/{slug}/adoption", status_code=204)
+async def clear_adoption(slug: str, session: AsyncSession = Depends(get_db)):
+    await tech_service.clear_adoption(session, await _id(session, slug))

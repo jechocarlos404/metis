@@ -60,6 +60,32 @@
       "implicitFlowEnabled": false,
       "directAccessGrantsEnabled": false,
       "serviceAccountsEnabled": true
+    },
+    {
+      "clientId": "metis-mcp",
+      "name": "Metis MCP (read-scoped)",
+      "description": "Service account for the MCP server. The backend derives a request's surface from the signed azp, so this token reads everything and can never write.",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "secret": "dev-mcp-secret",
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocolMappers": [
+        {
+          "name": "metis-backend-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "metis-backend",
+            "id.token.claim": "false",
+            "access.token.claim": "true"
+          }
+        }
+      ]
     }
   ],
   "users": [
@@ -106,6 +132,12 @@
       "clientRoles": {
         "realm-management": ["manage-users", "view-users", "query-users"]
       }
+    },
+    {
+      "username": "service-account-metis-mcp",
+      "enabled": true,
+      "serviceAccountClientId": "metis-mcp",
+      "realmRoles": ["viewer"]
     }
   ]
 }

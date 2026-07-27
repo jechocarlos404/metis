@@ -45,6 +45,15 @@ def test_writes_allowed_for_editor_and_admin(role, method):
 
 # --- the write boundary: only the desktop writes -----------------------------
 
+@pytest.mark.parametrize("role", ["viewer", "editor", "admin"])
+def test_off_desktop_hears_about_the_surface_not_the_role(role):
+    """Off the desktop no role would help, so answering "requires editor"
+    would send the caller to fix the wrong thing."""
+    with pytest.raises(HTTPException) as err:
+        authorize("POST", _p(role, surface=Surface.mcp), "/api/stacks/slots/abc/bind")
+    assert err.value.detail["error"] == "human_action_required"
+
+
 @pytest.mark.parametrize("surface", [Surface.api, Surface.mcp])
 @pytest.mark.parametrize("method", ["POST", "PATCH", "PUT", "DELETE"])
 def test_writes_blocked_off_desktop_even_for_admin(surface, method):

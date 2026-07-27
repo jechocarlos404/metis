@@ -86,13 +86,16 @@ def human_action(path: str) -> tuple[str, str]:
 
 
 def authorize(method: str, principal: Principal, path: str = "") -> None:
-    """Reads for any authenticated user; writes need editor/admin *and* the
-    desktop. Ordering matters: a viewer on the desktop should hear about their
-    role, not be told a human is required when they are one."""
+    """Reads for any authenticated user; writes need the desktop *and* an
+    editor/admin role.
+
+    Surface is checked first because it is the more fundamental refusal: off
+    the desktop no role would help, so answering "requires editor" would send
+    the caller to fix the wrong thing. On the desktop the role is the live
+    question, and a viewer hears about their role rather than being told a
+    human is required when they are one."""
     if _is_read(method, path):
         return
-    if not principal.has_any("editor", "admin"):
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "Requires editor or admin role")
     if principal.surface is not Surface.desktop:
         # Not 401 — the caller is who they say. Not 405 — the route exists.
         message, href = human_action(path)
@@ -100,6 +103,8 @@ def authorize(method: str, principal: Principal, path: str = "") -> None:
             status.HTTP_403_FORBIDDEN,
             {"error": "human_action_required", "message": message, "href": href},
         )
+    if not principal.has_any("editor", "admin"):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Requires editor or admin role")
 
 
 async def enforce_rbac(

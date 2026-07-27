@@ -51,19 +51,32 @@ router = APIRouter(prefix="/api", tags=["questions"], dependencies=[Depends(cach
 #: transcripts stop being comparable. It lives inside the package rather than
 #: in docs/ because the image only ships app/, and a doc that cannot deploy
 #: cannot be the source of truth.
-ONTOLOGY_MODEL = Path(__file__).resolve().parent.parent / "ontology" / "model.md"
+ONTOLOGY_DIR = Path(__file__).resolve().parent.parent / "ontology"
+ONTOLOGY_MODEL = ONTOLOGY_DIR / "model.md"
+ADOPTION_POLICY = ONTOLOGY_DIR / "adoptions.md"
+
+
+def _serve(document: Path, label: str) -> PlainTextResponse:
+    if not document.is_file():
+        raise HTTPException(404, f"{label} is not on disk")
+    # A custom Response bypasses the injected one, so the header is set here.
+    return PlainTextResponse(
+        document.read_text(encoding="utf-8"),
+        media_type="text/markdown",
+        headers={"Cache-Control": f"max-age={CACHE_SECONDS}"},
+    )
 
 
 @router.get("/ontology/model", response_class=PlainTextResponse)
 async def ontology_model():
-    if not ONTOLOGY_MODEL.is_file():
-        raise HTTPException(404, "Ontology model document is not on disk")
-    # A custom Response bypasses the injected one, so the header is set here.
-    return PlainTextResponse(
-        ONTOLOGY_MODEL.read_text(encoding="utf-8"),
-        media_type="text/markdown",
-        headers={"Cache-Control": f"max-age={CACHE_SECONDS}"},
-    )
+    return _serve(ONTOLOGY_MODEL, "Ontology model document")
+
+
+@router.get("/ontology/adoptions", response_class=PlainTextResponse)
+async def adoption_policy():
+    """What each stance means and which ones are hard stops. Served so the MCP
+    resource and any future UI read the same file the backend does."""
+    return _serve(ADOPTION_POLICY, "Adoption policy document")
 
 
 def _slot_name(slot: StackSlot) -> str:

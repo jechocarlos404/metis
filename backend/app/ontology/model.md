@@ -207,6 +207,30 @@ An agent that can bind a slot can silence a gap, and the gaps are the product. T
 is still explainable a year later only because every binding carries a person and a
 reason — an automated writer strips both while looking like progress.
 
+### The MCP surface
+
+Read-only, over the same HTTP API a browser uses — not over the services in-process.
+That is what makes the claim true rather than aspirational: there is an API log line to
+compare a chat transcript against, and the write boundary is inherited rather than
+re-implemented. The server's token is issued to `metis-mcp`, the backend derives
+`Surface.mcp` from the signed `azp`, and any write comes back 403.
+
+Eight tools — the six `question` keys, plus `tech_search` (navigation: everything else
+takes a slug it returns) and `propose_binding` (a hand-off that persists nothing).
+Four resources: `metis://ontology/model` and `metis://policy/adoptions` serve the same
+files as `GET /api/ontology/model` and `/api/ontology/adoptions`; `metis://tech/{slug}`
+and `metis://stacks/{product}` are templated. Three prompts.
+
+Tools return **text, not JSON**. An agent quotes text back to a user; it paraphrases
+JSON, and paraphrase is where `workaround` becomes "partial support" and the transcripts
+stop being comparable. Numbers lead, enums stay verbatim, the row order is the
+envelope's, and `Open: <href>` is always the last line.
+
+**Two hard stops, everything else an argument.** A `banned` stance and a blocking
+constraint both halt and cite an id. `deprecated`, `contained`, `workaround` and "no
+offer at all" come back with their rationale, so the agent can lose the argument out
+loud rather than quietly declining and leaving nobody to disagree with.
+
 ## Slugs
 
 Capabilities, products and technologies are addressed by a unique kebab-case slug.
@@ -258,10 +282,11 @@ independent.
 
 - **The six UI routes** — `/tech`, `/stacks`, `/capabilities/[slug]`, `/tech/[slug]`,
   `?view=exposure`, `/ontology`. UI decisions pending. Every endpoint they need exists.
-- **The MCP server** — 8 tools, 4 resources, 3 prompts. The envelope it renders is here;
-  the server, its transport and its read-scoped token are not.
 - The `stack_recommender` agent's step 1 (archetype auto-selection by best capability
   cover) and its chat routing.
+- The encounter side effect the MCP spec puts out of scope for v1: an agent that ships a
+  package appending an `encounters` row at depth `touched`. Left out on purpose so the
+  discussion happens deliberately rather than as a patch.
 - The `catalog_sync` job that refreshes `technologies` and `eol_on` from upstream
   registries. Until it exists, the catalog is populated by hand or by import script.
 - Lockfile/Dockerfile/Terraform import into `product_technologies`. The endpoint

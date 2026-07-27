@@ -12,14 +12,15 @@ import pytest
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi import HTTPException
 
-from app.auth import Principal, authorize
+from app.auth import Principal, authorize, surface_from_azp
 from app.auth.deps import require_admin
-from app.auth.jwt import TokenVerifier
+from app.auth.jwt import TokenVerifier, principal_from_claims
 from app.config import Settings
+from app.models.enums import Surface
 
 
-def _p(*roles: str) -> Principal:
-    return Principal(sub="u", username="u", roles=list(roles))
+def _p(*roles: str, surface: Surface = Surface.desktop) -> Principal:
+    return Principal(sub="u", username="u", roles=list(roles), surface=surface)
 
 
 # --- RBAC decision matrix (pure) ---------------------------------------------
@@ -40,6 +41,54 @@ def test_writes_blocked_for_viewer(method):
 @pytest.mark.parametrize("method", ["POST", "DELETE"])
 def test_writes_allowed_for_editor_and_admin(role, method):
     authorize(method, _p(role))  # does not raise
+
+
+# --- the write boundary: only the desktop writes -----------------------------
+
+@pytest.mark.parametrize("surface", [Surface.api, Surface.mcp])
+@pytest.mark.parametrize("method", ["POST", "PATCH", "PUT", "DELETE"])
+def test_writes_blocked_off_desktop_even_for_admin(surface, method):
+    """An agent that can bind a slot can silence a gap, and the gaps are the
+    product. Role is not the gate here — the door is."""
+    with pytest.raises(HTTPException) as err:
+        authorize(method, _p("admin", surface=surface), "/api/stacks/slots/abc/bind")
+    assert err.value.status_code == 403
+    assert err.value.detail["error"] == "human_action_required"
+    # The refusal hands over the screen that can do it.
+    assert err.value.detail["href"] == "/stacks?slot=abc"
+
+
+@pytest.mark.parametrize("surface", [Surface.api, Surface.mcp])
+def test_reads_allowed_off_desktop(surface):
+    authorize("GET", _p("viewer", surface=surface), "/api/tech")  # does not raise
+
+
+@pytest.mark.parametrize("surface", [Surface.api, Surface.mcp])
+def test_recommend_is_a_read_despite_being_a_post(surface):
+    """POST because the input is a body, not because it writes. Nothing is
+    persisted; the response is an argument."""
+    authorize("POST", _p("viewer", surface=surface), "/api/stacks/metis/recommend")
+
+
+def test_viewer_on_desktop_hears_about_their_role_not_their_surface():
+    with pytest.raises(HTTPException) as err:
+        authorize("POST", _p("viewer"), "/api/stacks/slots/abc/bind")
+    assert err.value.detail == "Requires editor or admin role"
+
+
+# --- surface comes from the signed azp, not from a header --------------------
+
+def test_surface_derives_from_the_authorized_party():
+    assert surface_from_azp("metis-web", "metis-web", "metis-mcp") is Surface.desktop
+    assert surface_from_azp("metis-mcp", "metis-web", "metis-mcp") is Surface.mcp
+    assert surface_from_azp("some-script", "metis-web", "metis-mcp") is Surface.api
+    # An absent azp gets the least-privileged surface, never the desktop.
+    assert surface_from_azp(None, "metis-web", "metis-mcp") is Surface.api
+
+
+def test_principal_defaults_to_api_when_no_client_configured():
+    principal = principal_from_claims({"sub": "u", "azp": "metis-web"})
+    assert principal.surface is Surface.api
 
 
 @pytest.mark.asyncio

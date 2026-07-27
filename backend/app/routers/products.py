@@ -17,6 +17,7 @@ from app.schemas.product import (
     ProductUpdate,
 )
 from app.services import capabilities as capability_service
+from app.services.slugs import unique_slug
 from app.services import decomposition as decomposition_service
 
 router = APIRouter(prefix="/api", tags=["products"])
@@ -31,7 +32,9 @@ async def list_products(session: AsyncSession = Depends(get_db)):
 async def create_product(data: ProductCreate, session: AsyncSession = Depends(get_db)):
     if data.goal_id is not None and await session.get(Goal, data.goal_id) is None:
         raise HTTPException(404, "Goal not found")
-    product = Product(**data.model_dump())
+    fields = data.model_dump()
+    fields["slug"] = await unique_slug(session, Product, data.name, data.slug)
+    product = Product(**fields)
     session.add(product)
     await session.commit()
     await session.refresh(product)

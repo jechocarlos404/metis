@@ -21,6 +21,9 @@ class Capability(PKMixin, TimestampMixin, Base):
     parent_id: Mapped[uuid.UUID | None] = mapped_column(
         PGUUID(as_uuid=True), ForeignKey("capabilities.id", ondelete="SET NULL")
     )
+    #: Canonical address. Derived from the name once, then stable — a rename
+    #: never moves it, so every href and MCP URI ever logged still resolves.
+    slug: Mapped[str] = mapped_column(Text, unique=True)
     name: Mapped[str] = mapped_column(Text)
     description: Mapped[str | None] = mapped_column(Text)
     maturity: Mapped[CapabilityMaturity] = mapped_column(

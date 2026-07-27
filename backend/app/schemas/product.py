@@ -11,6 +11,8 @@ from app.schemas.prd import PRDDocument
 class ProductCreate(BaseModel):
     goal_id: uuid.UUID | None = None
     name: str
+    #: Derived from the name when omitted. Set it explicitly to pin the address.
+    slug: str | None = None
     summary: str | None = None
     body: str | None = None
 
@@ -24,6 +26,7 @@ class ProductUpdate(BaseModel):
 
 class ProductRead(Stamped):
     goal_id: uuid.UUID | None
+    slug: str
     name: str
     summary: str | None
     body: str | None

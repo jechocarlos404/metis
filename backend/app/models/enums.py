@@ -45,6 +45,16 @@ class ContextBudget(StrEnum):
     L = "L"
 
 
+class Surface(StrEnum):
+    """Where a request came from. Not a role — a role says what someone is
+    allowed to do, a surface says which door they came through, and the write
+    boundary is drawn on the door."""
+
+    desktop = "desktop"
+    api = "api"
+    mcp = "mcp"
+
+
 class TechKind(StrEnum):
     """Granularity of the world catalog. These differ in kind, not in shape —
     every tech question ranges over all of them at once."""

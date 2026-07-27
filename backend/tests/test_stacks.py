@@ -22,7 +22,7 @@ from app.services import technologies as tech_service
 
 
 async def make_product(session, name="metis"):
-    product = Product(name=name)
+    product = Product(slug=name, name=name)
     session.add(product)
     await session.commit()
     await session.refresh(product)

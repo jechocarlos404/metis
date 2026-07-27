@@ -90,7 +90,8 @@ async def seed_demo_data(sessionmaker: async_sessionmaker[AsyncSession]) -> bool
         product = Product(
             seq=4,
             goal_id=product_goals[0].id,
-            name="PM Export — ticket delivery to external trackers",
+            slug="pm-export",
+        name="PM Export — ticket delivery to external trackers",
             summary="Tickets export to Jira, Linear, and Notion via the pm_backends "
             "protocol. Each exported ticket stores its external ID. "
             "What it does, not how.",
@@ -107,7 +108,8 @@ async def seed_demo_data(sessionmaker: async_sessionmaker[AsyncSession]) -> bool
         # --- Capability map (slow plane: nouns that mature, never ship) ---
         cap_intel = Capability(
             seq=1,
-            name="Feature intelligence",
+            slug="feature-intelligence",
+        name="Feature intelligence",
             description="The product understands its own feature library: search it, "
             "traverse it, answer impact questions from it.",
             maturity=CapabilityMaturity.ga,
@@ -118,7 +120,8 @@ async def seed_demo_data(sessionmaker: async_sessionmaker[AsyncSession]) -> bool
         cap_search = Capability(
             seq=2,
             parent_id=cap_intel.id,
-            name="Feature search",
+            slug="feature-search",
+        name="Feature search",
             description="Find features like X — ranked lookup over the library.",
             maturity=CapabilityMaturity.ga,
             evidence_anchors=["backend/app/services/search.py"],
@@ -126,14 +129,16 @@ async def seed_demo_data(sessionmaker: async_sessionmaker[AsyncSession]) -> bool
         cap_graph = Capability(
             seq=3,
             parent_id=cap_intel.id,
-            name="Feature graph",
+            slug="feature-graph",
+        name="Feature graph",
             description="Typed dependency graph with impact, build order, and cycles.",
             maturity=CapabilityMaturity.beta,
             evidence_anchors=["backend/app/services/graph_service.py"],
         )
         cap_export = Capability(
             seq=4,
-            name="Ticket export",
+            slug="ticket-export",
+        name="Ticket export",
             description="Approved tickets flow to external trackers and carry their "
             "external IDs back.",
             maturity=CapabilityMaturity.alpha,

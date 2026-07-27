@@ -34,6 +34,7 @@ from app.schemas.capability import (
     Rollup,
 )
 from app.schemas.feature import WhyChain, WhyStep
+from app.services.slugs import unique_slug
 
 GA_OR_LATER = {"ga", "deprecated", "retired"}
 
@@ -70,7 +71,9 @@ async def _forbid_forest_cycle(
 async def create_capability(session: AsyncSession, data: CapabilityCreate) -> Capability:
     if data.parent_id is not None and await session.get(Capability, data.parent_id) is None:
         raise HTTPException(404, f"Capability {data.parent_id} not found")
-    capability = Capability(**data.model_dump())
+    fields = data.model_dump()
+    fields["slug"] = await unique_slug(session, Capability, data.name, data.slug)
+    capability = Capability(**fields)
     session.add(capability)
     await session.commit()
     await session.refresh(capability)

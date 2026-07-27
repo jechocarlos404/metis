@@ -201,7 +201,7 @@ async def test_dependents_separate_breaks_from_drift(db):
     """Question 2. required is a break, optional an inconvenience, and
     off_stack means nobody declared the dependency in the first place."""
     async with db() as session:
-        product = Product(name="metis")
+        product = Product(slug="metis", name="metis")
         session.add(product)
         await session.commit()
         capability = await make_capability(session, "durable persistence")

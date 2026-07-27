@@ -1,6 +1,6 @@
 ---
 import HealthBadges from "../components/shell/HealthBadges.jsx";
-import { ICONS } from "../ds/Icons.jsx";
+import NavLink from "../components/shell/NavLink.astro";
 import "../styles/global.css";
 
 const NAV = [
@@ -9,14 +9,22 @@ const NAV = [
   { href: "/capabilities", label: "Capabilities", icon: "layers" },
   { href: "/features", label: "Features", icon: "network" },
   { href: "/products", label: "Products", icon: "package" },
+  // Buy plane. /capabilities/[slug] and /tech/[slug] are detail routes reached
+  // by link, and exposure is a view of /tech — six routes, three nav items.
+  { href: "/tech", label: "Tech", icon: "circuit-board" },
+  { href: "/stacks", label: "Stacks", icon: "layers" },
   { href: "/users", label: "Users", icon: "users", admin: true },
   { href: "/admin", label: "LLM Config", icon: "settings", admin: true },
+  // Help position: the document that teaches the vocabulary, last.
+  { href: "/ontology", label: "Ontology", icon: "book-open", foot: true },
 ];
 
 const { title = "Metis" } = Astro.props;
 const user = Astro.locals.user;
 const isAdmin = user?.role === "admin";
-const nav = NAV.filter((item) => !item.admin || isAdmin);
+const visible = NAV.filter((item) => !item.admin || isAdmin);
+const nav = visible.filter((item) => !item.foot);
+const footNav = visible.filter((item) => item.foot);
 const displayName = user?.name || user?.username || "";
 const initials =
   displayName
@@ -57,46 +65,14 @@ const isActive = (href) => path === href || path.startsWith(href + "/");
           >
         </div>
         <nav style="display:flex; flex-direction:column; gap:2px; padding:0 10px;">
-          {
-            nav.map((item) => {
-              const active = isActive(item.href);
-              return (
-                <a
-                  href={item.href}
-                  style={`display:flex; align-items:center; gap:10px; padding:8px 10px; text-decoration:none;
-                    background:${active ? "var(--surface-inset)" : "transparent"};
-                    color:${active ? "var(--text-heading)" : "var(--text-secondary)"};
-                    font-weight:${active ? "var(--weight-semibold)" : "var(--weight-regular)"};
-                    border-radius:var(--radius-sm); font-family:var(--font-body); font-size:var(--text-sm);`}
-                >
-                  <svg
-                    width="15"
-                    height="15"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    style={`flex:none; color:${active ? "var(--text-accent)" : "var(--text-disabled)"};`}
-                  >
-                    {(ICONS[item.icon] || []).map((n) =>
-                      n[0] === "path" ? (
-                        <path d={n[1]} />
-                      ) : n[0] === "circle" ? (
-                        <circle cx={n[1]} cy={n[2]} r={n[3]} />
-                      ) : (
-                        <rect x={n[1]} y={n[2]} width={n[3]} height={n[4]} rx={n[5]} />
-                      ),
-                    )}
-                  </svg>
-                  {item.label}
-                </a>
-              );
-            })
-          }
+          {nav.map((item) => <NavLink {...item} active={isActive(item.href)} />)}
         </nav>
         <div style="margin-top:auto; display:flex; flex-direction:column;">
+          {footNav.length > 0 && (
+            <nav style="display:flex; flex-direction:column; gap:2px; padding:0 10px 10px;">
+              {footNav.map((item) => <NavLink {...item} active={isActive(item.href)} />)}
+            </nav>
+          )}
           {
             user && (
               <div style="padding:12px 16px; border-top:1px solid var(--border-hairline); display:flex; align-items:center; gap:10px;">

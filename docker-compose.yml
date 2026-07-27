@@ -53,6 +53,10 @@ services:
       KEYCLOAK_ADMIN_CLIENT_ID: metis-backend
       KEYCLOAK_ADMIN_CLIENT_SECRET: ${METIS_BACKEND_CLIENT_SECRET:-dev-backend-secret}
       AUTH_ENABLED: ${AUTH_ENABLED:-true}
+      # The demo seed is skipped when any goal exists. A database where the
+      # goals were removed but their capabilities were not will try to seed
+      # again and collide, so this needs to be turnable off from outside.
+      SEED_DEMO_DATA: ${SEED_DEMO_DATA:-true}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:

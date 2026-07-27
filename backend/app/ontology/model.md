@@ -7,9 +7,8 @@ transcripts stop being comparable. It lives inside `backend/app/` rather than `d
 because the image ships only `app/`, and a document that cannot deploy cannot be the
 source of truth.
 
-Status: **implemented, backend only.** The six routes in the design handoff are not
-built; the API contract they need is. Extends `ontology-graph-spec.md` with a fourth
-plane.
+Status: **implemented** — data model, HTTP API, MCP server and the six routes. Extends
+`ontology-graph-spec.md` with a fourth plane.
 
 ## The organising idea
 
@@ -278,10 +277,27 @@ stance or a `bus_factor` of 1 with no version rows would never surface — contr
 its own three-independent-modes claim. The implementation treats the modes as
 independent.
 
+## The screens
+
+Six routes, three nav items. `/capabilities/[slug]` and `/tech/[slug]` are detail routes
+reached by link — nobody wakes up wanting to browse the catalog, they arrive holding a
+need — and `?view=exposure` is a view of `/tech`, kept in the URL so a resolved screen is
+linkable. Only `/ontology` earns its own entry, in the Help position.
+
+| Route | Is for |
+|---|---|
+| `/capabilities/[slug]` | build or buy, in one frame. The entry point everything links to |
+| `/tech` | finding a technology among many: facets, not a tree |
+| `/tech?view=exposure` | what is dying, sorted by required slots |
+| `/tech/[slug]` | one technology, its blast radius, and who to ask |
+| `/stacks` | slots by layer, their flags, and the resolver |
+| `/ontology` | this document |
+
+`/stacks` carries the only mutation in the buy plane: binding a slot. It is a button a
+human presses, and nothing else in the system presses it.
+
 ## Not built
 
-- **The six UI routes** — `/tech`, `/stacks`, `/capabilities/[slug]`, `/tech/[slug]`,
-  `?view=exposure`, `/ontology`. UI decisions pending. Every endpoint they need exists.
 - The `stack_recommender` agent's step 1 (archetype auto-selection by best capability
   cover) and its chat routing.
 - The encounter side effect the MCP spec puts out of scope for v1: an agent that ships a

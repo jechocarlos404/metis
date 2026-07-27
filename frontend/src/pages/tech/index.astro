@@ -1,0 +1,13 @@
+---
+import AppLayout from "../../layouts/AppLayout.astro";
+import TechCatalogIsland from "../../components/islands/TechCatalogIsland.jsx";
+
+// `?view=exposure` is a view of this route, not a second one — keeping it in
+// the URL is what makes a resolved screen linkable.
+const view = Astro.url.searchParams.get("view") === "exposure" ? "exposure" : "catalog";
+const query = Astro.url.searchParams.get("q") ?? "";
+---
+
+<AppLayout title="Tech">
+  <TechCatalogIsland client:load initialView={view} initialQuery={query} />
+</AppLayout>

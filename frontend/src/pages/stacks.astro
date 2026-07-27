@@ -1,0 +1,13 @@
+---
+import AppLayout from "../layouts/AppLayout.astro";
+import StacksIsland from "../components/islands/StacksIsland.jsx";
+
+// The resolved slot is in the URL so it can be linked to — the resolver is
+// the thing worth sending someone.
+const slot = Astro.url.searchParams.get("slot") ?? "";
+const canWrite = ["editor", "admin"].includes(Astro.locals.user?.role);
+---
+
+<AppLayout title="Stacks">
+  <StacksIsland client:load initialSlot={slot} canWrite={canWrite} />
+</AppLayout>

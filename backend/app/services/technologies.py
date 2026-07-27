@@ -35,6 +35,8 @@ from app.models import (
     TechEdge,
     TechEdgeKind,
     TechFit,
+    TechKind,
+    TechLayer,
     TechSatisfaction,
     Technology,
     TechVersion,
@@ -174,25 +176,74 @@ async def delete_technology(session: AsyncSession, tech_id: uuid.UUID) -> None:
     await session.commit()
 
 
-async def _satisfies_index(session: AsyncSession) -> dict[uuid.UUID, list[str]]:
+async def _satisfies_index(
+    session: AsyncSession, tech_ids: list[uuid.UUID] | None = None
+) -> dict[uuid.UUID, list[str]]:
     stmt = (
         select(TechSatisfaction.tech_id, Capability.name)
         .join(Capability, Capability.id == TechSatisfaction.capability_id)
         .order_by(Capability.name)
     )
+    if tech_ids is not None:
+        stmt = stmt.where(TechSatisfaction.tech_id.in_(tech_ids))
     index: dict[uuid.UUID, list[str]] = defaultdict(list)
     for tech_id, name in await session.execute(stmt):
         index[tech_id].append(name)
     return index
 
 
-async def _usage_counts(session: AsyncSession) -> dict[uuid.UUID, int]:
+async def _usage_counts(
+    session: AsyncSession, tech_ids: list[uuid.UUID] | None = None
+) -> dict[uuid.UUID, int]:
     stmt = select(ProductTechnology.tech_id, func.count()).group_by(ProductTechnology.tech_id)
+    if tech_ids is not None:
+        stmt = stmt.where(ProductTechnology.tech_id.in_(tech_ids))
     return {tech_id: count for tech_id, count in await session.execute(stmt)}
 
 
-async def _adoption_index(session: AsyncSession) -> dict[uuid.UUID, Adoption]:
-    return {a.tech_id: a for a in (await session.scalars(select(Adoption))).all()}
+async def _adoption_index(
+    session: AsyncSession, tech_ids: list[uuid.UUID] | None = None
+) -> dict[uuid.UUID, Adoption]:
+    stmt = select(Adoption)
+    if tech_ids is not None:
+        stmt = stmt.where(Adoption.tech_id.in_(tech_ids))
+    return {a.tech_id: a for a in (await session.scalars(stmt)).all()}
+
+
+def _coerce(enum_cls, value: str, field: str):
+    try:
+        return enum_cls(value)
+    except ValueError:
+        allowed = ", ".join(str(member) for member in enum_cls)
+        raise HTTPException(422, f"Unknown {field} `{value}` — one of: {allowed}") from None
+
+
+def _catalog_filters(
+    q: str | None,
+    kind: str | None,
+    layer: str | None,
+    adoption: str | None,
+    skip: str | None = None,
+) -> list:
+    filters = []
+    if q:
+        # Both trigram GIN indexes cover ILIKE with a leading wildcard.
+        filters.append(
+            or_(Technology.name.ilike(f"%{q}%"), Technology.slug.ilike(f"%{q}%"))
+        )
+    if kind and skip != "kind":
+        filters.append(Technology.kind == _coerce(TechKind, kind, "kind"))
+    if layer and skip != "layer":
+        filters.append(Technology.layer == _coerce(TechLayer, layer, "layer"))
+    if adoption and skip != "adoption":
+        # `none` is a real filter: no stance taken is a meaningful answer.
+        if adoption == "none":
+            filters.append(Adoption.id.is_(None))
+        else:
+            filters.append(
+                Adoption.status == _coerce(AdoptionStatus, adoption, "adoption status")
+            )
+    return filters
 
 
 async def catalog(
@@ -204,64 +255,77 @@ async def catalog(
     limit: int = 50,
     offset: int = 0,
 ) -> dict:
-    """The /tech page: faceted, paginated, and never unbounded — the catalog is
-    world-scope, so an unfiltered full read is a mistake, not a convenience.
+    """The /tech page: faceted and paginated in SQL. The catalog is world-scope
+    — an unfiltered full read is a mistake, not a convenience — so the filter,
+    the page and the counts all go to the database, and the per-row detail is
+    fetched only for the page.
 
-    kind and layer are orthogonal facets, not a hierarchy; facet_counts are
-    computed over the same filter minus the facet being counted, so a chip
-    never reports zero for something it would itself reveal."""
-    adoptions = await _adoption_index(session)
+    kind and layer are orthogonal facets, not a hierarchy. Each facet's counts
+    are computed over the same filter minus that facet, so a chip never reports
+    zero for something selecting it would reveal."""
+    joined = select(Technology).outerjoin(Adoption, Adoption.tech_id == Technology.id)
+    where = _catalog_filters(q, kind, layer, adoption)
 
-    def matches(t: Technology, *, skip: str | None = None) -> bool:
-        stance = adoptions.get(t.id)
-        if q and q.lower() not in t.name.lower() and q.lower() not in t.slug.lower():
-            return False
-        if skip != "kind" and kind and str(t.kind) != kind:
-            return False
-        if skip != "layer" and layer and str(t.layer or "") != layer:
-            return False
-        if skip != "adoption" and adoption:
-            # `none` is a real filter: no stance taken is a meaningful answer.
-            if adoption == "none":
-                return stance is None
-            if stance is None or str(stance.status) != adoption:
-                return False
-        return True
-
-    all_rows = list(
-        (await session.scalars(select(Technology).order_by(Technology.slug))).all()
+    total = await session.scalar(
+        select(func.count())
+        .select_from(Technology)
+        .outerjoin(Adoption, Adoption.tech_id == Technology.id)
+        .where(*where)
     )
-    matched = [t for t in all_rows if matches(t)]
+    page = list(
+        (
+            await session.scalars(
+                joined.where(*where).order_by(Technology.slug).limit(limit).offset(offset)
+            )
+        ).all()
+    )
 
-    facet_counts: dict[str, dict[str, int]] = {"kind": {}, "layer": {}, "adoption": {}}
-    for t in all_rows:
-        if matches(t, skip="kind"):
-            facet_counts["kind"][str(t.kind)] = facet_counts["kind"].get(str(t.kind), 0) + 1
-        if matches(t, skip="layer") and t.layer is not None:
-            facet_counts["layer"][str(t.layer)] = facet_counts["layer"].get(str(t.layer), 0) + 1
-        if matches(t, skip="adoption"):
-            stance = adoptions.get(t.id)
-            key = str(stance.status) if stance else "none"
-            facet_counts["adoption"][key] = facet_counts["adoption"].get(key, 0) + 1
+    def facet_query(column, facet: str):
+        return (
+            select(column, func.count())
+            .select_from(Technology)
+            .outerjoin(Adoption, Adoption.tech_id == Technology.id)
+            .where(*_catalog_filters(q, kind, layer, adoption, skip=facet))
+            .group_by(column)
+        )
 
-    page = matched[offset : offset + limit]
-    satisfies = await _satisfies_index(session)
-    used_by = await _usage_counts(session)
+    facet_counts: dict[str, dict[str, int]] = {}
+    facet_counts["kind"] = {
+        str(value): count for value, count in await session.execute(
+            facet_query(Technology.kind, "kind")
+        )
+    }
+    facet_counts["layer"] = {
+        str(value): count
+        for value, count in await session.execute(facet_query(Technology.layer, "layer"))
+        if value is not None  # a language spans layers; NULL is honest, not a bucket
+    }
+    facet_counts["adoption"] = {
+        (str(value) if value is not None else "none"): count
+        for value, count in await session.execute(
+            facet_query(Adoption.status, "adoption")
+        )
+    }
+
+    ids = [t.id for t in page]
+    satisfies = await _satisfies_index(session, ids)
+    used_by = await _usage_counts(session, ids)
+    stances = await _adoption_index(session, ids)
     rows = [
         {
             "technology": t,
-            "adoption": adoptions[t.id].status if t.id in adoptions else None,
+            "adoption": stances[t.id].status if t.id in stances else None,
             "satisfies": satisfies.get(t.id, []),
             "used_by": used_by.get(t.id, 0),
         }
         for t in page
     ]
-    return {"rows": rows, "total": len(matched), "facet_counts": facet_counts}
+    return {"rows": rows, "total": total or 0, "facet_counts": facet_counts}
 
 
 async def detail(session: AsyncSession, tech_id: uuid.UUID) -> dict:
     technology = await get_technology(session, tech_id)
-    adoptions = await _adoption_index(session)
+    adoptions = await _adoption_index(session, [tech_id])
     edges = list(
         (
             await session.scalars(
@@ -274,8 +338,8 @@ async def detail(session: AsyncSession, tech_id: uuid.UUID) -> dict:
     return {
         "technology": technology,
         "adoption": adoptions[tech_id].status if tech_id in adoptions else None,
-        "satisfies": (await _satisfies_index(session)).get(tech_id, []),
-        "used_by": (await _usage_counts(session)).get(tech_id, 0),
+        "satisfies": (await _satisfies_index(session, [tech_id])).get(tech_id, []),
+        "used_by": (await _usage_counts(session, [tech_id])).get(tech_id, 0),
         "vendor": (
             await session.get(Vendor, technology.vendor_id) if technology.vendor_id else None
         ),

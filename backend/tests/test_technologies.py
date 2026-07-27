@@ -110,6 +110,14 @@ async def test_catalog_facets_and_pagination(db):
         page = await tech_service.catalog(session, limit=2, offset=2)
         assert page["total"] == 3 and len(page["rows"]) == 1
 
+        # search matches slug or name, case-insensitively
+        page = await tech_service.catalog(session, q="POST")
+        assert [r["technology"].slug for r in page["rows"]] == ["postgres"]
+
+        with pytest.raises(HTTPException) as err:
+            await tech_service.catalog(session, kind="nonsense")
+        assert err.value.status_code == 422
+
 
 @pytest.mark.asyncio
 async def test_satisfaction_is_many_to_many(db):

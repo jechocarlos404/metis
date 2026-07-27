@@ -12,6 +12,7 @@ from app.schemas.stack import (
     SlotCreate,
     SlotUpdate,
     StackCreate,
+    StackUpdate,
 )
 from app.schemas.technology import AdoptionWrite, SatisfactionCreate, TechnologyCreate
 from app.services import capabilities as capability_service
@@ -256,6 +257,36 @@ async def test_slot_capability_must_be_bundled_by_the_product(db):
             SlotCreate(layer="api", role="payments", capability_id=unbundled.id),
         )
         await stack_service.update_slot(session, ok.id, SlotUpdate(role="payments api"))
+
+
+@pytest.mark.asyncio
+async def test_repointing_a_stack_revalidates_its_slots(db):
+    """Invariant 6 again: re-pointing carries the slots with it, so the new
+    product has to bundle everything they answer."""
+    async with db() as session:
+        origin = await make_product(session, "metis")
+        other = await make_product(session, "atlas")
+        capability = await make_capability(session, "durable persistence", origin)
+        stack = await stack_service.create_stack(
+            session, StackCreate(name="metis stack", product_id=origin.id)
+        )
+        await stack_service.create_slot(
+            session,
+            stack.id,
+            SlotCreate(layer="data", role="primary store", capability_id=capability.id),
+        )
+
+        with pytest.raises(HTTPException) as err:
+            await stack_service.update_stack(
+                session, stack.id, StackUpdate(product_id=other.id)
+            )
+        assert err.value.status_code == 422
+
+        await capability_service.bundle_product(session, other.id, capability.id)
+        moved = await stack_service.update_stack(
+            session, stack.id, StackUpdate(product_id=other.id)
+        )
+        assert moved.product_id == other.id
 
 
 @pytest.mark.asyncio

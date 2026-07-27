@@ -108,6 +108,13 @@ async def update_stack(
             raise HTTPException(422, "An archetype belongs to no product")
         if await session.get(Product, fields["product_id"]) is None:
             raise HTTPException(404, "Product not found")
+        # Re-pointing carries the existing slots with it, so they have to be
+        # legal against the new product too — otherwise the stack answers
+        # capabilities the product never promised.
+        for slot in await list_slots(session, stack_id):
+            await _check_capability_bundled(
+                session, fields["product_id"], slot.capability_id
+            )
     if fields.get("parent_id") is not None:
         if fields["parent_id"] == stack_id:
             raise HTTPException(422, "A stack cannot descend from itself")
@@ -183,18 +190,18 @@ async def get_slot(session: AsyncSession, slot_id: uuid.UUID) -> StackSlot:
 
 
 async def _check_capability_bundled(
-    session: AsyncSession, stack: TechStack, capability_id: uuid.UUID | None
+    session: AsyncSession, product_id: uuid.UUID | None, capability_id: uuid.UUID | None
 ) -> None:
     """A product stack may only answer capabilities its product actually bundles.
     No cross-table FK can express this, so it lives here. Archetypes are exempt:
     they have no product to check against — that is what makes them a shape."""
-    if capability_id is None or stack.product_id is None:
+    if capability_id is None or product_id is None:
         return
     if await session.get(Capability, capability_id) is None:
         raise HTTPException(404, "Capability not found")
     bundled = await session.scalar(
         select(ProductBundle).where(
-            ProductBundle.product_id == stack.product_id,
+            ProductBundle.product_id == product_id,
             ProductBundle.capability_id == capability_id,
         )
     )
@@ -210,7 +217,7 @@ async def create_slot(
     session: AsyncSession, stack_id: uuid.UUID, data: SlotCreate
 ) -> StackSlot:
     stack = await get_stack(session, stack_id)
-    await _check_capability_bundled(session, stack, data.capability_id)
+    await _check_capability_bundled(session, stack.product_id, data.capability_id)
     if data.tech_id is not None and await session.get(Technology, data.tech_id) is None:
         raise HTTPException(404, "Technology not found")
     slot = StackSlot(stack_id=stack_id, **data.model_dump())
@@ -227,7 +234,7 @@ async def update_slot(
     fields = data.model_dump(exclude_unset=True)
     if "capability_id" in fields:
         stack = await get_stack(session, slot.stack_id)
-        await _check_capability_bundled(session, stack, fields["capability_id"])
+        await _check_capability_bundled(session, stack.product_id, fields["capability_id"])
     for key, value in fields.items():
         setattr(slot, key, value)
     await session.commit()

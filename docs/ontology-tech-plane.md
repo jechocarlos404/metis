@@ -153,7 +153,7 @@ a prompt nobody could audit it, and the same question would answer differently o
 | `product_technologies` is a composite-PK join "following `product_bundles`" | `ProductBundle` is `PKMixin` + `UniqueConstraint`; the new join tables match that | Follow the codebase, not the description of it |
 | `v_exposure` / `v_redundancy` as SQL views; `adoption_rank()` as a SQL function | Service functions in Python | `create_all` makes no views or functions, and this matches how `capabilities.health()` and `graph_service` already compute derived data |
 | `tech_edges` "reuses the `feature_edges` acyclicity code unchanged" | A local check that builds a `DiGraph` from SQL per call | `FeatureGraph` is a stateful `app.state` singleton keyed on `DEPENDS_ON`/`BLOCKS` with dirty-flag write-through. The buy plane runs no topo order, ready set or cut, so there is nothing to keep warm and nothing to go stale |
-| A `stack_recommender` agent | Steps 1–5 shipped as `GET /api/stacks/slots/{id}/offers` | Those steps are deterministic. Step 6 (generated rationale text) and chat routing are not built |
+| A `stack_recommender` agent | Its deterministic steps 3–5 (supply, prune, rank) shipped as `GET /api/stacks/slots/{id}/offers`; step 2 (shape) is `POST /api/stacks/instantiate` | Those steps need no model. Step 1's archetype auto-selection and step 6's generated rationale are not built, nor is the chat routing |
 | Frontend is "Next.js App Router" | Astro | — |
 
 `v_exposure` as written in the handoff inner-joins `tech_versions`, so a `deprecated`

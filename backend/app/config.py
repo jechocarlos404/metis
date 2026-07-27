@@ -28,6 +28,12 @@ class Settings(BaseSettings):
     # the desktop, because `azp` is signed.
     keycloak_desktop_client: str = "metis-web"
     keycloak_mcp_client: str = "metis-mcp"
+    keycloak_mcp_client_secret: str = "dev-mcp-secret"
+
+    # The MCP server calls the HTTP API rather than the services in-process, so
+    # a chat transcript and an API log line up — and so the write boundary is
+    # inherited rather than re-implemented.
+    mcp_api_base_url: str = "http://localhost:8000"
 
     # LLM providers — presence of a credential marks the provider available.
     anthropic_api_key: str = ""

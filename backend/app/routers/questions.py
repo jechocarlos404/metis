@@ -70,8 +70,11 @@ async def capability_supply(
     capability = await by_slug(session, Capability, slug, "Capability")
     offers = await tech_service.offers(session, capability.id)
     bound = await tech_service.bindings_by_tech(session)
+    hidden = 0
     if not include_unadopted:
-        offers = [o for o in offers if o.stance is not None]
+        kept = [o for o in offers if o.stance is not None]
+        hidden = len(offers) - len(kept)
+        offers = kept
 
     rows = [
         {
@@ -85,18 +88,16 @@ async def capability_supply(
     ]
     unresolved = []
     if not rows:
+        # Empty is allowed; empty and silent is not. Whatever emptied the list
+        # has to say so — including this endpoint's own filter.
         blocked = await tech_service.blocked_reason(session, capability.id)
-        unresolved = [
-            Unresolved(
-                subject=slug,
-                reason=(
-                    "every offer is blocked by a constraint"
-                    if blocked
-                    else "no technology satisfies this capability"
-                ),
-                blocked_by=blocked,
-            )
-        ]
+        if hidden:
+            reason = f"{hidden} offer(s) hidden — none has an adoption stance"
+        elif blocked:
+            reason = "every offer is blocked by a constraint"
+        else:
+            reason = "no technology satisfies this capability"
+        unresolved = [Unresolved(subject=slug, reason=reason, blocked_by=blocked)]
     return envelope(
         Question.capability_supply,
         SubjectKind.capability,

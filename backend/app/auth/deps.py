@@ -15,6 +15,8 @@ progress.
 `authorize()` is kept pure so both matrices can be unit-tested without HTTP.
 """
 
+import re
+
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.concurrency import run_in_threadpool
 
@@ -34,10 +36,17 @@ DEV_PRINCIPAL = Principal(
 
 _SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 
-#: Path suffixes whose non-safe method computes an argument and persists
-#: nothing. The write boundary is about writes, not about verbs — `recommend`
-#: takes a body, so it has to be a POST, and it is still a read.
-_NON_PERSISTING = ("/recommend",)
+#: Reads that have to be POSTs because their input is a body. The write
+#: boundary is about writes, not about verbs. Matched in full rather than by
+#: suffix: the path is caller-controlled, and an exemption that widens by
+#: accident is the kind that is discovered later rather than reviewed now.
+_READS_BY_POST = (re.compile(r"/api/stacks/[^/]+/recommend"),)
+
+
+def _is_read(method: str, path: str) -> bool:
+    return method.upper() in _SAFE_METHODS or any(
+        pattern.fullmatch(path) for pattern in _READS_BY_POST
+    )
 
 
 def _verifier(request: Request, settings: Settings) -> TokenVerifier:
@@ -80,7 +89,7 @@ def authorize(method: str, principal: Principal, path: str = "") -> None:
     """Reads for any authenticated user; writes need editor/admin *and* the
     desktop. Ordering matters: a viewer on the desktop should hear about their
     role, not be told a human is required when they are one."""
-    if method.upper() in _SAFE_METHODS or path.endswith(_NON_PERSISTING):
+    if _is_read(method, path):
         return
     if not principal.has_any("editor", "admin"):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Requires editor or admin role")

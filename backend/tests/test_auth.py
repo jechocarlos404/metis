@@ -70,6 +70,22 @@ def test_recommend_is_a_read_despite_being_a_post(surface):
     authorize("POST", _p("viewer", surface=surface), "/api/stacks/metis/recommend")
 
 
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/stacks/slots/abc/bind/recommend",  # suffix match would exempt this
+        "/api/stacks/a/b/recommend",
+        "/api/tech/recommend",
+        "/api/recommend",
+    ],
+)
+def test_the_read_by_post_exemption_does_not_widen(path):
+    """The path is caller-controlled, so the exemption matches in full. An
+    exemption that widens by accident gets discovered rather than reviewed."""
+    with pytest.raises(HTTPException):
+        authorize("POST", _p("viewer", surface=Surface.api), path)
+
+
 def test_viewer_on_desktop_hears_about_their_role_not_their_surface():
     with pytest.raises(HTTPException) as err:
         authorize("POST", _p("viewer"), "/api/stacks/slots/abc/bind")

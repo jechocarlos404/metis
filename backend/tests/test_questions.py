@@ -25,6 +25,7 @@ from app.schemas.technology import (
     EncounterCreate,
     SatisfactionCreate,
     TechnologyCreate,
+    TechnologyUpdate,
     VendorCreate,
     VersionCreate,
 )
@@ -186,6 +187,34 @@ async def test_a_gap_is_an_answer_not_a_404(db, client):
             "blocked_by": [],
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_filtering_out_every_offer_still_says_why(db, client):
+    """Empty is allowed; empty and silent is not. The endpoint's own filter has
+    to account for what it hid, or it produces the one forbidden payload."""
+    await seed(db)
+    body = (
+        await client.get("/api/capabilities/semantic-search/supply?include_unadopted=false")
+    ).json()
+    # Only qdrant has a stance, so two offers are hidden and one survives.
+    assert [r["tech"] for r in body["answer"]] == ["qdrant"]
+
+    async with db() as session:
+        await tech_service.clear_adoption(session, (await seed_tech(session)).id)
+    body = (
+        await client.get("/api/capabilities/semantic-search/supply?include_unadopted=false")
+    ).json()
+    assert body["answer"] == []
+    assert body["unresolved"][0]["reason"] == "3 offer(s) hidden — none has an adoption stance"
+
+
+async def seed_tech(session):
+    from sqlalchemy import select
+
+    from app.models import Technology
+
+    return await session.scalar(select(Technology).where(Technology.slug == "qdrant"))
 
 
 @pytest.mark.asyncio
@@ -386,9 +415,7 @@ async def test_recommend_names_the_rule_that_pruned_each_offer(db, client):
         await tech_service.update_technology(
             session,
             seeded["tech"]["qdrant"].id,
-            __import__(
-                "app.schemas.technology", fromlist=["TechnologyUpdate"]
-            ).TechnologyUpdate(facets={"license": "AGPL-3.0"}),
+            TechnologyUpdate(facets={"license": "AGPL-3.0"}),
         )
         constraint = await governance_service.create_constraint(
             session,

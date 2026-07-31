@@ -8,6 +8,7 @@ from app.config import get_settings
 from app.db import init_db, make_engine
 from app.llm.registry import ProviderRegistry
 from app.routers import (
+    admin_data,
     admin_llm,
     capabilities,
     chat,
@@ -73,10 +74,21 @@ def create_app() -> FastAPI:
     app.include_router(governance.constraints_router, dependencies=rbac)
     app.include_router(governance.concerns_router, dependencies=rbac)
     app.include_router(chat.router, dependencies=rbac)
+    # Global lists the domain routers never grew: the two join tables (whose own
+    # ids nothing else exposes) and tickets across products. Ordinary reads.
+    app.include_router(admin_data.rows_router, dependencies=rbac)
     # Admin-only: user management and LLM provider config.
     admin_only = [Depends(require_admin)]
     app.include_router(users.router, dependencies=admin_only)
     app.include_router(admin_llm.router, dependencies=admin_only)
+    # Cascade delete gets BOTH gates. require_admin checks role only, so mounting
+    # it admin_only alone would make it the one write path an api/mcp token could
+    # reach — see test_writes_blocked_off_desktop_even_for_admin. Preview is a
+    # POST and is therefore desktop-only too; that is intended, not an oversight.
+    app.include_router(
+        admin_data.cascade_router,
+        dependencies=[Depends(require_admin), Depends(enforce_rbac)],
+    )
     return app
 
 

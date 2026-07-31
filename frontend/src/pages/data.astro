@@ -1,0 +1,12 @@
+---
+import AppLayout from "../layouts/AppLayout.astro";
+import DataIsland from "../components/islands/DataIsland.jsx";
+
+// Admin-only. The API enforces it too (require_admin on /api/admin/data); this
+// redirect just avoids rendering a page that would only 403.
+if (Astro.locals.user?.role !== "admin") return Astro.redirect("/");
+---
+
+<AppLayout title="Data">
+  <DataIsland client:load />
+</AppLayout>

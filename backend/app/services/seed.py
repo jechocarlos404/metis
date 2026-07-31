@@ -39,9 +39,14 @@ DEFAULT_MODEL = "claude-opus-4-8"
 
 async def seed_demo_data(sessionmaker: async_sessionmaker[AsyncSession]) -> bool:
     async with sessionmaker() as session:
-        if await session.scalar(select(func.count()).select_from(Goal)):
-            await _ensure_agent_configs(session)
-            return False
+        # The seed writes explicit `seq` values into all of these, so a row left
+        # in any one of them collides on insert. Checking goals alone is not
+        # enough: removing a seeded project's goals leaves its capabilities and
+        # features behind, and the next startup crashes on the duplicate seq.
+        for model in (Goal, Product, ProductDecomposition, Capability, Feature, Ticket):
+            if await session.scalar(select(func.count()).select_from(model)):
+                await _ensure_agent_configs(session)
+                return False
 
         # --- Goals ---
         org = Goal(

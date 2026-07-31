@@ -1,20 +1,58 @@
 # metis
 
-Metis turns org intent into scoped, executable work through one AI-assisted pipeline:
+**Metis turns org intent into scoped, executable work.** One AI-assisted pipeline runs
+from why-the-company-cares down to a ticket sized to fit a single Claude session —
+known context, clear inputs, a verifiable done condition.
 
+Named for the Titan of practical wisdom. The intelligence before the build.
+
+```mermaid
+flowchart LR
+  OG["OrgGoal<br/><i>why the company cares</i>"] --> PG["ProductGoal<br/><i>what should move</i>"]
+  PG --> SP["Spec<br/><i>what it does, not how</i>"]
+  SP --> CM["Capability map<br/><i>durable nouns</i>"]
+  SP --> FG["Feature graph<br/><i>verbs + typed edges</i>"]
+  CM --> PRD["PRD<br/><i>versioned snapshot</i>"]
+  FG --> PRD
+  PRD --> TK["Ticket<br/><i>one agent session</i>"]
 ```
-OrgGoal → ProductGoal → Spec → Capability map + Feature graph → PRD → Tickets
-```
 
-The terminal artifact — a **Ticket** — is sized to fit one Claude session: known context,
-clear inputs, a verifiable done condition. Named for the Titan of practical wisdom.
-The intelligence before the build.
+## Why it exists
 
-The taxonomy has two planes plus a why layer (full spec in `docs/`):
-**capabilities** are durable nouns that mature and never ship; **features** are verb
-phrases that `REALIZES` exactly one capability and do ship; **goals** motivate
-capabilities, never features directly. PRDs are versioned *snapshots* of the taxonomy —
-epics pin a capability, stories pin a feature — never a second hierarchy.
+Roadmap tools model **work**. Work churns — so anything pinned to it rots. A PRD written
+against a feature list is stale the week after it is approved, "why are we building this"
+degrades into tribal memory, and a ticket that says *add auth* is unsizeable for a human
+and unusable for an agent.
+
+Metis makes one bet: **separate the durable nouns from the churning verbs.**
+
+- A **capability** is what the product *can do* — a noun that matures and never ships.
+- A **feature** is a *change* that moves one capability — a verb that does ship, then archives.
+
+Because capabilities are stable, documents can pin to them permanently, provenance
+becomes a pure graph traversal instead of a meeting, and a pivot rewrites the features
+(cheap — they were meant to churn) while only re-weighting the map.
+
+Everything else in the system is a consequence of that split.
+
+## What you can ask it
+
+The payoff is queries, not screens. All of these are live endpoints, all mirrored in
+chat and over MCP:
+
+| Question a PM actually asks | Where it comes from |
+|---|---|
+| What breaks if we change this? | `GET /api/graph/impact/{feature_id}` |
+| What can we start right now, with nothing blocking it? | `GET /api/graph/ready` |
+| What order do we have to build these in? | `GET /api/graph/topo` |
+| Why does this feature exist, all the way up to org intent? | `GET /api/features/{id}/why` |
+| How far along is this capability, really? | `GET /api/capabilities/{id}/rollup` |
+| Where is the taxonomy lying to us? | `GET /api/capabilities/health` |
+| Do we build this or buy it? | `GET /api/capabilities/{slug}/supply` |
+| What's the smallest cut that ships something? | `POST /api/graph/mvp-cut` |
+
+No score is ever stored. If a number can be recomputed, it is recomputed — stored
+derivations go stale, and a stale risk number is worse than none.
 
 ## Quick start
 
@@ -31,13 +69,14 @@ Seeded realm users (temporary passwords — Keycloak will force a change on firs
 
 | User | Password | Role |
 |---|---|---|
-| `admin@metis.local` | `admin` | admin (Users + LLM Config) |
+| `admin@metis.local` | `admin` | admin (Users + LLM Config + Data browser) |
 | `editor@metis.local` | `editor` | editor (read + write domain) |
 | `viewer@metis.local` | `viewer` | viewer (read-only) |
 
 For curl / seed scripts against the API without a browser session, set
-`AUTH_ENABLED=false` in `.env` (treats every request as admin). Leave it `true`
-for normal use.
+`AUTH_ENABLED=false` in `.env` — every request becomes an admin on the desktop
+surface, so writes work exactly as they do in the real app (see
+[the write boundary](#the-write-boundary)). Leave it `true` for normal use.
 
 First boot seeds demo data (goals, the capability map, the PM-Export spec, a
 12-ticket PRD, the feature graph) so every screen renders with real content. Set
@@ -50,10 +89,217 @@ The app runs with zero LLM keys — chat replies with a clear "provider not conf
 notice, and everything else works. Add any subset of provider credentials to `.env`
 and pick provider + model per agent in **LLM Config**.
 
-### Seed workflows
+## The model
 
-Metis now supports both **in-app** and **skill-driven** seed round-trips
-(seed file format: `skills/metis-export/references/seed-format.md`):
+Four planes. The full spec is served live at `/ontology` and `GET /api/ontology/model`
+(source: `backend/app/ontology/model.md`); the design record is in `docs/`.
+
+| Plane | Node | Grammar | Lifecycle |
+|---|---|---|---|
+| **Why** | Goal | intent | own lifecycle |
+| **What** (slow) | Capability | noun phrase — *semantic search* | matures, never ships |
+| **Build** (fast) | Feature | verb phrase — *add vector index* | pending → in_progress → done |
+| **Buy** | Technology | proper noun — *qdrant* | exists in the world independently of us |
+
+```mermaid
+flowchart TB
+  OG["Goal: org<br/><i>why the company cares</i>"] -->|parent| PG["Goal: product"]
+  PG -->|MOTIVATES| C
+  PR["Product"] -->|BUNDLES| C
+  SC["Sub-capability"] -->|PART_OF| C
+
+  C["<b>Capability</b><br/>semantic search<br/><i>a noun that matures, never ships</i>"]
+
+  F2["Feature<br/>re-rank results"] -->|DEPENDS_ON| F1["Feature<br/>add vector index"]
+  F1 -->|"REALIZES — build side"| C
+  T["Technology<br/>qdrant"] -->|"SATISFIES — buy side"| C
+  SL["Stack slot<br/>data::vector index"] -->|binds| T
+```
+
+**Capability is the exchange currency.** A feature `REALIZES` a capability — the *build*
+side. A technology `SATISFIES` one — the *buy* side. Same node, same currency. The
+asymmetry is deliberate: a feature realizes exactly one capability
+(`features.capability_id NOT NULL`), a technology serves many. A change belongs to one
+durable noun; a technology serves several.
+
+Goals motivate **capabilities**, never features directly — features inherit their
+justification through `REALIZES`, which is what makes `why(feature)` a pure traversal
+rather than a stored field someone has to maintain.
+
+PRDs are versioned *snapshots* of the taxonomy — epics pin a capability, stories pin a
+feature — never a second hierarchy.
+
+### The slow plane — the capability map
+
+A relational forest: `capabilities.parent_id` is `PART_OF`, single parent, cycle-guarded.
+Capabilities carry stored `maturity` (planned → alpha → beta → ga → deprecated →
+retired), facets, and evidence anchors. Their *progress* is never stored — it is always
+the rollup over realizing features (`GET /api/capabilities/{id}/rollup`).
+
+### The fast plane — the feature graph
+
+Features and their typed edges (`DEPENDS_ON`, `BLOCKS`, `RELATES_TO`) live in Postgres,
+mirrored into an in-memory networkx graph at startup. Every write commits to Postgres
+first, then write-through updates the graph.
+
+The **precedence graph** — `DEPENDS_ON ∪ reverse(BLOCKS)` — is what the interesting
+queries run over. `RELATES_TO` is annotation only and is excluded from every algorithm.
+
+```mermaid
+flowchart LR
+  A["A: schema<br/>done"] --> B["B: API<br/>ready"]
+  A --> C["C: importer<br/>ready"]
+  B --> D["D: UI<br/>blocked"]
+  C --> D
+  D --> E["E: export<br/>blocked"]
+  E -.->|"rejected: would close a cycle"| A
+```
+
+Everything upstream is satisfied for **B** and **C**, so they are the ready frontier
+(`/api/graph/ready`). **D** waits on both parents; **E** waits transitively. The dashed
+edge is refused at write time — cycle detection runs on the write path, not as a report
+you read afterwards.
+
+### The buy plane — six questions
+
+The technology catalog is **world-scope and opinion-free**: `technologies` holds
+identity and classification, never a stance. The group's stance lives in `adoptions`
+as an ordered ramp (`candidate → trial → adopted → standard`, demotion
+`contained → deprecated → banned`), and *absence of a row is meaningful* — it means no
+stance taken, not "neutral."
+
+Stacks bind it all to products. A **stack slot** is `layer::role` with an optional
+capability and an optional technology, and four predicates fall out of one row:
+
+| Predicate | Means |
+|---|---|
+| `required AND tech_id IS NULL` | **gap** |
+| two slots in one stack sharing `capability_id` | **redundancy** |
+| `product_technologies.via_slot_id IS NULL` | **drift** — used but never declared |
+| bound tech's `fit = 'workaround'` | **known ceiling** |
+
+Six question endpoints share one envelope (`question`, `subject`, `answer`,
+`unresolved`, `as_of`, `href`):
+
+| Question | Endpoint |
+|---|---|
+| `capability_supply` — build or buy, in one frame | `GET /api/capabilities/{slug}/supply` |
+| `tech_blast_radius` — what breaks if we drop this | `GET /api/tech/{slug}/blast-radius` |
+| `tech_exposure` — what is dying, and does it matter | `GET /api/exposure?window_days=180` |
+| `stack_redundancy` — one capability answered twice | `GET /api/stacks/{product}/redundancy` |
+| `tech_encounters` — who has touched this | `GET /api/tech/{slug}/encounters` |
+| `stack_recommend` — what should this stack be | `POST /api/stacks/{product}/recommend` |
+
+**A gap is an answer.** An empty `answer` with a populated `unresolved` is the most
+useful response the system gives — a capability nothing satisfies, a required slot no
+offer survives for. It ships in the payload with a `200`; `404` means the *subject*
+doesn't exist. `workaround` offers are graded, never hidden. The currently-bound
+technology is never filtered out of a supply answer — you cannot re-evaluate a decision
+you cannot see.
+
+`stack_recommend` is deterministic end to end — supply, prune, rank — with no model in
+the loop. If the ordering came out of a prompt, nobody could audit it and the same
+question would answer differently on Tuesday.
+
+### The write boundary
+
+Read-only everywhere except the desktop. A write from any other surface returns:
+
+```
+403 { "error": "human_action_required",
+      "message": "Binding a slot is a human action.",
+      "href": "/stacks?slot=api::Auth" }
+```
+
+Not `401` — the caller is who they say. Not `405` — the route exists. The refusal names
+the reason and hands over the screen that can act. Surface is derived from the token's
+signed `azp`, so a service or MCP token cannot present itself as the desktop.
+
+Nothing in this codebase binds a slot. An agent that can bind a slot can silence a gap,
+and the gaps are the product.
+
+## Architecture
+
+```mermaid
+flowchart LR
+  U["Browser"] --> FE["<b>frontend</b> · Astro 5 SSR<br/>OIDC BFF · session cookie<br/>same-origin /api proxy"]
+  FE -->|bearer| API["<b>backend</b> · FastAPI<br/>domain API + JWT/RBAC<br/>agents over SSE<br/><i>one uvicorn worker</i>"]
+  MCPS["<b>mcp</b> · read-only<br/>8 tools · 4 resources"] -->|"same HTTP API"| API
+  API --- GR["FeatureGraph<br/><i>networkx, in-process</i>"]
+  API --> DB[("PostgreSQL 16<br/><i>system of record</i>")]
+  FE -.->|OIDC| KC["Keycloak 26<br/><i>metis realm</i>"]
+  API -.->|verify JWT| KC
+```
+
+| Service | Stack | Role |
+|---|---|---|
+| `frontend/` | Astro 5 (SSR, node adapter) + React islands | UI + OIDC BFF (session cookies, `/api/*` proxy with bearer). |
+| `backend/` | FastAPI + SQLAlchemy 2.0 async | Domain API, JWT/RBAC, agents, in-memory feature graph. |
+| `mcp` | MCP over stdio or SSE (compose profile `mcp`) | Read-only catalog access for coding agents. |
+| `keycloak` | Keycloak 26 | Identity provider (`metis` realm, admin/editor/viewer). |
+| `postgres` | PostgreSQL 16 | System of record (JSONB PRD versions, ticket file arrays). |
+
+Because the graph lives in process memory, the backend runs **exactly one uvicorn
+worker** (encoded in the Dockerfile).
+
+Cross-plane queries stitch it together: `GET /api/capabilities/{id}/impact` projects
+feature dependencies onto capabilities, `GET /api/features/{id}/why` prints a feature's
+provenance chain up to org intent, and `GET /api/capabilities/health` reports taxonomy
+findings (aspirational gaps, unmotivated capabilities, empty intent).
+
+### Agents
+
+Chat routes each message through an orchestrator (keyword table first, LLM one-shot
+second) to a specialist:
+
+| Agent | Role |
+|---|---|
+| `spec_decomposer` | ProductGoal → Spec → PRD (Epics → Stories → Tickets, pinned to the taxonomy); enforces ticket sizing |
+| `feature_manager` | Capability map + feature CRUD, `REALIZES`/`MOTIVATES` links, typed edges, duplicate-avoiding search; applies the noun/verb filing tests |
+| `graph_agent` | Impact queries, build order, ready frontier, cycles, capability rollups, provenance chains, taxonomy health |
+| `strategist` | RICE/MoSCoW priorities, versioned delivery strategies |
+
+Agents call the same service functions as the REST API (one write path), stream over
+SSE, and attach `ticket_card` viz blocks that render inline in the thread.
+
+**Ticket sizing rule:** `context_budget` is S (single file), M (2–4 files), or
+L (cross-cutting). A PRD cannot be approved while any ticket is L — split first. This is
+the mechanism that makes "one ticket, one agent session" enforceable rather than
+aspirational.
+
+### MCP server
+
+A read-only MCP surface for coding agents mid-build ("does this package already have a
+stance, and what does the group run?"). It calls the same **HTTP API** a browser
+does — not the services in-process — so a chat transcript and an API log line up, and
+the write boundary is inherited rather than re-implemented.
+
+Eight tools: the six `question` keys, plus `tech_search` (navigation — everything else
+takes a slug it returns) and `propose_binding` (a hand-off that persists nothing).
+Four resources: `metis://ontology/model`, `metis://policy/adoptions`, and the templated
+`metis://tech/{slug}` and `metis://stacks/{product}`. Three prompts.
+
+Tools return **text, not JSON** — an agent quotes text back to a user but paraphrases
+JSON, and paraphrase is where `workaround` quietly becomes "partial support."
+
+```sh
+docker compose --profile mcp up mcp     # SSE on the compose network, port 8001
+```
+
+The server refuses to start SSE without `MCP_SSE_TOKEN` — it holds an API token, and an
+open port would lend it to anyone who can reach the address.
+
+### LLM providers
+
+Anthropic API, OpenAI, OpenRouter, AWS Bedrock (Claude), and Ollama (local) sit behind
+one streaming protocol. Availability is detected from credentials in the environment
+(Ollama via a live reachability probe); per-agent provider + model selection is
+DB-backed and editable in the LLM Config panel.
+
+## Seed workflows
+
+Metis supports both **in-app** and **skill-driven** seed round-trips (seed file format:
+`skills/metis-export/references/seed-format.md`):
 
 - In the **Products** page, admins/editors can:
   - **Export seed**: download the selected Spec as a `metis-seed/v1` JSON file,
@@ -88,66 +334,8 @@ curl -s http://localhost:8000/api/graph/ready
 curl -s http://localhost:8000/api/capabilities/health
 ```
 
-## Architecture
-
-Three services plus Postgres:
-
-| Service | Stack | Role |
-|---|---|---|
-| `frontend/` | Astro 5 (SSR, node adapter) + React islands | UI + OIDC BFF (session cookies, `/api/*` proxy with bearer). |
-| `backend/` | FastAPI + SQLAlchemy 2.0 async | Domain API, JWT/RBAC, agents, in-memory feature graph. |
-| `keycloak` | Keycloak 26 | Identity provider (`metis` realm, admin/editor/viewer). |
-| `postgres` | PostgreSQL 16 | System of record (JSONB PRD versions, ticket file arrays). |
-
-### The two planes
-
-The **capability map** (slow plane) is a relational forest: `capabilities.parent_id`
-is `PART_OF`, single parent, cycle-guarded. Capabilities carry stored `maturity`
-(planned → alpha → beta → ga → deprecated → retired), facets, and evidence anchors;
-their progress is never stored — it is always the rollup over realizing features
-(`GET /api/capabilities/{id}/rollup`).
-
-The **feature graph** (fast plane) holds features and their typed edges
-(`DEPENDS_ON`, `BLOCKS`, `RELATES_TO`) in Postgres, mirrored into an in-memory
-networkx graph at startup. Every write commits to Postgres first, then write-through
-updates the graph. The *precedence graph* (`DEPENDS_ON ∪ reverse(BLOCKS)`) drives
-impact queries ("what breaks if this changes"), dependencies-first build order, the
-ready-work frontier (`/api/graph/ready`), and cycle detection — edge writes that
-would close a cycle are rejected at write time. `RELATES_TO` is annotation only.
-
-The bridge between planes is `features.capability_id` (`REALIZES`, exactly one,
-`NOT NULL`). Cross-plane queries: `GET /api/capabilities/{id}/impact` projects
-feature dependencies onto capabilities, `GET /api/features/{id}/why` prints a
-feature's provenance chain up to org intent, and `GET /api/capabilities/health`
-reports taxonomy findings (aspirational gaps, unmotivated capabilities, empty intent).
-
-Because the graph lives in process memory, the backend runs **exactly one uvicorn
-worker** (encoded in the Dockerfile).
-
-### Agents
-
-Chat routes each message through an orchestrator (keyword table first, LLM one-shot
-second) to a specialist:
-
-| Agent | Role |
-|---|---|
-| `spec_decomposer` | ProductGoal → Spec → PRD (Epics → Stories → Tickets, pinned to the taxonomy); enforces ticket sizing |
-| `feature_manager` | Capability map + feature CRUD, `REALIZES`/`MOTIVATES` links, typed edges, duplicate-avoiding search; applies the noun/verb filing tests |
-| `graph_agent` | Impact queries, build order, ready frontier, cycles, capability rollups, provenance chains, taxonomy health |
-| `strategist` | RICE/MoSCoW priorities, versioned delivery strategies |
-
-Agents call the same service functions as the REST API (one write path), stream over
-SSE, and attach `ticket_card` viz blocks that render inline in the thread.
-
-**Ticket sizing rule:** `context_budget` is S (single file), M (2–4 files), or
-L (cross-cutting). A PRD cannot be approved while any ticket is L — split first.
-
-### LLM providers
-
-Anthropic API, OpenAI, OpenRouter, AWS Bedrock (Claude), and Ollama (local) sit behind
-one streaming protocol. Availability is detected from credentials in the environment
-(Ollama via a live reachability probe); per-agent provider + model selection is
-DB-backed and editable in the LLM Config panel.
+Admins can also browse and cascade-delete ontology rows directly at `/data` — the one
+place that overrides the domain invariants, for cleaning up orphaned seed data.
 
 ## Configuration
 
@@ -161,6 +349,8 @@ All optional — see `.env.example`:
 | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_REGION` | Bedrock (Claude models) |
 | `OLLAMA_BASE_URL` | Ollama; compose default reaches host Ollama at `host.docker.internal:11434` |
 | `SEED_DEMO_DATA` | Seed demo data on first boot (default `true`) |
+| `AUTH_ENABLED` | `false` makes every request an admin on the desktop surface — scripts only |
+| `METIS_MCP_SSE_TOKEN` | Required for the MCP server's SSE mode |
 | `ANTHROPIC_MODELS` etc. | Override the model dropdowns (comma-separated) |
 
 ## Development
@@ -189,12 +379,21 @@ The UI implements the Metis design system: warm paper neutrals with one Aegean-b
 accent, Space Grotesk + IBM Plex Mono, hairline-first cards, pipeline-stage hues, a
 1–5 priority ramp, and S/M/L budget colors. Design tokens are in
 `frontend/src/styles/tokens/`; components in `frontend/src/ds/`. System state renders
-verbatim in mono (`in_progress`, `DEPENDS_ON`) — never prettified.
+verbatim in mono (`in_progress`, `DEPENDS_ON`, `workaround`) — never prettified, so a
+screenshot, a log line and a chat transcript stay greppable against each other.
 
 ## Repository layout
 
 ```
-backend/    FastAPI app: models, routers, services (graph, PRD flow, seed), llm/, agents/
-frontend/   Astro app: pages, islands, design system (ds/), same-origin API proxy
+backend/
+  app/models/      Goal, Capability, Feature, Product, Technology, Stack, work, governance
+  app/routers/     Domain API + the six question endpoints + admin data browser
+  app/services/    graph, capabilities, decomposition, technologies, stacks, seed
+  app/agents/      orchestrator, prompts, SSE runner, tools
+  app/mcp/         read-only MCP server (stdio + SSE)
+  app/ontology/    model.md — served to the UI, the API and MCP from one file
+frontend/          Astro app: pages, React islands, design system (ds/), API proxy
+docs/              ontology design record (divergence, mental model, graph spec)
+skills/            metis-export (portable); .claude/skills/ for in-repo skills
 docker-compose.yml
 ```

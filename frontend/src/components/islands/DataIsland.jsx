@@ -47,9 +47,20 @@ export default function DataIsland() {
     setCounts((c) => ({ ...c, [key]: data.length }));
   }, []);
 
+  // Every tab's count, so the tab bar shows where the junk is without having to
+  // click through all eight.
+  const loadCounts = React.useCallback(async () => {
+    const lists = await Promise.all(
+      ENTITIES.map((e) => api(e.listPath).catch(() => null)),
+    );
+    setCounts(Object.fromEntries(
+      ENTITIES.map((e, i) => [e.key, lists[i]?.length]).filter(([, n]) => n != null),
+    ));
+  }, []);
+
   const reload = React.useCallback(
-    async (key) => Promise.all([loadRows(key), loadRefs()]),
-    [loadRows, loadRefs],
+    async (key) => Promise.all([loadRows(key), loadRefs(), loadCounts()]),
+    [loadRows, loadRefs, loadCounts],
   );
 
   React.useEffect(() => {
@@ -363,13 +374,15 @@ export default function DataIsland() {
               <div key={i} style={{ fontSize: "var(--text-xs)", color: "var(--warn-fg, var(--text-secondary))" }}>{w}</div>
             ))}
 
+            {/* Label above its tags, not beside them: the collateral would
+                otherwise squeeze the name down to an ellipsis. */}
             <div style={{ border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", maxHeight: 240, overflowY: "auto" }}>
               {previewData.rows.map((r, i) => (
-                <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderBottom: i < previewData.rows.length - 1 ? "1px solid var(--border-hairline)" : "none" }}>
-                  <span style={{ flex: 1, ...CELL, fontSize: "var(--text-sm)" }}>
+                <div key={r.id} style={{ display: "flex", flexDirection: "column", gap: 6, padding: "8px 12px", borderBottom: i < previewData.rows.length - 1 ? "1px solid var(--border-hairline)" : "none" }}>
+                  <span style={{ ...CELL, fontSize: "var(--text-sm)", color: "var(--text-heading)" }}>
                     {r.missing ? `${shortId(r.id)} (already gone)` : r.label}
                   </span>
-                  <span style={{ display: "flex", gap: 6, flex: "none", flexWrap: "wrap" }}>
+                  <span style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                     {r.deletes.map((t) => <Tag key={t.table}>{t.count} {t.label.toLowerCase()}</Tag>)}
                     {r.deletes.length === 0 && !r.missing && <span style={MUTED}>no dependents</span>}
                   </span>

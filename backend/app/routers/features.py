@@ -80,6 +80,9 @@ async def get_feature(
     detail = FeatureDetail.model_validate(feature)
     graph = get_graph(request)
     if graph is not None:
+        # A bulk delete marks the graph dirty rather than mirroring N removals,
+        # so this read has to settle it before trusting the adjacency.
+        await graph.ensure_fresh()
         rels = graph.relationships(feature_id)
         detail.outgoing = rels["outgoing"]
         detail.incoming = rels["incoming"]

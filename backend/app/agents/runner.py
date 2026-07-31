@@ -9,15 +9,20 @@ Yields (event_name, payload) tuples that the chat router serializes as SSE:
     message_end  {message}
     error        {message}
 
-The agent reply is persisted in `finally`, so a client disconnect mid-stream
-never loses the message.
+The agent reply is persisted whichever way the turn ends, so a client
+disconnect mid-stream never loses the message. That persist — and the
+session's own teardown — run inside `anyio.CancelScope(shield=True)`: a
+disconnect cancels this generator, and under a cancelled scope every await
+raises at once, including the connection pool's graceful close.
 """
 
 import json
+import logging
 import uuid
 from collections.abc import AsyncIterator
 from typing import Any
 
+import anyio
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -30,6 +35,8 @@ from app.models import ChatMessage, ChatThread
 
 MAX_ITERATIONS = 6
 HISTORY_LIMIT = 30
+
+log = logging.getLogger("metis.chat")
 
 
 async def _history(session: AsyncSession, thread_id: uuid.UUID) -> list[dict[str, Any]]:
@@ -67,7 +74,8 @@ async def run_turn(
     thread_id: uuid.UUID,
     content: str,
 ) -> AsyncIterator[tuple[str, dict[str, Any]]]:
-    async with sessionmaker() as session:
+    session = sessionmaker()
+    try:
         thread = await session.get(ChatThread, thread_id)
         if thread is None:
             yield ("error", {"message": "Thread not found"})
@@ -84,8 +92,28 @@ async def run_turn(
         yield ("message_start", {"agent": agent_name})
 
         text_parts: list[str] = []
+        # The iteration being streamed right now. Held out here so a disconnect
+        # mid-stream keeps the deltas the client already saw.
+        partial = ""
         viz_blocks: list[dict[str, Any]] = []
         tool_trace: list[dict[str, Any]] = []
+
+        def _content() -> str:
+            return "\n\n".join(part for part in [*text_parts, partial] if part).strip()
+
+        async def persist() -> ChatMessage:
+            message = ChatMessage(
+                thread_id=thread_id,
+                role="agent",
+                agent_name=agent_name,
+                content=_content(),
+                viz=viz_blocks,
+                tool_calls=tool_trace or None,
+            )
+            session.add(message)
+            await session.commit()
+            await session.refresh(message)
+            return message
 
         try:
             try:
@@ -103,13 +131,13 @@ async def run_turn(
 
             hit_iteration_limit = provider is not None
             for _iteration in range(MAX_ITERATIONS if provider else 0):
-                iteration_text = ""
+                partial = ""
                 tool_calls: list[ToolCallEvent] = []
                 failed = False
 
                 async for event in provider.stream(model, system, messages, tools):
                     if isinstance(event, TextDelta):
-                        iteration_text += event.text
+                        partial += event.text
                         yield ("text_delta", {"text": event.text})
                     elif isinstance(event, ToolCallEvent):
                         tool_calls.append(event)
@@ -121,8 +149,10 @@ async def run_turn(
                     elif isinstance(event, StreamDone):
                         pass
 
-                if iteration_text:
-                    text_parts.append(iteration_text)
+                iteration_text = partial  # kept for the assistant turn below
+                if partial:
+                    text_parts.append(partial)
+                partial = ""  # folded above; _content() must not count it twice
                 if failed or not tool_calls:
                     hit_iteration_limit = False
                     break
@@ -171,17 +201,24 @@ async def run_turn(
                 text_parts.append(note)
                 yield ("text_delta", {"text": "\n" + note})
 
-        finally:
-            agent_message = ChatMessage(
-                thread_id=thread_id,
-                role="agent",
-                agent_name=agent_name,
-                content="\n\n".join(part for part in text_parts if part).strip(),
-                viz=viz_blocks,
-                tool_calls=tool_trace or None,
-            )
-            session.add(agent_message)
-            await session.commit()
-            await session.refresh(agent_message)
+        except BaseException:
+            # Cancelled by a client disconnect, or the turn blew up. Keep what
+            # was generated, but never let a failure here mask the exception on
+            # its way out — nothing downstream is waiting for the reply now.
+            with anyio.CancelScope(shield=True):
+                try:
+                    # Nothing reached the client yet: no reply to keep, and a
+                    # blank row would render as an empty bubble.
+                    if _content() or viz_blocks or tool_trace:
+                        await persist()
+                except Exception:
+                    log.exception("Could not persist the agent reply for %s", thread_id)
+            raise
 
+        agent_message = await persist()
         yield ("message_end", {"message": _serialize_message(agent_message)})
+    finally:
+        # Under a cancelled scope the pool's graceful close is cancelled too,
+        # which terminates the connection instead of returning it.
+        with anyio.CancelScope(shield=True):
+            await session.close()

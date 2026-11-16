@@ -39,7 +39,9 @@ from app.schemas.capability import (
     CoverageRequest,
     FeatureCoverage,
     HealthFinding,
+    IdeaFeature,
     InventoryEntry,
+    ProductCoverage,
     ProductRef,
     Rollup,
 )
@@ -691,3 +693,41 @@ async def health(session: AsyncSession) -> list[HealthFinding]:
                 )
             )
     return findings
+
+
+async def product_coverage(session: AsyncSession, product_id: uuid.UUID) -> ProductCoverage:
+    """Score a product against our inventory — derived from coverage(), never a
+    second computation: its features become the idea, its links the needs."""
+    product = await session.get(Product, product_id)
+    if product is None:
+        raise HTTPException(404, "Product not found")
+    features = list(
+        await session.scalars(
+            select(Feature).where(Feature.product_id == product_id).order_by(Feature.seq)
+        )
+    )
+    names = {c.id: c.name for c in await list_capabilities(session)}
+    known = [f for f in features if f.capability_ids]
+    report = (
+        await coverage(
+            session,
+            CoverageRequest(
+                features=[
+                    IdeaFeature(name=f.name, capabilities=[names[c] for c in f.capability_ids])
+                    for f in known
+                ]
+            ),
+        )
+        if known
+        else None
+    )
+    covered = {fc.name for fc in report.features if fc.existing == fc.total} if report else set()
+    return ProductCoverage(
+        product=ProductRef.model_validate(product),
+        total_features=len(features),
+        buildable=[
+            f.name for f in features if f.name in covered and not f.unknown_capabilities
+        ],
+        unknown_features=[f.name for f in features if f.unknown_capabilities],
+        report=report,
+    )

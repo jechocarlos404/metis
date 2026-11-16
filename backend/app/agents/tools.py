@@ -220,6 +220,12 @@ async def product_coverage(ctx: ToolContext, features: list[dict]) -> ToolResult
     return ToolResult(report.model_dump_json())
 
 
+async def existing_product_coverage(ctx: ToolContext, product: str) -> ToolResult:
+    product_obj = await _resolve(ctx.session, Product, product, "PRD", Product.name)
+    score = await capability_service.product_coverage(ctx.session, product_obj.id)
+    return ToolResult(score.model_dump_json())
+
+
 async def list_capabilities(ctx: ToolContext) -> ToolResult:
     capabilities = await capability_service.list_capabilities(ctx.session)
     return ToolResult(_dump([_capability_dict(c) for c in capabilities]))
@@ -657,6 +663,7 @@ _MVP_CUT_TOOL = _tool(
 SHARED_TOOLS = [
     _tool("capability_inventory", "Everything we can already do: every capability with its maturity, the products whose features realize it, and its feature count — most-reused first. Start here for 'what could we build next'.", {}, [], capability_inventory),
     _tool("product_coverage", "How much of a product idea already exists. features = [{name, capabilities: [capability names]}]. Names match exactly (by slug) — read capability_inventory first and reuse its names; unresolved needs come back with near-name candidates, never a guessed match.", {"features": {"type": "array", "items": {"type": "object", "properties": {"name": _STR, "capabilities": {"type": "array", "items": _STR, "minItems": 1}}, "required": ["name", "capabilities"]}, "minItems": 1}}, ["features"], product_coverage),
+    _tool("existing_product_coverage", "How much of an existing product (typically an external one) we could build from what we already have: which of its features are fully covered by our capabilities, which declare unknown capabilities (never counted — the score is a lower bound), and the missing capabilities.", {"product": _STR}, ["product"], existing_product_coverage),
     _tool("list_goals", "List all org and product goals with IDs, criteria, priority, status.", {}, [], list_goals),
     _tool("list_products", "List all products (Specs) with IDs, names, status, version.", {}, [], list_products),
     _tool("list_capabilities", "List the capability map (slow plane): IDs, names, parent, maturity, evidence anchors.", {}, [], list_capabilities),

@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
 from app.models import Goal, Product
-from app.schemas.capability import CapabilityRead
+from app.schemas.capability import CapabilityRead, ProductCoverage
 from app.schemas.product import (
     DecompositionCreate,
     DecompositionRead,
@@ -45,6 +45,12 @@ async def create_product(data: ProductCreate, session: AsyncSession = Depends(ge
 @router.get("/products/{product_id}", response_model=ProductRead)
 async def get_product(product_id: uuid.UUID, session: AsyncSession = Depends(get_db)):
     return await decomposition_service.get_product(session, product_id)
+
+
+@router.get("/products/{product_id}/coverage", response_model=ProductCoverage)
+async def product_coverage(product_id: uuid.UUID, session: AsyncSession = Depends(get_db)):
+    """How much of this product we could build from what we already have."""
+    return await capability_service.product_coverage(session, product_id)
 
 
 @router.patch("/products/{product_id}", response_model=ProductRead)

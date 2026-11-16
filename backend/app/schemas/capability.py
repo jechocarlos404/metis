@@ -133,3 +133,18 @@ class CoverageReport(BaseModel):
     #: `mature`: those of ours at beta or ga — built and proven, not just named.
     mature: int
     missing: list[str]
+
+
+class ProductCoverage(BaseModel):
+    """How much of an existing product — typically someone else's — we could
+    build from what we already have. A lower bound: features declaring unknown
+    capabilities never count as buildable, whatever their known links say."""
+
+    product: ProductRef
+    total_features: int
+    #: Features whose every capability is known and ours.
+    buildable: list[str]
+    #: Features whose capability list is declared incomplete.
+    unknown_features: list[str]
+    #: Coverage of the features' known capabilities; None when none are known.
+    report: CoverageReport | None

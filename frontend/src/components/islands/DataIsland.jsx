@@ -122,7 +122,7 @@ export default function DataIsland() {
 
   const save = async () => {
     const missing = fieldsFor(dialog.mode).filter(
-      (f) => f.required && !String(draft[f.key] ?? "").trim(),
+      (f) => f.required && !(f.requiredUnless && draft[f.requiredUnless]) && !String(draft[f.key] ?? "").trim(),
     );
     if (missing.length) {
       setDialogError(`Required: ${missing.map((f) => f.label).join(", ")}`);
@@ -414,6 +414,9 @@ export default function DataIsland() {
 }
 
 function Field({ field, refs, value, onChange }) {
+  if (field.type === "checkbox") {
+    return <Checkbox label={field.label} checked={!!value} onChange={onChange} />;
+  }
   if (field.type === "multiselect") {
     const chosen = new Set(value ?? []);
     const toggle = (id, on) => onChange(on ? [...(value ?? []), id] : (value ?? []).filter((x) => x !== id));

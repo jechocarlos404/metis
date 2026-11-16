@@ -184,6 +184,7 @@ export default function FeaturesIsland({ canWrite = true }) {
       name: detail.name,
       description: detail.description ?? "",
       capabilityIds: detail.capability_ids,
+      unknownCapabilities: detail.unknown_capabilities,
       productId: detail.product_id ?? "",
       layer: detail.facets?.layer ?? "service",
       priority: detail.priority != null ? String(detail.priority) : "",
@@ -194,8 +195,10 @@ export default function FeaturesIsland({ canWrite = true }) {
     setDialog({ mode: "edit" });
   };
 
+  // At least one capability, unless the rest are declared unknown.
+  const canSave = Boolean(draft.name.trim()) && (draft.capabilityIds.length > 0 || draft.unknownCapabilities);
   const save = async () => {
-    if (!draft.name.trim() || draft.capabilityIds.length === 0) return;
+    if (!canSave) return;
     setSaving(true);
     setError(null);
     try {
@@ -203,6 +206,7 @@ export default function FeaturesIsland({ canWrite = true }) {
         name: draft.name.trim(),
         description: draft.description.trim() || null,
         capability_ids: draft.capabilityIds,
+        unknown_capabilities: draft.unknownCapabilities,
         product_id: draft.productId || null,
         priority: draft.priority === "" ? null : Number(draft.priority),
       };
@@ -353,11 +357,16 @@ export default function FeaturesIsland({ canWrite = true }) {
                     REALIZES → {capabilityById.get(cid)?.name ?? "unknown capability"}
                   </div>
                 ))}
+                {detail.unknown_capabilities && (
+                  <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-disabled)" }}>
+                    REALIZES → {detail.capability_ids.length ? "+ " : ""}capabilities not yet identified
+                  </div>
+                )}
                 {products.length > 0 && (
                   (nodeById.get(detail.id)?.product_ids ?? []).length > 0 ? (
                     nodeById.get(detail.id).product_ids.map((pid) => (
                       <div key={pid} style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-secondary)" }}>
-                        PRODUCT → {productById.get(pid)?.name ?? "unknown product"}
+                        PRODUCT → {productById.get(pid)?.name ?? "unknown product"}{productById.get(pid)?.external ? " · external, not our work" : ""}
                       </div>
                     ))
                   ) : (
@@ -460,7 +469,7 @@ export default function FeaturesIsland({ canWrite = true }) {
               </Button>
             )}
             <Button size="sm" variant="secondary" onClick={() => setDialog(null)}>Cancel</Button>
-            <Button size="sm" variant="accent" disabled={saving || !draft.name.trim() || draft.capabilityIds.length === 0} onClick={save}>
+            <Button size="sm" variant="accent" disabled={saving || !canSave} onClick={save}>
               {dialog?.mode === "new" ? "Create feature" : "Save"}
             </Button>
           </>
@@ -470,9 +479,11 @@ export default function FeaturesIsland({ canWrite = true }) {
           <Input label="Name (what the user gets, verb phrase)" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="Export tickets to Notion" />
           <Input label="Description" value={draft.description} onChange={(e) => setDraft({ ...draft, description: e.target.value })} />
           <Select label="Product" value={draft.productId} onChange={(e) => setDraft({ ...draft, productId: e.target.value })}
-            options={[{ value: "", label: "— none —" }, ...products.map((p) => ({ value: p.id, label: p.name }))]} />
+            options={[{ value: "", label: "— none —" }, ...products.map((p) => ({ value: p.id, label: p.external ? `${p.name} (external)` : p.name }))]} />
           <CapabilityPicker capabilities={capabilities} selected={draft.capabilityIds} query={capQuery} onQuery={setCapQuery}
             onChange={(ids) => setDraft({ ...draft, capabilityIds: ids })} />
+          <Checkbox label="Some capabilities are unknown — link only the ones you can name"
+            checked={draft.unknownCapabilities} onChange={(on) => setDraft({ ...draft, unknownCapabilities: on })} />
           <Select label="Layer" value={draft.layer} onChange={(e) => setDraft({ ...draft, layer: e.target.value })} options={["ui", "service", "integration", "infra"]} />
           <Select label="Priority (1 hottest)" value={draft.priority} onChange={(e) => setDraft({ ...draft, priority: e.target.value })}
             options={dialog?.mode === "edit" ? [{ value: "", label: "—" }, "1", "2", "3", "4", "5"] : ["1", "2", "3", "4", "5"]} />
@@ -486,7 +497,7 @@ export default function FeaturesIsland({ canWrite = true }) {
   );
 }
 
-const EMPTY_DRAFT = { name: "", description: "", capabilityIds: [], productId: "", layer: "service", priority: "3", status: "pending" };
+const EMPTY_DRAFT = { name: "", description: "", capabilityIds: [], unknownCapabilities: false, productId: "", layer: "service", priority: "3", status: "pending" };
 
 function capabilityNames(ids, capabilityById) {
   const names = (ids ?? []).map((c) => capabilityById.get(c)?.name).filter(Boolean);

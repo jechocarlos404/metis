@@ -50,6 +50,8 @@ def feature_capability_refs(feature):
     refs = feature.get("capability_refs")
     if refs is None and feature.get("capability_ref") is not None:
         refs = [feature["capability_ref"]]
+    if refs is None and feature.get("unknown_capabilities") is True:
+        refs = []  # declared unknown: none named yet
     return refs
 
 
@@ -139,8 +141,12 @@ def validate(doc):
         if not f.get("name"):
             errors.append(f"{where}: 'name' is required")
         refs = feature_capability_refs(f)
-        if not isinstance(refs, list) or not refs:
-            errors.append(f"{where}: capability_refs must be a non-empty list of capability refs")
+        unknown = f.get("unknown_capabilities", False)
+        if not isinstance(unknown, bool):
+            errors.append(f"{where}: unknown_capabilities must be true or false")
+        if not isinstance(refs, list) or (not refs and unknown is not True):
+            errors.append(f"{where}: capability_refs must be a non-empty list of capability refs "
+                          "(or set unknown_capabilities: true)")
         else:
             for ref in refs:
                 if ref not in cap_refs:
@@ -210,6 +216,8 @@ def validate(doc):
             errors.append(f"{where}: 'name' is required")
         if p.get("goal_ref") is not None and p["goal_ref"] not in goal_refs:
             errors.append(f"{where}: unknown goal_ref {p['goal_ref']!r}")
+        if not isinstance(p.get("external", False), bool):
+            errors.append(f"{where}: external must be true or false")
         bundle_refs = p.get("bundle_refs")
         if bundle_refs is not None and (
             not isinstance(bundle_refs, list)

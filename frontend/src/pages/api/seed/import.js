@@ -44,6 +44,7 @@ function checkFacets(errors, where, item) {
 function featureCapabilityRefs(feature) {
   if (feature.capability_refs != null) return feature.capability_refs;
   if (feature.capability_ref != null) return [feature.capability_ref];
+  if (feature.unknown_capabilities === true) return []; // declared unknown: none named yet
   return null;
 }
 
@@ -135,8 +136,10 @@ function validateSeed(doc) {
     const where = `features[${i}] (${feature.ref})`;
     if (!feature.name) errors.push(`${where}: 'name' is required`);
     const refs = featureCapabilityRefs(feature);
-    if (!Array.isArray(refs) || refs.length === 0) {
-      errors.push(`${where}: capability_refs must be a non-empty list of capability refs`);
+    const unknown = feature.unknown_capabilities ?? false;
+    if (typeof unknown !== "boolean") errors.push(`${where}: unknown_capabilities must be true or false`);
+    if (!Array.isArray(refs) || (refs.length === 0 && unknown !== true)) {
+      errors.push(`${where}: capability_refs must be a non-empty list of capability refs (or set unknown_capabilities: true)`);
     } else {
       for (const ref of refs) {
         if (!capRefs.has(ref)) errors.push(`${where}: capability ref ${JSON.stringify(ref)} does not match a capability`);
@@ -214,6 +217,7 @@ function validateSeed(doc) {
     if (product.goal_ref != null && !goalRefs.has(product.goal_ref)) {
       errors.push(`${where}: unknown goal_ref ${JSON.stringify(product.goal_ref)}`);
     }
+    if (typeof (product.external ?? false) !== "boolean") errors.push(`${where}: external must be true or false`);
     if (
       product.bundle_refs != null &&
       (!Array.isArray(product.bundle_refs) ||
@@ -465,6 +469,7 @@ class Loader {
         feature.ref,
         await this.create("features", "/api/features", {
           capability_ids: featureCapabilityRefs(feature).map((ref) => this.capIds.get(ref)),
+          unknown_capabilities: feature.unknown_capabilities === true,
           product_id: this.productIds.get(feature.product_ref),
           name: feature.name,
           description: feature.description,
@@ -548,6 +553,7 @@ class Loader {
           name: product.name,
           summary: product.summary,
           body: product.body,
+          external: product.external === true,
         }, product.name);
       }
       this.productIds.set(product.ref, productId);

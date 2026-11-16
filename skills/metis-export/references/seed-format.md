@@ -42,9 +42,14 @@ one file to edit.
   list (e.g. "Estimate climb power"). If only a developer could observe it, it is a
   (sub-)capability, not a feature. Each feature REALIZES **every** capability built
   to implement it: `capability_refs` is required and lists at least one. List them
-  all — a missing link understates reuse, an invented one overstates it.
+  all — a missing link understates reuse, an invented one overstates it. When you
+  genuinely cannot tell (typical for an external product), set
+  `"unknown_capabilities": true` and list only the ones you can name — possibly none.
 - **Products** are the unit of a project: one product per exported project. Each
-  feature names its product with `product_ref`.
+  feature names its product with `product_ref`. A product can be someone else's
+  (`"external": true`) — known only from the outside, as a user. Its features say
+  what it does; they never count as our work, and capabilities only external
+  features realize never count as ours.
 - **Capabilities are shared across products.** Identity is the exact name, on
   purpose: when two projects both have "Authentication", they must use that exact
   name so metis can see the reuse. Never prefix names to keep projects apart, and
@@ -103,6 +108,7 @@ Goal MOTIVATES capability. One object per pair:
 {
   "ref": "feat-impact",
   "capability_refs": ["cap-graph", "cap-search"],  // required, ≥1: every capability this REALIZES
+  "unknown_capabilities": false,   // optional: true = the list is incomplete (may then be empty)
   "product_ref": "prod-export",    // optional: whose feature this is (a products[] ref)
   "name": "Traverse blast radius from a changed feature",  // required; user-facing verb phrase
   "description": "…",
@@ -115,6 +121,11 @@ Goal MOTIVATES capability. One object per pair:
 
 A legacy single `"capability_ref": "cap-graph"` is still accepted and read as
 `["cap-graph"]`; new files should use `capability_refs`.
+
+For an **external** product: no evidence anchors (there is no code to point at),
+leave capability `maturity` at `planned` — it describes *our* implementation, and
+an external-only capability's maturity is ignored anyway — and declare
+`unknown_capabilities` rather than guessing a link.
 
 ### edges
 
@@ -140,6 +151,7 @@ snapshots of the taxonomy, never a second hierarchy.
   "name": "PM Export",             // required
   "summary": "…",
   "body": "Markdown spec body…",
+  "external": false,               // optional: true = someone else's product, known from outside
   "bundle_refs": ["cap-graph"],    // optional: capability refs this product explicitly offers
   "decomposition": {
     "summary": "…",

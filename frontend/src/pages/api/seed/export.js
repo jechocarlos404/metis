@@ -163,6 +163,7 @@ export async function GET({ request, locals }) {
       features: includedFeatures.map((feature) => ({
         ref: featureRef.get(feature.id),
         capability_refs: (feature.capability_ids || []).map((id) => capRef.get(id)),
+        ...(feature.unknown_capabilities ? { unknown_capabilities: true } : {}),
         product_ref: productRef,
         name: feature.name,
         description: feature.description,
@@ -183,6 +184,7 @@ export async function GET({ request, locals }) {
           name: product.name,
           summary: product.summary,
           body: product.body,
+          ...(product.external ? { external: true } : {}),
           bundle_refs: bundles.map((capability) => capRef.get(capability.id)).filter(Boolean),
           decomposition: latestDecomposition
             ? {

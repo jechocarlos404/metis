@@ -1,6 +1,6 @@
 import React from "react";
 import { PageHeader } from "../shell/PageHeader.jsx";
-import { Badge, Button, Card, Dialog, Icon, Input, Select, StatusBadge, Tabs, Tag, TicketCard, Toast } from "../../ds";
+import { Badge, Button, Card, Checkbox, Dialog, Icon, Input, Select, StatusBadge, Tabs, Tag, TicketCard, Toast } from "../../ds";
 import { api } from "../../lib/api.js";
 import { openChatWithPrompt } from "../../lib/chat-launch.js";
 
@@ -81,12 +81,12 @@ export default function ProductsIsland({ canWrite = true }) {
 
   const openNewProduct = () => {
     setConfirmingDelete(false);
-    setProductDialog({ mode: "new", name: "", summary: "", goalId: "" });
+    setProductDialog({ mode: "new", name: "", summary: "", goalId: "", external: false });
   };
 
   const openEditProduct = () => {
     setConfirmingDelete(false);
-    setProductDialog({ mode: "edit", name: product.name, summary: product.summary ?? "", goalId: product.goal_id ?? "" });
+    setProductDialog({ mode: "edit", name: product.name, summary: product.summary ?? "", goalId: product.goal_id ?? "", external: product.external });
   };
 
   const saveProduct = async () => {
@@ -98,6 +98,7 @@ export default function ProductsIsland({ canWrite = true }) {
         name: d.name.trim(),
         summary: d.summary.trim() || null,
         goal_id: d.goalId || null,
+        external: d.external,
       };
       if (d.mode === "new") {
         const created = await api("/products", { method: "POST", body });
@@ -331,7 +332,7 @@ export default function ProductsIsland({ canWrite = true }) {
     <>
       <PageHeader
         title="Products"
-        meta={product ? `${product.display_id} · v${product.version}` : "no products"}
+        meta={product ? `${product.display_id} · v${product.version}${product.external ? " · external" : ""}` : "no products"}
         actions={
           <>
             {products.length > 1 && (
@@ -828,6 +829,8 @@ export default function ProductsIsland({ canWrite = true }) {
             <Select label="Product goal" value={productDialog.goalId} onChange={(e) => setProductDialog({ ...productDialog, goalId: e.target.value })}
               options={[{ value: "", label: "None" },
                 ...goals.map((g) => ({ value: g.id, label: `${g.display_id} ${g.title}` }))]} />
+            <Checkbox label="External — someone else's product, known from the outside. Its features never count as ours."
+              checked={productDialog.external} onChange={(on) => setProductDialog({ ...productDialog, external: on })} />
           </div>
         )}
       </Dialog>

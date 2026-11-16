@@ -739,5 +739,8 @@ async def product_coverage(session: AsyncSession, product_id: uuid.UUID) -> Prod
             f.name for i, f in enumerate(features) if i in covered and not f.unknown_capabilities
         ],
         unknown_features=[f.name for f in features if f.unknown_capabilities],
+        known_covered=[
+            f.name for f in features if f.name in covered and f.unknown_capabilities
+        ],
         report=report,
     )

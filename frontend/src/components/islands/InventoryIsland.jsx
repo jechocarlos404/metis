@@ -214,6 +214,11 @@ function ProductScore({ score }) {
       {score.buildable.length > 0 && (
         <div style={{ color: "var(--text-secondary)" }}>Buildable now: {score.buildable.join(", ")}</div>
       )}
+      {score.known_covered.length > 0 && (
+        <div style={{ color: "var(--text-secondary)" }}>
+          <span style={{ fontFamily: "var(--font-mono)", color: "var(--text-heading)" }}>+{score.known_covered.length}</span> more where we have every capability anyone could name — weaker, since the unnamed ones may be missing: {score.known_covered.join(", ")}
+        </div>
+      )}
       {score.unknown_features.length > 0 && (
         <div style={{ color: "var(--text-secondary)" }}>
           A lower bound — {score.unknown_features.length} feature{score.unknown_features.length === 1 ? " has" : "s have"} capabilities nobody has identified yet: {score.unknown_features.join(", ")}

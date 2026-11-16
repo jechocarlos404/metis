@@ -146,5 +146,8 @@ class ProductCoverage(BaseModel):
     buildable: list[str]
     #: Features whose capability list is declared incomplete.
     unknown_features: list[str]
+    #: Of those, the ones where we have every capability anyone could name — a
+    #: weaker signal than buildable, since the unnamed rest may be missing.
+    known_covered: list[str]
     #: Coverage of the features' known capabilities; None when none are known.
     report: CoverageReport | None

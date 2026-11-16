@@ -172,6 +172,9 @@ async def test_how_much_of_an_external_product_we_could_build(db):
     # needs only sync as far as we know — but "as far as we know" is not covered.
     assert score.buildable == ["Sync activities"]
     assert score.unknown_features == ["Beacon live tracking", "Share routes"]
+    # The softer signal: every capability anyone named for Share routes is ours.
+    # Beacon names none, so it never counts.
+    assert score.known_covered == ["Share routes"]
     report = score.report
     assert (report.needed, report.existing) == (2, 1)
     assert report.missing == ["Segment leaderboards"]
@@ -188,3 +191,4 @@ async def test_a_product_with_only_unknown_features_scores_zero(db):
         score = await capability_service.product_coverage(session, p.id)
     assert score.report is None
     assert (score.total_features, score.buildable, score.unknown_features) == (1, [], ["Magic"])
+    assert score.known_covered == []

@@ -7,7 +7,6 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     database_url: str = "postgresql+asyncpg://metis:metis@localhost:5432/metis"
-    seed_demo_data: bool = True
     cors_origins: str = "http://localhost:4321"
 
     # --- Auth (Keycloak / OIDC) ---

@@ -3,7 +3,7 @@
 
 The inverse of seed_instance.py. Stdlib only — no dependencies. Entities are
 matched exactly the way the loader matches them (goals by type+title;
-capabilities, features, and products by name; edges by src+dst+kind;
+capabilities and products by name, features by (product, name); edges by src+dst+kind;
 motivations by pair) and deleted via the REST API.
 
 Entities entangled with material outside the seed are kept, with a warning:
@@ -107,15 +107,18 @@ class Unseeder:
             {c["name"]: c for c in self.inst_caps},
             lambda c: c.get("name"),
         )
-        self.feats = self._match(
-            "features", lambda f: f.get("name"),
-            {f["name"]: f for f in self.inst_feats},
-            lambda f: f.get("name"),
-        )
         self.prods = self._match(
             "products", lambda p: p.get("name"),
             {p["name"]: p for p in self.inst_prods},
             lambda p: p.get("name"),
+        )
+        # A feature is its product's: identity is (product, name), so two
+        # products may each have a "Sign in" without one unseed taking both.
+        self.feats = self._match(
+            "features",
+            lambda f: ((self.prods.get(f.get("product_ref")) or {}).get("id"), f.get("name")),
+            {(f.get("product_id"), f["name"]): f for f in self.inst_feats},
+            lambda f: f.get("name"),
         )
 
     def _match(self, collection, key, existing, label):

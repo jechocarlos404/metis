@@ -113,9 +113,9 @@ export default function InventoryIsland() {
               <a href={`/capabilities/${c.slug}`} style={{ color: "var(--text-heading)", fontWeight: "var(--weight-medium)", textDecoration: "none" }}>{c.name}</a>
               <span><Badge tone={MATURITY_TONES[c.maturity] ?? "neutral"}>{c.maturity}</Badge></span>
               <span style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-                {c.products.length === 0
-                  ? <span style={{ fontSize: "var(--text-xs)", color: "var(--text-disabled)" }}>unused</span>
-                  : c.products.map((p) => <Tag key={p.id}>{p.name}</Tag>)}
+                {c.products.length > 0
+                  ? c.products.map((p) => <Tag key={p.id}>{p.name}</Tag>)
+                  : <span style={{ fontSize: "var(--text-xs)", color: "var(--text-disabled)" }}>{c.features > 0 ? "no product" : "unused"}</span>}
               </span>
               <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-secondary)" }}>{c.features}</span>
             </div>

@@ -188,3 +188,37 @@ async def test_scope_counts_a_shared_feature_once_per_capability(db):
         physics_scope = await capability_service.scope(session, s["physics"].id)
     assert {f.name for f in strava_scope} == {"Estimate climb power", "Show ride summary"}
     assert {f.name for f in physics_scope} == {"Estimate climb power"}
+
+
+@pytest.mark.asyncio
+async def test_coverage_suggests_the_full_name_for_an_abbreviation(db):
+    async with db() as session:
+        await make_capability(session, "Authentication")
+        report = await capability_service.coverage(
+            session,
+            CoverageRequest.model_validate(
+                {"features": [{"name": "Sign in", "capabilities": ["Auth"]}]}
+            ),
+        )
+    need = report.features[0].capabilities[0]
+    assert need.match is None
+    assert [c.name for c in need.candidates] == ["Authentication"]
+
+
+@pytest.mark.asyncio
+async def test_agent_tool_links_exact_names_only(db):
+    """The agent's create_feature never substring-matches a capability: a near
+    name fails with candidates instead of silently linking the wrong one."""
+    from app.agents import tools
+    from app.agents.tools import ToolContext, ToolError
+
+    async with db() as session:
+        auth = await make_capability(session, "Authentication")
+        ctx = ToolContext(session=session)
+        with pytest.raises(ToolError) as err:
+            await tools.create_feature(ctx, name="Sign in", capabilities=["Auth"])
+        assert "`Authentication`" in str(err.value)
+
+        await tools.create_feature(ctx, name="Sign in", capabilities=["authentication"])
+        feature = await session.scalar(select(Feature).where(Feature.name == "Sign in"))
+        assert feature.capability_ids == [auth.id]

@@ -69,15 +69,18 @@ class Unseeder {
       (capability) => capability.name,
       new Map(this.instCaps.map((capability) => [capability.name, capability])),
     );
-    this.features = this.match(
-      "features",
-      (feature) => feature.name,
-      new Map(this.instFeatures.map((feature) => [feature.name, feature])),
-    );
     this.products = this.match(
       "products",
       (product) => product.name,
       new Map(this.instProducts.map((product) => [product.name, product])),
+    );
+    // A feature is its product's: identity is (product, name), so two products
+    // may each have a "Sign in" without one unseed taking both.
+    const featureKey = (productId, name) => `${productId ?? ""}\u0000${name}`;
+    this.features = this.match(
+      "features",
+      (feature) => featureKey(this.products.get(feature.product_ref)?.id, feature.name),
+      new Map(this.instFeatures.map((feature) => [featureKey(feature.product_id, feature.name), feature])),
     );
   }
 

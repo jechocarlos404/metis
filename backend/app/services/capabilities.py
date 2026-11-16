@@ -422,6 +422,17 @@ async def unbundle_product(
 PROVEN = {CapabilityMaturity.beta, CapabilityMaturity.ga}
 
 
+def name_closeness(column, name: str):
+    """How near a stored name is to a typed one, for suggestions only. Plain
+    trigram similarity misses abbreviations ("Auth" vs "Authentication" is
+    0.25), so take the best of it and word similarity in both directions."""
+    return func.greatest(
+        func.similarity(column, name),
+        func.word_similarity(name, column),
+        func.word_similarity(column, name),
+    )
+
+
 async def _products_by_capability(
     session: AsyncSession,
 ) -> tuple[dict[uuid.UUID, set[uuid.UUID]], dict[uuid.UUID, set[uuid.UUID]], dict[uuid.UUID, Product]]:
@@ -493,11 +504,11 @@ async def coverage(session: AsyncSession, request: CoverageRequest) -> CoverageR
         )
 
     async def candidates(name: str) -> list[CapabilityMatch]:
-        similarity = func.similarity(Capability.name, name)
+        score = name_closeness(Capability.name, name)
         stmt = (
             select(Capability)
-            .where(similarity > 0.3)
-            .order_by(similarity.desc(), Capability.seq)
+            .where(score > 0.3)
+            .order_by(score.desc(), Capability.seq)
             .limit(3)
         )
         return [as_match(c) for c in await session.scalars(stmt)]

@@ -277,6 +277,12 @@ function parentsFirst(items) {
   return ordered;
 }
 
+
+/** Feature identity: (product, name). A missing product is its own bucket. */
+function featureKey(productId, name) {
+  return `${productId ?? ""}\u0000${name}`;
+}
+
 class UpstreamApi {
   constructor(accessToken) {
     this.accessToken = accessToken;
@@ -442,14 +448,16 @@ class Loader {
   }
 
   async loadFeatures() {
-    // Add-only: an existing feature (matched by name) keeps its capability
-    // links and product as they are — the importer never rewrites a row.
+    // Add-only: an existing feature keeps its capability links as they are —
+    // the importer never rewrites a row. Identity is (product, name): another
+    // product's "Sign in" is a different feature, not a reuse.
     const existing = new Map(
-      (await this.api.get("/api/features")).map((feature) => [feature.name, feature.id]),
+      (await this.api.get("/api/features")).map((feature) => [featureKey(feature.product_id, feature.name), feature.id]),
     );
     for (const feature of this.doc.features || []) {
-      if (existing.has(feature.name)) {
-        this.featureIds.set(feature.ref, existing.get(feature.name));
+      const key = featureKey(this.productIds.get(feature.product_ref), feature.name);
+      if (existing.has(key)) {
+        this.featureIds.set(feature.ref, existing.get(key));
         this.note("features", "reused");
         continue;
       }

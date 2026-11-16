@@ -2,7 +2,8 @@
 """Seed a running metis instance from a metis-seed JSON file (format v1).
 
 Stdlib only — no dependencies. Idempotent and add-only: existing entities are
-matched (goals by type+title; capabilities, features, and products by name;
+matched (goals by type+title; capabilities and products by name; features by
+(product, name);
 edges by src+dst+kind; motivations by pair) and reused rather than duplicated,
 so re-running the same file is safe. Nothing is ever updated or deleted.
 
@@ -418,12 +419,17 @@ class Loader:
                     self.note("motivations", "created")
 
     def load_features(self):
-        # Add-only: an existing feature (matched by name) keeps its capability
-        # links and product as they are — the seeder never rewrites a row.
-        existing = {f["name"]: f["id"] for f in self.api.get("/api/features")}
+        # Add-only: an existing feature keeps its capability links as they
+        # are — the seeder never rewrites a row. Identity is (product, name):
+        # features belong to their product, so another product's "Sign in" is
+        # a different feature, not a reuse.
+        existing = {
+            (f.get("product_id"), f["name"]): f["id"] for f in self.api.get("/api/features")
+        }
         for f in self.doc.get("features") or []:
-            if f["name"] in existing:
-                self.feat_ids[f["ref"]] = existing[f["name"]]
+            key = (self.prod_ids.get(f.get("product_ref")), f["name"])
+            if key in existing:
+                self.feat_ids[f["ref"]] = existing[key]
                 self.note("features", "reused")
                 continue
             self.feat_ids[f["ref"]] = self.create(

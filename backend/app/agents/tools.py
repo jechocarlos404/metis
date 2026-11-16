@@ -89,11 +89,9 @@ async def _resolve_capabilities(session, refs: list[str]) -> list[uuid.UUID]:
                 )
             )
         if found is None:
+            score = capability_service.name_closeness(Capability.name, ref)
             near = await session.scalars(
-                select(Capability.name)
-                .where(func.similarity(Capability.name, ref) > 0.3)
-                .order_by(func.similarity(Capability.name, ref).desc())
-                .limit(3)
+                select(Capability.name).where(score > 0.3).order_by(score.desc()).limit(3)
             )
             hint = ", ".join(f"`{n}`" for n in near) or "none — create it first"
             raise ToolError(f"No capability named `{ref}`. Near names: {hint}.")

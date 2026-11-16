@@ -34,6 +34,11 @@ format and ontology spec. The rules that shape everything you extract:
   is wrong. Only for an external product (someone else's, described from the
   outside with `"external": true`) may a feature set `"unknown_capabilities": true`
   and list just the capabilities you can name.
+- **Only what exists.** Export what the code actually does: features a user can
+  reach today (`done`), or ones whose code exists but isn't reachable yet
+  (`in_progress`). Never a feature or capability that only a README, spec, roadmap
+  or stub describes, and never code the repo ships without running (e.g. templates
+  it emits into other projects) as if it were the repo's own ability.
 - **Goals motivate capabilities, never features.** One org goal is usually
   enough; product goals hang under it.
 - **`A DEPENDS_ON B` means A needs B.** The dependency graph must be acyclic.
@@ -65,10 +70,11 @@ format and ontology spec. The rules that shape everything you extract:
    including case. Create a new name only when nothing in the inventory fits, and
    never one that near-duplicates an existing name ("Auth" next to
    "Authentication"). Set `maturity` from observed reality in *this* repo:
-   shipped and stable → `ga`, usable but rough → `beta`/`alpha`, aspirational →
-   `planned`. Ground each in `evidence_anchors` (real file paths from the repo).
-5. **Extract features.** The user-facing verbs: what has been built (status
-   `done`), what's underway (`in_progress`), what's clearly next (`pending`).
+   shipped and stable → `ga`, usable but rough → `beta`/`alpha`. A capability with
+   no working code isn't exported at all (never `planned`). Ground each in `evidence_anchors` (real file paths from the repo).
+5. **Extract features.** The user-facing verbs that exist in code: built and
+   reachable (status `done`), or built but not yet reachable (`in_progress`).
+   Nothing that is only planned.
    For each, list every capability implementing it in `capability_refs`, and set
    `product_ref` to this project's product. Give priorities (1–5) with a one-line
    `priority_rationale` where it isn't obvious.
@@ -105,6 +111,5 @@ format and ontology spec. The rules that shape everything you extract:
 - **Don't inventory the code.** A capability map is the product's anatomy, not
   its directory listing; utilities, configs, and test scaffolding are not
   capabilities.
-- **When the repo is thin** (early project, sparse docs), export a small honest
-  graph — a handful of `planned` capabilities and pending features beats an
-  invented backlog.
+- **When the repo is thin** (early project, stubs), export a small honest graph
+  of what the code does — even if that is very little. Plans stay in the repo.

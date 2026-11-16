@@ -86,9 +86,10 @@ For curl / seed scripts against the API without a browser session, set
 surface, so writes work exactly as they do in the real app (see
 [the write boundary](#the-write-boundary)). Leave it `true` for normal use.
 
-First boot seeds demo data (goals, the capability map, the PM-Export spec, a
-12-ticket PRD, the feature graph) so every screen renders with real content. Set
-`SEED_DEMO_DATA=false` to skip. The schema is `create_all` on boot — after pulling a
+A fresh instance is empty: metis holds only real data, loaded from seed files
+exported from actual repositories (`metis-export`, then `metis-seed-instance`).
+There is no demo data, and nothing a repo only describes — plans, specs, or code
+it ships without running — is recorded as existing. The schema is `create_all` on boot — after pulling a
 schema change, reset the dev volume (`docker compose down -v`). Realm import only
 runs on a fresh Keycloak data directory; to re-import users/roles, recreate the
 Keycloak container without a persisted volume (compose already does that).
@@ -366,7 +367,6 @@ All optional — see `.env.example`:
 | `OPENROUTER_API_KEY` | OpenRouter |
 | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_REGION` | Bedrock (Claude models) |
 | `OLLAMA_BASE_URL` | Ollama; compose default reaches host Ollama at `host.docker.internal:11434` |
-| `SEED_DEMO_DATA` | Seed demo data on first boot (default `true`) |
 | `AUTH_ENABLED` | `false` makes every request an admin on the desktop surface — scripts only |
 | `METIS_MCP_SSE_TOKEN` | Required for the MCP server's SSE mode |
 | `ANTHROPIC_MODELS` etc. | Override the model dropdowns (comma-separated) |

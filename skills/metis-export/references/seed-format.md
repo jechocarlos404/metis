@@ -123,8 +123,8 @@ A legacy single `"capability_ref": "cap-graph"` is still accepted and read as
 `["cap-graph"]`; new files should use `capability_refs`.
 
 For an **external** product: no evidence anchors (there is no code to point at),
-leave capability `maturity` at `planned` — it describes *our* implementation, and
-an external-only capability's maturity is ignored anyway — and declare
+leave capability `maturity` unset — it describes *our* implementation, and an
+external-only capability's maturity is ignored anyway — and declare
 `unknown_capabilities` rather than guessing a link.
 
 ### edges

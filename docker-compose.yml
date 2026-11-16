@@ -53,10 +53,6 @@ services:
       KEYCLOAK_ADMIN_CLIENT_ID: metis-backend
       KEYCLOAK_ADMIN_CLIENT_SECRET: ${METIS_BACKEND_CLIENT_SECRET:-dev-backend-secret}
       AUTH_ENABLED: ${AUTH_ENABLED:-true}
-      # The demo seed only runs on a database with no seeded rows at all, so a
-      # partially-unseeded instance is left alone rather than colliding. Set to
-      # false to skip it on a fresh database too.
-      SEED_DEMO_DATA: ${SEED_DEMO_DATA:-true}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:

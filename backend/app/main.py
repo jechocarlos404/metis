@@ -26,7 +26,7 @@ from app.routers import (
     work,
 )
 from app.services.graph_service import FeatureGraph
-from app.services.seed import seed_demo_data
+from app.services.seed import ensure_agent_configs
 
 
 @asynccontextmanager
@@ -36,8 +36,7 @@ async def lifespan(app: FastAPI):
     app.state.engine = engine
     app.state.sessionmaker = sessionmaker
     await init_db(engine)
-    if settings.seed_demo_data:
-        await seed_demo_data(sessionmaker)
+    await ensure_agent_configs(sessionmaker)
     app.state.graph = FeatureGraph(sessionmaker)
     await app.state.graph.load()
     app.state.llm = ProviderRegistry(settings)

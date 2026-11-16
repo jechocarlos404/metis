@@ -131,6 +131,11 @@ sides are many-to-many: a feature realizes every capability implementing it
 product is its own (`features.product_id`), never derived from capabilities — a shared
 capability says nothing about whose feature this is.
 
+A product can be someone else's (`external`): you know its features as a user and
+map them to the capabilities they need, declaring `unknown_capabilities` where you
+can't tell. External products show what exists in the world; they never count as what
+*we* can do — coverage of an idea counts only capabilities our own features realize.
+
 Capability identity is the exact name (slug), on purpose: reuse is only visible when two
 products name the same ability the same way. Coverage matches exactly and offers near
 names as candidates; it never guesses, because a wrong match overstates what exists.

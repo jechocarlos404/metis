@@ -17,6 +17,7 @@ def fake_feature(seq: int, name: str, **kw):
         name=name,
         capability_ids=kw.get("capability_ids", (kw.get("capability_id", CAP_A),)),
         product_id=kw.get("product_id"),
+        external=kw.get("external", False),
         facets=kw.get("facets", {"layer": "service"}),
         status=kw.get("status", "pending"),
         priority=kw.get("priority"),

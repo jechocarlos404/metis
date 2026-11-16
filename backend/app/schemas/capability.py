@@ -76,10 +76,14 @@ class ProductRef(BaseModel):
 
 
 class InventoryEntry(CapabilityRead):
-    """A capability and who uses it, over its submap. products is derived from
-    the features realizing it — never stored, never from bundles."""
+    """A capability and who uses it, over its submap — derived from the
+    features realizing it, never stored, never from bundles. `products` and
+    `features` are ours; `external_products` are someone else's that have it.
+    `ours` is false only when every realizing feature is external."""
 
+    ours: bool
     products: list[ProductRef]
+    external_products: list[ProductRef]
     features: int
 
 
@@ -99,7 +103,10 @@ class CapabilityMatch(BaseModel):
     slug: str
     name: str
     maturity: CapabilityMaturity
+    #: False when only external products realize it: it exists, we don't have it.
+    ours: bool
     products: list[ProductRef]
+    external_products: list[ProductRef]
 
 
 class CapabilityNeed(BaseModel):
@@ -122,6 +129,7 @@ class CoverageReport(BaseModel):
     #: Distinct needs across the idea (a capability two features need counts once).
     needed: int
     existing: int
-    #: Existing needs at beta or ga — built and proven, not just named.
+    #: Distinct needs we have (external-only matches count as missing).
+    #: `mature`: those of ours at beta or ga — built and proven, not just named.
     mature: int
     missing: list[str]

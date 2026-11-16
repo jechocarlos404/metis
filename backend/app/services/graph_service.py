@@ -50,6 +50,8 @@ def _node_attrs(feature: Feature | Any) -> dict[str, Any]:
         "name": feature.name,
         "capability_ids": tuple(feature.capability_ids),
         "product_id": feature.product_id,
+        # Someone else's feature: shown and traversed, never our work queue.
+        "external": feature.external,
         "facets": dict(feature.facets or {}),
         "status": str(feature.status),
         "priority": feature.priority,
@@ -134,6 +136,7 @@ class FeatureGraph:
             "name": attrs["name"],
             "capability_ids": [str(c) for c in attrs.get("capability_ids", ())],
             "product_id": str(attrs["product_id"]) if attrs.get("product_id") else None,
+            "external": attrs.get("external", False),
             "facets": attrs.get("facets", {}),
             "status": attrs["status"],
             "priority": attrs.get("priority"),
@@ -151,6 +154,9 @@ class FeatureGraph:
             for src, _, data in self._g.in_edges(feature_id, data=True)
         ]
         return {"outgoing": outgoing, "incoming": incoming}
+
+    def _ours(self, node: uuid.UUID) -> bool:
+        return not self._g.nodes[node].get("external", False)
 
     def _precedence_subgraph(self) -> nx.DiGraph:
         """DEPENDS_ON ∪ reverse(BLOCKS): edge u->v means *u needs v*."""
@@ -185,12 +191,12 @@ class FeatureGraph:
         }
 
     def ready_set(self) -> list[dict[str, Any]]:
-        """The work frontier: pending features whose precedence dependencies
-        are all done."""
+        """The work frontier: our pending features whose precedence
+        dependencies are all done. External features are never our work."""
         dep = self._precedence_subgraph()
         ready = []
         for node in self._g.nodes:
-            if self._g.nodes[node]["status"] != "pending":
+            if self._g.nodes[node]["status"] != "pending" or not self._ours(node):
                 continue
             if all(
                 self._g.nodes[d]["status"] == "done" for d in nx.descendants(dep, node)
@@ -200,14 +206,15 @@ class FeatureGraph:
         return [self._summary(n) for n in ready]
 
     def topo_order(self) -> list[dict[str, Any]]:
-        """Features ordered dependencies-first. Raises GraphCycleError on a cycle."""
+        """Our features ordered dependencies-first (external ones are not ours
+        to build). Raises GraphCycleError on a cycle."""
         dep = self._precedence_subgraph()
         try:
             order = list(reversed(list(nx.topological_sort(dep))))
         except nx.NetworkXUnfeasible:
             cycle = [edge[0] for edge in nx.find_cycle(dep)]
             raise GraphCycleError(cycle) from None
-        return [self._summary(n) for n in order]
+        return [self._summary(n) for n in order if self._ours(n)]
 
     def mvp_cut(self, target_ids: set[uuid.UUID]) -> dict[str, Any]:
         """Prerequisite closure for a delivery cut: essential = targets ∪ their
@@ -218,10 +225,13 @@ class FeatureGraph:
         aggregation is the caller's job. Raises GraphCycleError if the
         essential subgraph contains a cycle."""
         dep = self._precedence_subgraph()
-        targets = {t for t in target_ids if self._g.has_node(t)}
+        # A cut is a plan for our work; external features are neither targets
+        # nor prerequisites we could build.
+        targets = {t for t in target_ids if self._g.has_node(t) and self._ours(t)}
         required = set(targets)
         for target in targets:
             required |= nx.descendants(dep, target)
+        required = {n for n in required if self._ours(n)}
         sub = dep.subgraph(required)
         try:
             order = list(reversed(list(nx.topological_sort(sub))))
@@ -232,12 +242,14 @@ class FeatureGraph:
         deferrable = [
             self._summary(n)
             for n in sorted(
-                set(self._g.nodes) - required,
+                {n for n in self._g.nodes if self._ours(n)} - required,
                 key=lambda n: (self._g.nodes[n]["priority"] or 99, self._g.nodes[n]["seq"]),
             )
         ]
         capabilities: dict[uuid.UUID, dict[str, int]] = {}
         for node in self._g.nodes:
+            if not self._ours(node):
+                continue
             for cid in self._g.nodes[node].get("capability_ids", ()):
                 entry = capabilities.setdefault(cid, {"required": 0, "total": 0})
                 entry["total"] += 1

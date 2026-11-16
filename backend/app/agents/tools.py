@@ -105,6 +105,8 @@ def _feature_dict(f: Feature) -> dict[str, Any]:
         "name": f.name,
         "capability_ids": [str(c) for c in f.capability_ids],
         "product_id": str(f.product_id) if f.product_id else None,
+        "external": f.external,
+        "unknown_capabilities": f.unknown_capabilities,
         "facets": dict(f.facets or {}),
         "status": str(f.status),
         "priority": f.priority,
@@ -182,6 +184,7 @@ async def list_products(ctx: ToolContext) -> ToolResult:
             "summary": p.summary,
             "status": str(p.status),
             "version": p.version,
+            "external": p.external,
         }
         for p in products
     ]))
@@ -197,8 +200,11 @@ async def capability_inventory(ctx: ToolContext) -> ToolResult:
     return ToolResult(_dump([
         {
             "name": e.name,
-            "maturity": str(e.maturity),
+            "ours": e.ours,
+            # Maturity describes our implementation; meaningless when not ours.
+            "maturity": str(e.maturity) if e.ours else None,
             "products": [p.name for p in e.products],
+            "external_products": [p.name for p in e.external_products],
             "features": e.features,
         }
         for e in entries
@@ -227,7 +233,12 @@ async def search_features(ctx: ToolContext, query: str) -> ToolResult:
 # ---- spec_decomposer tools ----
 
 async def create_product_spec(
-    ctx: ToolContext, name: str, summary: str, body: str = "", goal: str = ""
+    ctx: ToolContext,
+    name: str,
+    summary: str,
+    body: str = "",
+    goal: str = "",
+    external: bool = False,
 ) -> ToolResult:
     goal_id = None
     if goal:
@@ -239,6 +250,7 @@ async def create_product_spec(
         name=name,
         summary=summary,
         body=body or None,
+        external=external,
     )
     ctx.session.add(product)
     await ctx.session.commit()
@@ -388,13 +400,14 @@ async def motivate_capability(ctx: ToolContext, capability: str, goal: str) -> T
 async def create_feature(
     ctx: ToolContext,
     name: str,
-    capabilities: list[str],
+    capabilities: list[str] | None = None,
     description: str = "",
     layer: str = "",
     priority: int | None = None,
     product: str = "",
+    unknown_capabilities: bool = False,
 ) -> ToolResult:
-    capability_ids = await _resolve_capabilities(ctx.session, capabilities)
+    capability_ids = await _resolve_capabilities(ctx.session, capabilities or [])
     product_obj = (
         await _resolve(ctx.session, Product, product, "PRD", Product.name) if product else None
     )
@@ -402,6 +415,7 @@ async def create_feature(
         data = FeatureCreate(
             name=name, description=description or None,
             capability_ids=capability_ids,
+            unknown_capabilities=unknown_capabilities,
             product_id=product_obj.id if product_obj else None,
             facets={"layer": layer} if layer else {},
             priority=priority,
@@ -652,7 +666,7 @@ SHARED_TOOLS = [
 
 AGENT_TOOLS: dict[str, list[tuple[ToolDef, Any]]] = {
     "spec_decomposer": SHARED_TOOLS + [
-        _tool("create_product_spec", "Create a new product Spec. summary = what it does, not how. Optionally link to a goal by ID (PG-xx) or title.", {"name": _STR, "summary": _STR, "body": _STR, "goal": _STR}, ["name", "summary"], create_product_spec),
+        _tool("create_product_spec", "Create a new product Spec. summary = what it does, not how. Optionally link to a goal by ID (PG-xx) or title. external = true for someone else's product known only from the outside (its features never count as ours).", {"name": _STR, "summary": _STR, "body": _STR, "goal": _STR, "external": {"type": "boolean"}}, ["name", "summary"], create_product_spec),
         _tool("create_prd_draft", "Create a new versioned PRD draft for a product and materialize its epics, stories, and tickets. Pin every epic to a capability and every story to a feature — the PRD is a snapshot of the taxonomy. Replaces the previous draft while all tickets are pending. product = UUID, SPEC-xxx, or name.", {"product": _STR, "document": _PRD_SCHEMA}, ["product", "document"], create_prd_draft),
         _tool("create_ticket", "Create a single ticket under a product (optionally under an epic/story UUID). context_budget: S, M, or L.", {"product": _STR, "title": _STR, "description": _STR, "technical_approach": _STR, "acceptance_criteria": _STR, "affected_files": {"type": "array", "items": _STR}, "context_budget": {"type": "string", "enum": ["S", "M", "L"]}, "epic_id": _STR, "story_id": _STR}, ["product", "title"], create_ticket),
         _tool("update_ticket", "Update a ticket by UUID, TKT-xxxx, or title. Only pass fields to change.", {"ticket": _STR, "title": _STR, "description": _STR, "technical_approach": _STR, "acceptance_criteria": _STR, "affected_files": {"type": "array", "items": _STR}, "context_budget": {"type": "string", "enum": ["S", "M", "L"]}, "status": {"type": "string", "enum": ["pending", "in_progress", "done"]}}, ["ticket"], update_ticket),
@@ -661,8 +675,8 @@ AGENT_TOOLS: dict[str, list[tuple[ToolDef, Any]]] = {
         _tool("create_capability", "Create a capability (slow plane). Name must be a NOUN phrase naming a durable state of the product. Optionally nest under a parent capability (UUID or name).", {"name": _STR, "description": _STR, "parent": _STR, "maturity": _MATURITY, "evidence_anchors": {"type": "array", "items": _STR}}, ["name"], create_capability),
         _tool("update_capability", "Update a capability by UUID or name. Only pass fields to change. Re-parenting that closes a containment cycle is rejected.", {"capability": _STR, "name": _STR, "description": _STR, "parent": _STR, "maturity": _MATURITY}, ["capability"], update_capability),
         _tool("motivate_capability", "Link a goal to a capability: goal MOTIVATES capability. Goals justify capabilities, never features directly.", {"capability": _STR, "goal": _STR}, ["capability", "goal"], motivate_capability),
-        _tool("create_feature", "Create a user-facing feature. capabilities = every capability it REALIZES (required, at least one; UUID, slug or exact name — no fuzzy matching, so list_capabilities first). product = whose feature it is (UUID or name). layer facet: ui | service | integration | infra. priority 1-5 (1 hottest).", {"name": _STR, "capabilities": {"type": "array", "items": _STR, "minItems": 1}, "product": _STR, "description": _STR, "layer": {"type": "string", "enum": ["ui", "service", "integration", "infra"]}, "priority": {"type": "integer", "minimum": 1, "maximum": 5}}, ["name", "capabilities"], create_feature),
-        _tool("update_feature", "Update a feature by UUID or name. Only pass fields to change. capabilities REPLACES the whole set it REALIZES (exact names only). product re-assigns whose feature it is.", {"feature": _STR, "name": _STR, "description": _STR, "capabilities": {"type": "array", "items": _STR, "minItems": 1}, "product": _STR, "layer": {"type": "string", "enum": ["ui", "service", "integration", "infra"]}, "status": {"type": "string", "enum": ["pending", "in_progress", "done"]}, "priority": {"type": "integer", "minimum": 1, "maximum": 5}, "priority_rationale": _STR}, ["feature"], update_feature),
+        _tool("create_feature", "Create a user-facing feature. capabilities = every capability it REALIZES (UUID, slug or exact name — no fuzzy matching, so list_capabilities first). If you cannot name them all — typical for an external product — set unknown_capabilities=true and list only the ones you know (possibly none); never guess. product = whose feature it is (UUID or name). layer facet: ui | service | integration | infra. priority 1-5 (1 hottest).", {"name": _STR, "capabilities": {"type": "array", "items": _STR}, "product": _STR, "unknown_capabilities": {"type": "boolean"}, "description": _STR, "layer": {"type": "string", "enum": ["ui", "service", "integration", "infra"]}, "priority": {"type": "integer", "minimum": 1, "maximum": 5}}, ["name"], create_feature),
+        _tool("update_feature", "Update a feature by UUID or name. Only pass fields to change. capabilities REPLACES the whole set it REALIZES (exact names only). product re-assigns whose feature it is. unknown_capabilities declares the list incomplete.", {"feature": _STR, "name": _STR, "description": _STR, "capabilities": {"type": "array", "items": _STR, "minItems": 1}, "product": _STR, "unknown_capabilities": {"type": "boolean"}, "layer": {"type": "string", "enum": ["ui", "service", "integration", "infra"]}, "status": {"type": "string", "enum": ["pending", "in_progress", "done"]}, "priority": {"type": "integer", "minimum": 1, "maximum": 5}, "priority_rationale": _STR}, ["feature"], update_feature),
         _tool("link_features", "Create a typed edge src -> dst. `src DEPENDS_ON dst` means src needs dst; `src BLOCKS dst` means dst waits for src. Writes that close a precedence cycle are rejected. Kinds: DEPENDS_ON, BLOCKS, RELATES_TO.", {"src": _STR, "dst": _STR, "kind": {"type": "string", "enum": ["DEPENDS_ON", "BLOCKS", "RELATES_TO"]}}, ["src", "dst"], link_features),
     ],
     "graph_agent": SHARED_TOOLS + [

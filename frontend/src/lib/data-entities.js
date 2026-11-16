@@ -137,7 +137,9 @@ const FEATURES = {
   columns: [
     { key: "name", label: "Name", width: "minmax(0,2fr)", render: (r) => r.name },
     { key: "capabilities", label: "Capabilities", width: "minmax(0,1.5fr)",
-      render: (r, refs) => (r.capability_ids ?? []).map((id) => nameOf(refs, "capabilities", id)).join(", ") || "—" },
+      render: (r, refs) =>
+        [...(r.capability_ids ?? []).map((id) => nameOf(refs, "capabilities", id)), ...(r.unknown_capabilities ? ["+ unknown"] : [])]
+          .join(", ") || "—" },
     { key: "product", label: "Product", width: "minmax(0,1fr)",
       render: (r, refs) => (r.product_id ? nameOf(refs, "products", r.product_id) : "—") },
     { key: "status", label: "Status", width: "110px",
@@ -148,19 +150,23 @@ const FEATURES = {
     { key: "name", label: "Name", type: "text", required: true },
     { key: "product_id", label: "Product", type: "select",
       optionsFrom: "products", optionLabel: (p) => p.name, nullable: true },
+    // At least one, unless the rest are declared unknown.
     { key: "capability_ids", label: "Realizes capabilities", type: "multiselect", required: true,
+      requiredUnless: "unknown_capabilities",
       optionsFrom: "capabilities", optionLabel: (c) => c.name },
+    { key: "unknown_capabilities", label: "Some capabilities are unknown", type: "checkbox" },
     { key: "description", label: "Description", type: "textarea" },
     { key: "status", label: "Status", type: "select", options: WORK_STATUSES },
     { key: "priority", label: "Priority", type: "number" },
     { key: "priority_rationale", label: "Priority rationale", type: "textarea" },
   ],
   emptyDraft: {
-    capability_ids: [], product_id: "", name: "", description: "", status: "pending",
+    capability_ids: [], unknown_capabilities: false, product_id: "", name: "", description: "", status: "pending",
     priority: "", priority_rationale: "",
   },
   toDraft: (r) => ({
-    capability_ids: r.capability_ids, product_id: r.product_id ?? "",
+    capability_ids: r.capability_ids ?? [], unknown_capabilities: !!r.unknown_capabilities,
+    product_id: r.product_id ?? "",
     name: r.name, description: r.description ?? "",
     status: r.status, priority: r.priority != null ? String(r.priority) : "",
     priority_rationale: r.priority_rationale ?? "",
@@ -168,6 +174,7 @@ const FEATURES = {
   createPath: () => "/features",
   createBody: (d) => ({
     capability_ids: d.capability_ids,
+    unknown_capabilities: d.unknown_capabilities,
     product_id: d.product_id || null,
     name: d.name.trim(),
     description: d.description.trim() || null,
@@ -252,6 +259,7 @@ const PRODUCTS = {
     { key: "slug", label: "Slug", width: "minmax(0,1fr)", mono: true, render: (r) => r.slug },
     { key: "goal", label: "Goal", width: "minmax(0,1fr)",
       render: (r, refs) => (r.goal_id ? titleOf(refs, "goals", r.goal_id) : "—") },
+    { key: "external", label: "External", width: "80px", render: (r) => (r.external ? "yes" : "—") },
     { key: "status", label: "Status", width: "90px",
       render: (r) => r.status, tone: (r) => (r.status === "approved" ? "ok" : "neutral") },
   ],
@@ -262,11 +270,12 @@ const PRODUCTS = {
       optionsFrom: "goals", optionLabel: (g) => g.title, nullable: true },
     { key: "summary", label: "Summary", type: "textarea" },
     { key: "body", label: "Body", type: "textarea" },
+    { key: "external", label: "External (someone else's product)", type: "checkbox" },
   ],
-  emptyDraft: { name: "", slug: "", goal_id: "", summary: "", body: "" },
+  emptyDraft: { name: "", slug: "", goal_id: "", summary: "", body: "", external: false },
   toDraft: (r) => ({
     name: r.name, slug: r.slug, goal_id: r.goal_id ?? "",
-    summary: r.summary ?? "", body: r.body ?? "",
+    summary: r.summary ?? "", body: r.body ?? "", external: !!r.external,
   }),
   createPath: () => "/products",
   createBody: (d) => ({
@@ -275,6 +284,7 @@ const PRODUCTS = {
     goal_id: d.goal_id || null,
     summary: d.summary.trim() || null,
     body: d.body.trim() || null,
+    external: d.external,
   }),
   patchPath: (r) => `/products/${r.id}`,
   patchBody: (d) => ({
@@ -282,6 +292,7 @@ const PRODUCTS = {
     goal_id: d.goal_id || null,
     summary: d.summary.trim() || null,
     body: d.body.trim() || null,
+    external: d.external,
   }),
   deletePath: (r) => `/products/${r.id}`,
 };

@@ -21,6 +21,8 @@ const PANEL = {
   borderRadius: "var(--radius-md)", overflow: "hidden",
 };
 
+const GRID = "minmax(0,1.4fr) 100px minmax(0,1.6fr) 70px";
+
 const PLACEHOLDER = `Predict climb time from weather: Strava import, Physics model, Weather forecast
 Import past rides: Strava import`;
 
@@ -86,14 +88,17 @@ export default function InventoryIsland() {
     check(next);
   };
 
-  const rows = (inventory ?? []).filter((c) => !reusedOnly || c.products.length > 1);
-  const reused = (inventory ?? []).filter((c) => c.products.length > 1).length;
+  const ours = (inventory ?? []).filter((c) => c.ours);
+  // Known only from someone else's product: it exists, we don't have it.
+  const elsewhere = (inventory ?? []).filter((c) => !c.ours);
+  const rows = ours.filter((c) => !reusedOnly || c.products.length > 1);
+  const reused = ours.filter((c) => c.products.length > 1).length;
 
   return (
     <>
       <PageHeader
         title="Inventory"
-        meta={inventory ? `${inventory.length} capabilities · ${reused} reused across products` : "loading"}
+        meta={inventory ? `${ours.length} capabilities of ours · ${reused} reused across products · ${elsewhere.length} known elsewhere` : "loading"}
       />
       <div style={{ flex: 1, overflowY: "auto", padding: 20, display: "grid", gridTemplateColumns: "minmax(0,3fr) minmax(320px,2fr)", gap: 20, alignItems: "start" }}>
         <section style={PANEL}>
@@ -105,17 +110,20 @@ export default function InventoryIsland() {
               reused only
             </label>
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1.4fr) 100px minmax(0,1.6fr) 70px", padding: "8px 16px", borderBottom: "1px solid var(--border-hairline)", ...CAPS }}>
+          <div style={{ display: "grid", gridTemplateColumns: GRID, padding: "8px 16px", borderBottom: "1px solid var(--border-hairline)", ...CAPS }}>
             <span>Capability</span><span>Maturity</span><span>Products</span><span>Features</span>
           </div>
           {rows.map((c, i) => (
-            <div key={c.id} style={{ display: "grid", gridTemplateColumns: "minmax(0,1.4fr) 100px minmax(0,1.6fr) 70px", alignItems: "center", gap: 8, padding: "10px 16px", borderBottom: i < rows.length - 1 ? "1px solid var(--border-hairline)" : "none", fontSize: "var(--text-sm)" }}>
+            <div key={c.id} style={{ display: "grid", gridTemplateColumns: GRID, alignItems: "center", gap: 8, padding: "10px 16px", borderBottom: i < rows.length - 1 ? "1px solid var(--border-hairline)" : "none", fontSize: "var(--text-sm)" }}>
               <a href={`/capabilities/${c.slug}`} style={{ color: "var(--text-heading)", fontWeight: "var(--weight-medium)", textDecoration: "none" }}>{c.name}</a>
               <span><Badge tone={MATURITY_TONES[c.maturity] ?? "neutral"}>{c.maturity}</Badge></span>
-              <span style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+              <span style={{ display: "flex", gap: 4, flexWrap: "wrap", alignItems: "center" }}>
                 {c.products.length > 0
                   ? c.products.map((p) => <Tag key={p.id}>{p.name}</Tag>)
                   : <span style={{ fontSize: "var(--text-xs)", color: "var(--text-disabled)" }}>{c.features > 0 ? "no product" : "unused"}</span>}
+                {c.external_products.length > 0 && (
+                  <span style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>· also in {c.external_products.map((p) => p.name).join(", ")}</span>
+                )}
               </span>
               <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-secondary)" }}>{c.features}</span>
             </div>
@@ -124,6 +132,24 @@ export default function InventoryIsland() {
             <div style={{ padding: 16, fontSize: "var(--text-sm)", color: "var(--text-disabled)" }}>
               {reusedOnly ? "0 capabilities are used by more than one product yet." : "0 capabilities. Seed a product to start the inventory."}
             </div>
+          )}
+          {elsewhere.length > 0 && (
+            <>
+              <div style={{ padding: "10px 16px", borderTop: "1px solid var(--border-hairline)", borderBottom: "1px solid var(--border-hairline)" }}>
+                <div style={{ fontSize: "var(--text-sm)", fontWeight: "var(--weight-semibold)", color: "var(--text-heading)" }}>Known from other products</div>
+                <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", marginTop: 2 }}>External products have these; we don't yet.</div>
+              </div>
+              {elsewhere.map((c, i) => (
+                <div key={c.id} style={{ display: "grid", gridTemplateColumns: GRID, alignItems: "center", gap: 8, padding: "10px 16px", borderBottom: i < elsewhere.length - 1 ? "1px solid var(--border-hairline)" : "none", fontSize: "var(--text-sm)" }}>
+                  <a href={`/capabilities/${c.slug}`} style={{ color: "var(--text-body)", textDecoration: "none" }}>{c.name}</a>
+                  <span style={{ fontSize: "var(--text-xs)", color: "var(--text-disabled)" }}>not ours</span>
+                  <span style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                    {c.external_products.map((p) => <Tag key={p.id}>{p.name}</Tag>)}
+                  </span>
+                  <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-disabled)" }}>0</span>
+                </div>
+              ))}
+            </>
           )}
         </section>
 
@@ -151,7 +177,7 @@ function CoverageReport({ report, onCandidate }) {
   return (
     <div style={{ borderTop: "1px solid var(--border-hairline)", padding: 16, display: "flex", flexDirection: "column", gap: 14 }}>
       <div style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-sm)", color: "var(--text-heading)" }}>
-        {report.existing}/{report.needed} capabilities exist · {report.mature} proven (beta+)
+        {report.existing}/{report.needed} capabilities we have · {report.mature} proven (beta+)
       </div>
       {report.missing.length > 0 && (
         <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>
@@ -166,7 +192,13 @@ function CoverageReport({ report, onCandidate }) {
           </div>
           {f.capabilities.map((need) => (
             <div key={need.name} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", paddingLeft: 10, fontSize: "var(--text-xs)" }}>
-              {need.match ? (
+              {need.match && !need.match.ours ? (
+                <>
+                  <Badge tone="warn">missing</Badge>
+                  <span style={{ color: "var(--text-body)" }}>{need.match.name}</span>
+                  <span style={{ color: "var(--text-secondary)" }}>known from {need.match.external_products.map((p) => p.name).join(", ")}</span>
+                </>
+              ) : need.match ? (
                 <>
                   <Badge tone="ok">exists</Badge>
                   <span style={{ color: "var(--text-body)" }}>{need.match.name}</span>

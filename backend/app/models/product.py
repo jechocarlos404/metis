@@ -1,7 +1,7 @@
 import uuid
 from typing import Any
 
-from sqlalchemy import Enum, ForeignKey, Integer, Text, UniqueConstraint
+from sqlalchemy import Boolean, Enum, ForeignKey, Integer, Text, UniqueConstraint, false
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -28,6 +28,9 @@ class Product(PKMixin, TimestampMixin, Base):
         Enum(DocStatus, native_enum=False), default=DocStatus.draft
     )
     version: Mapped[int] = mapped_column(Integer, default=1)
+    #: Someone else's product, known only from the outside — its features are
+    #: what a user sees, never our work. Never counted as what we can do.
+    external: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
 
     decompositions: Mapped[list["ProductDecomposition"]] = relationship(
         back_populates="product", cascade="all, delete-orphan"

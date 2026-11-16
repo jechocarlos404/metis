@@ -8,10 +8,11 @@ progress is always the rollup over realizing features.
 """
 
 import uuid
+from dataclasses import dataclass
 from collections import defaultdict
 
 from fastapi import HTTPException
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
@@ -161,14 +162,19 @@ async def submap_ids(session: AsyncSession, capability_id: uuid.UUID) -> set[uui
 
 
 async def scope(session: AsyncSession, capability_id: uuid.UUID) -> list[Feature]:
-    """All features realizing the capability or anything in its submap —
-    exactly what a PRD epic snapshot freezes. A feature realizing several
+    """Our features realizing the capability or anything in its submap —
+    exactly what a PRD epic snapshot freezes, and what progress rolls up over.
+    External features are someone else's work. A feature realizing several
     capabilities in the submap appears once."""
     ids = await submap_ids(session, capability_id)
     realizing = select(FeatureCapability.feature_id).where(
         FeatureCapability.capability_id.in_(ids)
     )
-    stmt = select(Feature).where(Feature.id.in_(realizing)).order_by(Feature.seq)
+    stmt = (
+        select(Feature)
+        .where(Feature.id.in_(realizing), ours_clause())
+        .order_by(Feature.seq)
+    )
     return list((await session.scalars(stmt)).all())
 
 
@@ -191,7 +197,7 @@ async def rollup(session: AsyncSession, capability_id: uuid.UUID) -> Rollup:
 async def capability_map(session: AsyncSession) -> list[CapabilityNode]:
     """The whole forest with an aggregated rollup per node (over its submap)."""
     children = await _children_index(session)
-    features = list((await session.scalars(select(Feature))).all())
+    features = list((await session.scalars(select(Feature).where(ours_clause()))).all())
     by_capability: dict[uuid.UUID, list[Feature]] = defaultdict(list)
     for feature in features:
         for cid in feature.capability_ids:
@@ -433,24 +439,62 @@ def name_closeness(column, name: str):
     )
 
 
-async def _products_by_capability(
-    session: AsyncSession,
-) -> tuple[dict[uuid.UUID, set[uuid.UUID]], dict[uuid.UUID, set[uuid.UUID]], dict[uuid.UUID, Product]]:
-    """Direct REALIZES links, as (capability -> feature ids, capability ->
-    product ids, product by id). Submap aggregation is the caller's job."""
-    features: dict[uuid.UUID, set[uuid.UUID]] = defaultdict(set)
-    products: dict[uuid.UUID, set[uuid.UUID]] = defaultdict(set)
+def ours_clause():
+    """The one rule for "ours": a feature is ours unless its product is
+    external. A feature with no product is internal work, so ours."""
+    return or_(
+        Feature.product_id.is_(None),
+        Feature.product_id.in_(select(Product.id).where(Product.external.is_(False))),
+    )
+
+
+@dataclass(frozen=True)
+class Usage:
+    """Who realizes a capability, over its submap. `ours` is the inventory's
+    whole question: false only when features realize it and every one of them
+    belongs to an external product — then we know it exists, not that we have it."""
+
+    products: list[ProductRef]
+    external_products: list[ProductRef]
+    features: int  # our features only
+    ours: bool
+
+
+async def _usage(session: AsyncSession) -> dict[uuid.UUID, Usage]:
+    """Per capability, over its submap. A parent is in use wherever any of its
+    children is."""
+    children = await _children_index(session)
+    by_id = {p.id: p for p in (await session.scalars(select(Product))).all()}
+    ours_f: dict[uuid.UUID, set[uuid.UUID]] = defaultdict(set)
+    ext_f: dict[uuid.UUID, set[uuid.UUID]] = defaultdict(set)
+    ours_p: dict[uuid.UUID, set[uuid.UUID]] = defaultdict(set)
+    ext_p: dict[uuid.UUID, set[uuid.UUID]] = defaultdict(set)
     rows = await session.execute(
         select(FeatureCapability.capability_id, Feature.id, Feature.product_id).join(
             Feature, Feature.id == FeatureCapability.feature_id
         )
     )
     for capability_id, feature_id, product_id in rows:
-        features[capability_id].add(feature_id)
+        external = product_id is not None and by_id[product_id].external
+        (ext_f if external else ours_f)[capability_id].add(feature_id)
         if product_id is not None:
-            products[capability_id].add(product_id)
-    by_id = {p.id: p for p in (await session.scalars(select(Product))).all()}
-    return features, products, by_id
+            (ext_p if external else ours_p)[capability_id].add(product_id)
+
+    def gather(index, submap):
+        return set().union(*(index.get(cid, set()) for cid in submap))
+
+    usage: dict[uuid.UUID, Usage] = {}
+    for capability in (c for group in children.values() for c in group):
+        submap = _submap_ids(capability.id, children)
+        ours_features = gather(ours_f, submap)
+        external_features = gather(ext_f, submap)
+        usage[capability.id] = Usage(
+            products=_refs(gather(ours_p, submap), by_id),
+            external_products=_refs(gather(ext_p, submap), by_id),
+            features=len(ours_features),
+            ours=bool(ours_features) or not external_features,
+        )
+    return usage
 
 
 def _refs(ids: set[uuid.UUID], by_id: dict[uuid.UUID, Product]) -> list[ProductRef]:
@@ -460,47 +504,52 @@ def _refs(ids: set[uuid.UUID], by_id: dict[uuid.UUID, Product]) -> list[ProductR
     )
 
 
-async def _usage(session: AsyncSession):
-    """Per capability, over its submap: (products, feature count). A parent is
-    in use wherever any of its children is."""
-    children = await _children_index(session)
-    features, products, by_id = await _products_by_capability(session)
-    usage: dict[uuid.UUID, tuple[list[ProductRef], int]] = {}
-    for capability in (c for group in children.values() for c in group):
-        submap = _submap_ids(capability.id, children)
-        feature_ids = set().union(*(features.get(cid, set()) for cid in submap))
-        product_ids = set().union(*(products.get(cid, set()) for cid in submap))
-        usage[capability.id] = (_refs(product_ids, by_id), len(feature_ids))
-    return usage
-
-
 async def inventory(session: AsyncSession) -> list[InventoryEntry]:
-    """Everything we can already do, most-reused first: the raw material for
-    the next product."""
+    """Everything we can already do, most-reused first, then what we only know
+    from external products: the raw material for the next product."""
     usage = await _usage(session)
     entries = [
         InventoryEntry(
             **CapabilityRead.model_validate(c).model_dump(),
-            products=usage[c.id][0],
-            features=usage[c.id][1],
+            ours=usage[c.id].ours,
+            products=usage[c.id].products,
+            external_products=usage[c.id].external_products,
+            features=usage[c.id].features,
         )
         for c in await list_capabilities(session)
     ]
-    entries.sort(key=lambda e: (-len(e.products), -e.features, e.name.lower()))
+    entries.sort(
+        key=lambda e: (
+            not e.ours,
+            -len(e.products),
+            -e.features,
+            -len(e.external_products),
+            e.name.lower(),
+        )
+    )
     return entries
 
 
 async def coverage(session: AsyncSession, request: CoverageRequest) -> CoverageReport:
-    """How much of a product idea already exists. Needs resolve by exact slug
+    """How much of a product idea we already have. Needs resolve by exact slug
     only — a wrong match would overstate what we have, which is worse than an
-    honest gap — and every unresolved need lists near names to confirm."""
+    honest gap — and every unresolved need lists near names to confirm. A
+    capability known only from external products resolves (so you see who has
+    it) but counts as missing: knowing it exists is not having it."""
     capabilities = await list_capabilities(session)
     by_slug = {c.slug: c for c in capabilities}
     usage = await _usage(session)
 
     def as_match(c: Capability) -> CapabilityMatch:
+        u = usage[c.id]
         return CapabilityMatch(
-            id=c.id, slug=c.slug, name=c.name, maturity=c.maturity, products=usage[c.id][0]
+            id=c.id,
+            slug=c.slug,
+            name=c.name,
+            maturity=c.maturity,
+            ours=u.ours,
+            products=u.products,
+            external_products=u.external_products,
         )
 
     async def candidates(name: str) -> list[CapabilityMatch]:
@@ -532,16 +581,17 @@ async def coverage(session: AsyncSession, request: CoverageRequest) -> CoverageR
             FeatureCoverage(
                 name=idea.name,
                 capabilities=needs,
-                existing=sum(1 for n in needs if n.match),
+                existing=sum(1 for n in needs if n.match and n.match.ours),
                 total=len(needs),
             )
         )
 
-    found_caps = [c for c in seen.values() if c is not None]
+    # Maturity describes our implementation, so only ours can be proven.
+    found_caps = [c for c in seen.values() if c is not None and usage[c.id].ours]
     missing: dict[str, str] = {}
     for f in features:
         for n in f.capabilities:
-            if n.match is None:
+            if n.match is None or not n.match.ours:
                 missing.setdefault(slugify(n.name), n.name)
     return CoverageReport(
         features=features,
@@ -571,7 +621,10 @@ async def health(session: AsyncSession) -> list[HealthFinding]:
     # can only add rows), so the invariant is checked here as well as on write.
     unlinked = await session.scalars(
         select(Feature)
-        .where(Feature.id.notin_(select(FeatureCapability.feature_id)))
+        .where(
+            Feature.id.notin_(select(FeatureCapability.feature_id)),
+            Feature.unknown_capabilities.is_(False),
+        )
         .order_by(Feature.seq)
     )
     for feature in unlinked:
@@ -591,7 +644,11 @@ async def health(session: AsyncSession) -> list[HealthFinding]:
         m.goal_id for m in (await session.scalars(select(Motivation))).all()
     }
 
+    usage = await _usage(session)
     for capability in capabilities:
+        # Known only from someone else's product: not our promise to keep.
+        if not usage[capability.id].ours:
+            continue
         in_scope = sum(
             counts_by_capability.get(cid, 0)
             for cid in _submap_ids(capability.id, children)

@@ -30,15 +30,17 @@ async def get_feature(session: AsyncSession, feature_id: uuid.UUID) -> Feature:
 
 
 async def _resolve_links(
-    session: AsyncSession, capability_ids: list[uuid.UUID]
+    session: AsyncSession, capability_ids: list[uuid.UUID], unknown: bool
 ) -> list[uuid.UUID]:
-    """The REALIZES set, deduped in order. At least one: a feature that
-    realizes nothing is either misfiled or unjustified work — refuse it here,
-    because no column can."""
+    """The REALIZES set, deduped in order. At least one unless the feature
+    declares its capabilities unknown: an undeclared empty list is either
+    misfiled or unjustified work — refuse it here, because no column can."""
     ids = list(dict.fromkeys(capability_ids))
-    if not ids:
+    if not ids and not unknown:
         raise HTTPException(
-            422, "A feature must realize at least one capability (capability_ids)."
+            422,
+            "A feature must realize at least one capability (capability_ids), "
+            "or declare its capabilities unknown (unknown_capabilities).",
         )
     found = set(await session.scalars(select(Capability.id).where(Capability.id.in_(ids))))
     for cid in ids:
@@ -55,7 +57,7 @@ async def _require_product(session: AsyncSession, product_id: uuid.UUID | None) 
 async def create_feature(
     session: AsyncSession, data: FeatureCreate, graph=None
 ) -> Feature:
-    ids = await _resolve_links(session, data.capability_ids)
+    ids = await _resolve_links(session, data.capability_ids, data.unknown_capabilities)
     await _require_product(session, data.product_id)
     feature = Feature(**data.model_dump(exclude={"capability_ids"}))
     feature.capability_links = [FeatureCapability(capability_id=cid) for cid in ids]
@@ -72,12 +74,18 @@ async def update_feature(
 ) -> Feature:
     feature = await get_feature(session, feature_id)
     fields = data.model_dump(exclude_unset=True)
+    if fields.get("unknown_capabilities") is None:
+        fields.pop("unknown_capabilities", None)
+    unknown = fields.get("unknown_capabilities", feature.unknown_capabilities)
     if "capability_ids" in fields:
-        ids = await _resolve_links(session, fields.pop("capability_ids") or [])
+        ids = await _resolve_links(session, fields.pop("capability_ids") or [], unknown)
         keep = {link.capability_id: link for link in feature.capability_links}
         feature.capability_links = [
             keep.get(cid) or FeatureCapability(capability_id=cid) for cid in ids
         ]
+    else:
+        # Clearing the declaration on a feature with no links is the same orphan.
+        await _resolve_links(session, feature.capability_ids, unknown)
     if fields.get("product_id") is not None:
         await _require_product(session, fields["product_id"])
     for key, value in fields.items():
@@ -87,6 +95,19 @@ async def update_feature(
     if graph is not None:
         graph.upsert_node(feature)
     return feature
+
+
+async def refresh_product_features(
+    session: AsyncSession, product_id: uuid.UUID, graph=None
+) -> None:
+    """A product's external flag decides whether its features are our work;
+    re-sync their graph nodes after it changes."""
+    if graph is None:
+        return
+    features = await session.scalars(select(Feature).where(Feature.product_id == product_id))
+    for feature in features:
+        await session.refresh(feature, ["product"])
+        graph.upsert_node(feature)
 
 
 async def delete_feature(session: AsyncSession, feature_id: uuid.UUID, graph=None) -> None:

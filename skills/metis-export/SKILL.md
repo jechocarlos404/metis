@@ -30,7 +30,10 @@ format and ontology spec. The rules that shape everything you extract:
 - **A feature REALIZES every capability implementing it.** `capability_refs`
   lists all of them — trace the feature through the code and include each
   capability it actually relies on. A missing link understates reuse; an invented
-  one overstates it. If you can't name any, your capability map is wrong.
+  one overstates it. In your own repo, if you can't name any, your capability map
+  is wrong. Only for an external product (someone else's, described from the
+  outside with `"external": true`) may a feature set `"unknown_capabilities": true`
+  and list just the capabilities you can name.
 - **Goals motivate capabilities, never features.** One org goal is usually
   enough; product goals hang under it.
 - **`A DEPENDS_ON B` means A needs B.** The dependency graph must be acyclic.

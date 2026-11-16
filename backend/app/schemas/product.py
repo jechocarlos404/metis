@@ -15,6 +15,8 @@ class ProductCreate(BaseModel):
     slug: str | None = None
     summary: str | None = None
     body: str | None = None
+    #: Someone else's product, known only from the outside.
+    external: bool = False
 
 
 class ProductUpdate(BaseModel):
@@ -22,6 +24,7 @@ class ProductUpdate(BaseModel):
     name: str | None = None
     summary: str | None = None
     body: str | None = None
+    external: bool | None = None
 
 
 class ProductRead(Stamped):
@@ -32,6 +35,7 @@ class ProductRead(Stamped):
     body: str | None
     status: DocStatus
     version: int
+    external: bool
 
     @computed_field
     @property

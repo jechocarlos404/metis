@@ -7,7 +7,9 @@ from app.schemas.common import Stamped
 
 
 class FeatureCreate(BaseModel):
-    capability_id: uuid.UUID
+    #: Every capability this feature REALIZES; at least one (422 otherwise).
+    capability_ids: list[uuid.UUID]
+    product_id: uuid.UUID | None = None
     name: str
     description: str | None = None
     facets: dict[str, str] = Field(default_factory=dict)
@@ -17,7 +19,9 @@ class FeatureCreate(BaseModel):
 
 
 class FeatureUpdate(BaseModel):
-    capability_id: uuid.UUID | None = None
+    #: Replaces the whole set when given; still at least one.
+    capability_ids: list[uuid.UUID] | None = None
+    product_id: uuid.UUID | None = None
     name: str | None = None
     description: str | None = None
     facets: dict[str, str] | None = None
@@ -27,7 +31,8 @@ class FeatureUpdate(BaseModel):
 
 
 class FeatureRead(Stamped):
-    capability_id: uuid.UUID
+    capability_ids: list[uuid.UUID]
+    product_id: uuid.UUID | None
     name: str
     description: str | None
     facets: dict[str, str]

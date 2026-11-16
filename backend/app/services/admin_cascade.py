@@ -9,6 +9,10 @@ Two rules keep the override honest:
 
 * One closure function serves both preview and execute. A preview computed by
   different code than the delete is a preview that can lie.
+* A feature realizing several capabilities loses only the links into the
+  closure; it is deleted only when no capability outside the closure is left
+  for it to realize. Leaving it behind would orphan it, which the guarded
+  paths refuse to do.
 * Nothing is silently re-pointed. `capabilities.parent_id` is ON DELETE SET NULL,
   so letting Postgres handle a parent delete would quietly re-root the children
   at top level. The closure follows `parent_id` instead, and the preview says so.
@@ -32,6 +36,7 @@ from app.models import (
     Encounter,
     Epic,
     Feature,
+    FeatureCapability,
     FeatureEdge,
     Goal,
     Motivation,
@@ -80,7 +85,7 @@ CHILDREN: dict[type, tuple[ChildSpec, ...]] = {
         # PG says SET NULL. We recurse anyway: an admin ticking a parent does not
         # mean "flatten my capability map and tell me nothing".
         ChildSpec(Capability, "parent_id", "delete", "ontology"),
-        ChildSpec(Feature, "capability_id", "delete", "ontology"),  # the RESTRICT that 409s
+        ChildSpec(FeatureCapability, "capability_id", "delete", "ontology"),  # the RESTRICT that 409s
         ChildSpec(Motivation, "capability_id", "delete", "ontology"),
         ChildSpec(ProductBundle, "capability_id", "delete", "ontology"),
         ChildSpec(TechSatisfaction, "capability_id", "delete", "buy"),  # the other RESTRICT
@@ -88,6 +93,7 @@ CHILDREN: dict[type, tuple[ChildSpec, ...]] = {
         ChildSpec(StackSlot, "capability_id", "detach", "buy"),
     ),
     Feature: (
+        ChildSpec(FeatureCapability, "feature_id", "delete", "ontology"),
         ChildSpec(FeatureEdge, "src_id", "delete", "ontology"),
         ChildSpec(FeatureEdge, "dst_id", "delete", "ontology"),
         ChildSpec(Story, "feature_id", "detach", "delivery"),
@@ -99,6 +105,7 @@ CHILDREN: dict[type, tuple[ChildSpec, ...]] = {
     ),
     Product: (
         ChildSpec(ProductBundle, "product_id", "delete", "ontology"),
+        ChildSpec(Feature, "product_id", "detach", "ontology"),  # features outlive their product
         ChildSpec(ProductDecomposition, "product_id", "delete", "delivery"),
         ChildSpec(Epic, "product_id", "delete", "delivery"),
         ChildSpec(Ticket, "product_id", "delete", "delivery"),
@@ -141,6 +148,7 @@ DELETE_ORDER: tuple[type, ...] = (
     ProductDecomposition,
     DeliveryStrategy,
     FeatureEdge,
+    FeatureCapability,
     Feature,
     TechSatisfaction,
     Motivation,
@@ -168,6 +176,7 @@ LABELS: dict[type, tuple[str, Plane]] = {
     Encounter: ("Encounters", "buy"),
     Epic: ("Epics", "delivery"),
     Feature: ("Features", "ontology"),
+    FeatureCapability: ("Feature capability links", "ontology"),
     FeatureEdge: ("Feature edges", "ontology"),
     Goal: ("Goals", "ontology"),
     Motivation: ("Motivations", "ontology"),
@@ -236,19 +245,26 @@ async def compute_closure(
             frontier.append((model, found))
 
     while frontier:
-        model, ids = frontier.popleft()
-        for spec in CHILDREN.get(model, ()):
-            if spec.action != "delete":
-                continue
-            child_ids = set(
-                await session.scalars(
-                    select(spec.model.id).where(getattr(spec.model, spec.fk).in_(ids))
+        while frontier:
+            model, ids = frontier.popleft()
+            for spec in CHILDREN.get(model, ()):
+                if spec.action != "delete":
+                    continue
+                child_ids = set(
+                    await session.scalars(
+                        select(spec.model.id).where(getattr(spec.model, spec.fk).in_(ids))
+                    )
                 )
-            )
-            new = child_ids - to_delete[spec.model]
-            if new:
-                to_delete[spec.model] |= new
-                frontier.append((spec.model, new))
+                new = child_ids - to_delete[spec.model]
+                if new:
+                    to_delete[spec.model] |= new
+                    frontier.append((spec.model, new))
+        # Features whose every link is in the closure have nothing left to
+        # realize; they join it (and their own children expand next round).
+        orphans = await _orphaned_features(session, to_delete)
+        if orphans:
+            to_delete[Feature] |= orphans
+            frontier.append((Feature, orphans))
 
     # Detach counts last, and only for rows that survive. A story whose epic is
     # in the closure is deleted, not detached; counting it during expansion would
@@ -268,6 +284,30 @@ async def compute_closure(
             detach[spec.model] += await session.scalar(stmt) or 0
 
     return {m: ids for m, ids in to_delete.items() if ids}, dict(detach), missing
+
+
+async def _orphaned_features(
+    session: AsyncSession, to_delete: dict[type, set[uuid.UUID]]
+) -> set[uuid.UUID]:
+    links = to_delete.get(FeatureCapability)
+    if not links:
+        return set()
+    touched = set(
+        await session.scalars(
+            select(FeatureCapability.feature_id).where(FeatureCapability.id.in_(links))
+        )
+    ) - to_delete.get(Feature, set())
+    if not touched:
+        return set()
+    survivors = set(
+        await session.scalars(
+            select(FeatureCapability.feature_id).where(
+                FeatureCapability.feature_id.in_(touched),
+                FeatureCapability.id.notin_(links),
+            )
+        )
+    )
+    return touched - survivors
 
 
 async def _label(session: AsyncSession, model: type, row_id: uuid.UUID) -> str:

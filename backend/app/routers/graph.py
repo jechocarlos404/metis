@@ -25,13 +25,12 @@ async def _graph(request: Request) -> FeatureGraph:
 
 
 @router.get("/layout")
-async def layout(request: Request, session: AsyncSession = Depends(get_db)):
-    """Graph layout plus derived product attribution per node (see
-    capability_service.product_attribution)."""
+async def layout(request: Request):
+    """Graph layout plus each node's product. Direct, never derived from
+    capabilities: a shared capability says nothing about whose feature this is."""
     data = (await _graph(request)).layout()
-    attribution = await capability_service.product_attribution(session)
     for node in data["nodes"]:
-        node["product_ids"] = attribution.get(node["capability_id"], [])
+        node["product_ids"] = [node["product_id"]] if node["product_id"] else []
     return data
 
 

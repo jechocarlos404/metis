@@ -12,6 +12,7 @@ from app.models import (
     AdoptionStatus,
     EncounterDepth,
     Feature,
+    FeatureCapability,
     Product,
     ProductTechnology,
     StackSlot,
@@ -408,10 +409,12 @@ async def test_slug_is_canonical_and_unique(db):
 
 
 @pytest.mark.asyncio
-async def test_build_plane_stays_one_to_one(db):
-    """Invariant 1: features.capability_id stays NOT NULL. The build plane's
-    one-to-one is what makes the buy plane's many-to-many mean something."""
-    assert not Feature.__table__.c.capability_id.nullable
+async def test_build_plane_realizes_through_the_link_table(db):
+    """Invariant 1: a feature REALIZES capabilities only through
+    feature_capabilities, whose capability FK is RESTRICT like the buy side's."""
+    assert "capability_id" not in Feature.__table__.c
+    (fk,) = FeatureCapability.__table__.c.capability_id.foreign_keys
+    assert fk.ondelete == "RESTRICT"
 
 
 @pytest.mark.asyncio

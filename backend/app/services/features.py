@@ -11,7 +11,7 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Capability, EdgeKind, Feature, FeatureEdge
+from app.models import Capability, EdgeKind, Feature, FeatureCapability, FeatureEdge, Product
 from app.schemas.feature import EdgeCreate, FeatureCreate, FeatureUpdate
 
 
@@ -29,16 +29,36 @@ async def get_feature(session: AsyncSession, feature_id: uuid.UUID) -> Feature:
     return feature
 
 
-async def _require_capability(session: AsyncSession, capability_id: uuid.UUID) -> None:
-    if await session.get(Capability, capability_id) is None:
-        raise HTTPException(404, f"Capability {capability_id} not found")
+async def _resolve_links(
+    session: AsyncSession, capability_ids: list[uuid.UUID]
+) -> list[uuid.UUID]:
+    """The REALIZES set, deduped in order. At least one: a feature that
+    realizes nothing is either misfiled or unjustified work — refuse it here,
+    because no column can."""
+    ids = list(dict.fromkeys(capability_ids))
+    if not ids:
+        raise HTTPException(
+            422, "A feature must realize at least one capability (capability_ids)."
+        )
+    found = set(await session.scalars(select(Capability.id).where(Capability.id.in_(ids))))
+    for cid in ids:
+        if cid not in found:
+            raise HTTPException(404, f"Capability {cid} not found")
+    return ids
+
+
+async def _require_product(session: AsyncSession, product_id: uuid.UUID | None) -> None:
+    if product_id is not None and await session.get(Product, product_id) is None:
+        raise HTTPException(404, f"Product {product_id} not found")
 
 
 async def create_feature(
     session: AsyncSession, data: FeatureCreate, graph=None
 ) -> Feature:
-    await _require_capability(session, data.capability_id)
-    feature = Feature(**data.model_dump())
+    ids = await _resolve_links(session, data.capability_ids)
+    await _require_product(session, data.product_id)
+    feature = Feature(**data.model_dump(exclude={"capability_ids"}))
+    feature.capability_links = [FeatureCapability(capability_id=cid) for cid in ids]
     session.add(feature)
     await session.commit()
     await session.refresh(feature)
@@ -52,8 +72,14 @@ async def update_feature(
 ) -> Feature:
     feature = await get_feature(session, feature_id)
     fields = data.model_dump(exclude_unset=True)
-    if fields.get("capability_id") is not None:
-        await _require_capability(session, fields["capability_id"])
+    if "capability_ids" in fields:
+        ids = await _resolve_links(session, fields.pop("capability_ids") or [])
+        keep = {link.capability_id: link for link in feature.capability_links}
+        feature.capability_links = [
+            keep.get(cid) or FeatureCapability(capability_id=cid) for cid in ids
+        ]
+    if fields.get("product_id") is not None:
+        await _require_product(session, fields["product_id"])
     for key, value in fields.items():
         setattr(feature, key, value)
     await session.commit()

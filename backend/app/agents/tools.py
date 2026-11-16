@@ -12,12 +12,12 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.llm.types import ToolDef
 from app.models import Capability, Feature, Goal, Product, Ticket
-from app.schemas.capability import CapabilityCreate, CapabilityUpdate
+from app.schemas.capability import CapabilityCreate, CapabilityUpdate, CoverageRequest
 from app.schemas.feature import EdgeCreate, FeatureCreate, FeatureUpdate
 from app.schemas.prd import PRDDocument
 from app.schemas.strategy import StrategyCreate
@@ -28,7 +28,7 @@ from app.services import features as feature_service
 from app.services import search as search_service
 from app.services import strategies as strategy_service
 from app.services import tickets as ticket_service
-from app.services.slugs import unique_slug
+from app.services.slugs import slugify, unique_slug
 
 
 @dataclass
@@ -69,11 +69,44 @@ async def _resolve(session, model, ref: str, prefix: str, name_column=None):
     raise ToolError(f"Could not resolve `{ref}` to a known {model.__tablename__[:-1]}")
 
 
+async def _resolve_capabilities(session, refs: list[str]) -> list[uuid.UUID]:
+    """Exact resolution for REALIZES links: UUID, slug, or name ignoring case.
+    Unlike _resolve there is no substring fallback — a link to the wrong
+    capability corrupts the inventory silently, so near names are reported
+    for the agent to choose from instead."""
+    ids: list[uuid.UUID] = []
+    for ref in refs:
+        ref = (ref or "").strip()
+        found = None
+        try:
+            found = await session.get(Capability, uuid.UUID(ref))
+        except ValueError:
+            pass
+        if found is None:
+            found = await session.scalar(
+                select(Capability).where(
+                    or_(Capability.slug == slugify(ref), func.lower(Capability.name) == ref.lower())
+                )
+            )
+        if found is None:
+            near = await session.scalars(
+                select(Capability.name)
+                .where(func.similarity(Capability.name, ref) > 0.3)
+                .order_by(func.similarity(Capability.name, ref).desc())
+                .limit(3)
+            )
+            hint = ", ".join(f"`{n}`" for n in near) or "none — create it first"
+            raise ToolError(f"No capability named `{ref}`. Near names: {hint}.")
+        ids.append(found.id)
+    return ids
+
+
 def _feature_dict(f: Feature) -> dict[str, Any]:
     return {
         "id": str(f.id),
         "name": f.name,
-        "capability_id": str(f.capability_id),
+        "capability_ids": [str(c) for c in f.capability_ids],
+        "product_id": str(f.product_id) if f.product_id else None,
         "facets": dict(f.facets or {}),
         "status": str(f.status),
         "priority": f.priority,
@@ -159,6 +192,28 @@ async def list_products(ctx: ToolContext) -> ToolResult:
 async def list_features(ctx: ToolContext) -> ToolResult:
     features = await feature_service.list_features(ctx.session)
     return ToolResult(_dump([_feature_dict(f) for f in features]))
+
+
+async def capability_inventory(ctx: ToolContext) -> ToolResult:
+    entries = await capability_service.inventory(ctx.session)
+    return ToolResult(_dump([
+        {
+            "name": e.name,
+            "maturity": str(e.maturity),
+            "products": [p.name for p in e.products],
+            "features": e.features,
+        }
+        for e in entries
+    ]))
+
+
+async def product_coverage(ctx: ToolContext, features: list[dict]) -> ToolResult:
+    try:
+        request = CoverageRequest.model_validate({"features": features})
+    except ValueError as e:
+        raise ToolError(str(e)) from None
+    report = await capability_service.coverage(ctx.session, request)
+    return ToolResult(report.model_dump_json())
 
 
 async def list_capabilities(ctx: ToolContext) -> ToolResult:
@@ -335,16 +390,21 @@ async def motivate_capability(ctx: ToolContext, capability: str, goal: str) -> T
 async def create_feature(
     ctx: ToolContext,
     name: str,
-    capability: str,
+    capabilities: list[str],
     description: str = "",
     layer: str = "",
     priority: int | None = None,
+    product: str = "",
 ) -> ToolResult:
-    capability_obj = await _resolve(ctx.session, Capability, capability, "CAP", Capability.name)
+    capability_ids = await _resolve_capabilities(ctx.session, capabilities)
+    product_obj = (
+        await _resolve(ctx.session, Product, product, "PRD", Product.name) if product else None
+    )
     try:
         data = FeatureCreate(
             name=name, description=description or None,
-            capability_id=capability_obj.id,
+            capability_ids=capability_ids,
+            product_id=product_obj.id if product_obj else None,
             facets={"layer": layer} if layer else {},
             priority=priority,
         )
@@ -358,10 +418,12 @@ async def create_feature(
 
 async def update_feature(ctx: ToolContext, feature: str, **fields) -> ToolResult:
     feature_obj = await _resolve(ctx.session, Feature, feature, "FTR", Feature.name)
-    capability = fields.pop("capability", None)
-    if capability:
-        capability_obj = await _resolve(ctx.session, Capability, capability, "CAP", Capability.name)
-        fields["capability_id"] = capability_obj.id
+    capabilities = fields.pop("capabilities", None)
+    if capabilities:
+        fields["capability_ids"] = await _resolve_capabilities(ctx.session, capabilities)
+    product = fields.pop("product", None)
+    if product:
+        fields["product_id"] = (await _resolve(ctx.session, Product, product, "PRD", Product.name)).id
     layer = fields.pop("layer", None)
     if layer:
         fields["facets"] = {**(feature_obj.facets or {}), "layer": layer}
@@ -581,6 +643,8 @@ _MVP_CUT_TOOL = _tool(
 )
 
 SHARED_TOOLS = [
+    _tool("capability_inventory", "Everything we can already do: every capability with its maturity, the products whose features realize it, and its feature count — most-reused first. Start here for 'what could we build next'.", {}, [], capability_inventory),
+    _tool("product_coverage", "How much of a product idea already exists. features = [{name, capabilities: [capability names]}]. Names match exactly (by slug) — read capability_inventory first and reuse its names; unresolved needs come back with near-name candidates, never a guessed match.", {"features": {"type": "array", "items": {"type": "object", "properties": {"name": _STR, "capabilities": {"type": "array", "items": _STR, "minItems": 1}}, "required": ["name", "capabilities"]}, "minItems": 1}}, ["features"], product_coverage),
     _tool("list_goals", "List all org and product goals with IDs, criteria, priority, status.", {}, [], list_goals),
     _tool("list_products", "List all products (Specs) with IDs, names, status, version.", {}, [], list_products),
     _tool("list_capabilities", "List the capability map (slow plane): IDs, names, parent, maturity, evidence anchors.", {}, [], list_capabilities),
@@ -599,8 +663,8 @@ AGENT_TOOLS: dict[str, list[tuple[ToolDef, Any]]] = {
         _tool("create_capability", "Create a capability (slow plane). Name must be a NOUN phrase naming a durable state of the product. Optionally nest under a parent capability (UUID or name).", {"name": _STR, "description": _STR, "parent": _STR, "maturity": _MATURITY, "evidence_anchors": {"type": "array", "items": _STR}}, ["name"], create_capability),
         _tool("update_capability", "Update a capability by UUID or name. Only pass fields to change. Re-parenting that closes a containment cycle is rejected.", {"capability": _STR, "name": _STR, "description": _STR, "parent": _STR, "maturity": _MATURITY}, ["capability"], update_capability),
         _tool("motivate_capability", "Link a goal to a capability: goal MOTIVATES capability. Goals justify capabilities, never features directly.", {"capability": _STR, "goal": _STR}, ["capability", "goal"], motivate_capability),
-        _tool("create_feature", "Create a feature (fast plane). Name must be a VERB phrase naming a change. capability = the one capability it REALIZES (required; UUID or name). layer facet: ui | service | integration | infra. priority 1-5 (1 hottest).", {"name": _STR, "capability": _STR, "description": _STR, "layer": {"type": "string", "enum": ["ui", "service", "integration", "infra"]}, "priority": {"type": "integer", "minimum": 1, "maximum": 5}}, ["name", "capability"], create_feature),
-        _tool("update_feature", "Update a feature by UUID or name. Only pass fields to change. capability re-points which capability it REALIZES.", {"feature": _STR, "name": _STR, "description": _STR, "capability": _STR, "layer": {"type": "string", "enum": ["ui", "service", "integration", "infra"]}, "status": {"type": "string", "enum": ["pending", "in_progress", "done"]}, "priority": {"type": "integer", "minimum": 1, "maximum": 5}, "priority_rationale": _STR}, ["feature"], update_feature),
+        _tool("create_feature", "Create a user-facing feature. capabilities = every capability it REALIZES (required, at least one; UUID, slug or exact name — no fuzzy matching, so list_capabilities first). product = whose feature it is (UUID or name). layer facet: ui | service | integration | infra. priority 1-5 (1 hottest).", {"name": _STR, "capabilities": {"type": "array", "items": _STR, "minItems": 1}, "product": _STR, "description": _STR, "layer": {"type": "string", "enum": ["ui", "service", "integration", "infra"]}, "priority": {"type": "integer", "minimum": 1, "maximum": 5}}, ["name", "capabilities"], create_feature),
+        _tool("update_feature", "Update a feature by UUID or name. Only pass fields to change. capabilities REPLACES the whole set it REALIZES (exact names only). product re-assigns whose feature it is.", {"feature": _STR, "name": _STR, "description": _STR, "capabilities": {"type": "array", "items": _STR, "minItems": 1}, "product": _STR, "layer": {"type": "string", "enum": ["ui", "service", "integration", "infra"]}, "status": {"type": "string", "enum": ["pending", "in_progress", "done"]}, "priority": {"type": "integer", "minimum": 1, "maximum": 5}, "priority_rationale": _STR}, ["feature"], update_feature),
         _tool("link_features", "Create a typed edge src -> dst. `src DEPENDS_ON dst` means src needs dst; `src BLOCKS dst` means dst waits for src. Writes that close a precedence cycle are rejected. Kinds: DEPENDS_ON, BLOCKS, RELATES_TO.", {"src": _STR, "dst": _STR, "kind": {"type": "string", "enum": ["DEPENDS_ON", "BLOCKS", "RELATES_TO"]}}, ["src", "dst"], link_features),
     ],
     "graph_agent": SHARED_TOOLS + [

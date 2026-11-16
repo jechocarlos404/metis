@@ -72,7 +72,7 @@ async def make_capability(session, name, parent_id=None):
 
 async def make_feature(session, name, capability_id, graph=None):
     return await feature_service.create_feature(
-        session, FeatureCreate(name=name, capability_id=capability_id), graph
+        session, FeatureCreate(name=name, capability_ids=[capability_id]), graph
     )
 
 
@@ -163,9 +163,10 @@ async def test_overlapping_selections_are_deduplicated(db):
 
     features_total = next(t.count for t in preview.total_deletes if t.table == "features")
     assert features_total == 2
-    # f1's own row contributes only its edge — the capability already reached it.
+    # f1's own row contributes only its edge and its link — the capability
+    # already reached it.
     f1_row = next(r for r in preview.rows if r.id == e["f1"].id)
-    assert [t.table for t in f1_row.deletes] == ["feature_edges"]
+    assert sorted(t.table for t in f1_row.deletes) == ["feature_capabilities", "feature_edges"]
 
 
 @pytest.mark.asyncio
@@ -277,7 +278,7 @@ async def test_cascade_removes_the_closure_and_spares_the_rest(db):
         epic = await session.scalar(select(Epic))
         assert epic is not None and epic.capability_id is None
         # 2 caps, 2 features, 1 edge, 1 motivation, 1 bundle, 1 tech satisfaction
-        assert result.total == 8
+        assert result.total == 10  # 8 rows + the two features' capability links
 
 
 @pytest.mark.asyncio
@@ -463,11 +464,36 @@ async def test_cascade_endpoints_round_trip_over_http(db, client):
 
     body = {"rows": [{"entity": "capabilities", "id": str(e["parent"].id)}]}
     preview = (await client.post("/api/admin/data/cascade-preview", json=body)).json()
-    assert preview["total_rows"] == 8
+    assert preview["total_rows"] == 10
     assert preview["rows"][0]["label"] == "feature intelligence"
 
     result = (await client.post("/api/admin/data/cascade-delete", json=body)).json()
-    assert result["total"] == 8
+    assert result["total"] == 10
 
     async with db() as session:
         assert await count(session, Capability) == 0
+
+
+@pytest.mark.asyncio
+async def test_a_feature_still_realizing_something_survives_the_cascade(db):
+    """Deleting one of a feature's capabilities removes the link, not the
+    feature — it still realizes the other. A feature left realizing nothing
+    goes with the closure, as it always did."""
+    async with db() as session:
+        shared = await make_capability(session, "Strava import")
+        kept = await make_capability(session, "Elevation data")
+        both = await feature_service.create_feature(
+            session, FeatureCreate(name="ride summary", capability_ids=[shared.id, kept.id])
+        )
+        only = await make_feature(session, "sync rides", shared.id)
+
+        to_delete, _, _ = await admin_cascade.compute_closure(
+            session, [ref("capabilities", shared.id)]
+        )
+        assert to_delete[Feature] == {only.id}
+        await admin_cascade.execute(session, [ref("capabilities", shared.id)])
+
+    async with db() as session:
+        survivor = await session.get(Feature, both.id)
+        assert survivor is not None and survivor.capability_ids == [kept.id]
+        assert await session.get(Feature, only.id) is None

@@ -20,6 +20,7 @@ from app.models import (
     EdgeKind,
     Epic,
     Feature,
+    FeatureCapability,
     FeatureEdge,
     Goal,
     GoalType,
@@ -165,7 +166,8 @@ async def seed_demo_data(sessionmaker: async_sessionmaker[AsyncSession]) -> bool
         def feature(seq, name, capability, layer, priority, status, description, rationale=None):
             return Feature(
                 seq=seq,
-                capability_id=capability.id,
+                product_id=product.id,
+                capability_links=[FeatureCapability(capability_id=capability.id)],
                 name=name,
                 description=description,
                 facets={"layer": layer},

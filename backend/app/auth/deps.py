@@ -40,7 +40,10 @@ _SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 #: boundary is about writes, not about verbs. Matched in full rather than by
 #: suffix: the path is caller-controlled, and an exemption that widens by
 #: accident is the kind that is discovered later rather than reviewed now.
-_READS_BY_POST = (re.compile(r"/api/stacks/[^/]+/recommend"),)
+_READS_BY_POST = (
+    re.compile(r"/api/stacks/[^/]+/recommend"),
+    re.compile(r"/api/capabilities/coverage"),
+)
 
 
 def _is_read(method: str, path: str) -> bool:

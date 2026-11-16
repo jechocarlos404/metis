@@ -137,7 +137,7 @@ const FEATURES = {
   columns: [
     { key: "name", label: "Name", width: "minmax(0,2fr)", render: (r) => r.name },
     { key: "capabilities", label: "Capabilities", width: "minmax(0,1.5fr)",
-      render: (r, refs) => r.capability_ids.map((id) => nameOf(refs, "capabilities", id)).join(", ") || "—" },
+      render: (r, refs) => (r.capability_ids ?? []).map((id) => nameOf(refs, "capabilities", id)).join(", ") || "—" },
     { key: "product", label: "Product", width: "minmax(0,1fr)",
       render: (r, refs) => (r.product_id ? nameOf(refs, "products", r.product_id) : "—") },
     { key: "status", label: "Status", width: "110px",

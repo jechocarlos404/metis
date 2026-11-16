@@ -256,6 +256,15 @@ class Unseeder:
 
     # ---- removal passes, safest order ----
 
+    def _dead(self, kind):
+        """Ids the capability/goal passes will delete, computed once — the
+        deletable_* checks record keep-warnings, so they must not run twice."""
+        cache = self.__dict__.setdefault("_dead_cache", {})
+        if kind not in cache:
+            rows = self.deletable_caps() if kind == "caps" else self.deletable_goals()
+            cache[kind] = rows
+        return {r["id"] for r in cache[kind]}
+
     def remove_motivations(self):
         for m in self.doc.get("motivations") or []:
             goal = self.goals.get(m.get("goal_ref"))
@@ -266,6 +275,11 @@ class Unseeder:
             existing = {g["id"] for g in self.api.get(f"/api/capabilities/{cap['id']}/motivations")}
             if goal["id"] not in existing:
                 self.note("motivations", "absent")
+                continue
+            # Both ends survive: the pair is someone else's too (another
+            # product's seed motivated the same capability by the same goal).
+            if cap["id"] not in self._dead("caps") and goal["id"] not in self._dead("goals"):
+                self.note("motivations", "kept")
                 continue
             self.remove(
                 "motivations",
@@ -335,7 +349,8 @@ class Unseeder:
             )
 
     def remove_capabilities(self):
-        for cap in self.deletable_caps():
+        self._dead("caps")
+        for cap in self._dead_cache["caps"]:
             self.remove(
                 "capabilities",
                 f"/api/capabilities/{cap['id']}",
@@ -343,7 +358,8 @@ class Unseeder:
             )
 
     def remove_goals(self):
-        for goal in self.deletable_goals():
+        self._dead("goals")
+        for goal in self._dead_cache["goals"]:
             self.remove("goals", f"/api/goals/{goal['id']}", f"goal {goal['title']!r}")
 
     def report(self):

@@ -249,6 +249,18 @@ class Unseeder {
     return [...this.goals.values()].filter(check).sort((a, b) => depth(b) - depth(a));
   }
 
+  /** Rows the capability/goal passes will delete, computed once — the
+   * deletable* checks record keep-warnings, so they must not run twice. */
+  deadRows(kind) {
+    this.deadCache ??= {};
+    this.deadCache[kind] ??= kind === "caps" ? this.deletableCaps() : this.deletableGoals();
+    return this.deadCache[kind];
+  }
+
+  dead(kind) {
+    return new Set(this.deadRows(kind).map((row) => row.id));
+  }
+
   async removeMotivations() {
     for (const motivation of this.doc.motivations || []) {
       const goal = this.goals.get(motivation.goal_ref);
@@ -262,6 +274,12 @@ class Unseeder {
       );
       if (!existing.has(goal.id)) {
         this.note("motivations", "absent");
+        continue;
+      }
+      // Both ends survive: the pair is someone else's too (another product's
+      // seed motivated the same capability by the same goal).
+      if (!this.dead("caps").has(cap.id) && !this.dead("goals").has(goal.id)) {
+        this.note("motivations", "kept");
         continue;
       }
       await this.remove(
@@ -328,13 +346,13 @@ class Unseeder {
   }
 
   async removeCaps() {
-    for (const cap of this.deletableCaps()) {
+    for (const cap of this.deadRows("caps")) {
       await this.remove("capabilities", `/api/capabilities/${cap.id}`, `capability ${JSON.stringify(cap.name)}`);
     }
   }
 
   async removeGoals() {
-    for (const goal of this.deletableGoals()) {
+    for (const goal of this.deadRows("goals")) {
       await this.remove("goals", `/api/goals/${goal.id}`, `goal ${JSON.stringify(goal.title)}`);
     }
   }

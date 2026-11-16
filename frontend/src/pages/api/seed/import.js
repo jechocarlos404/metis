@@ -561,7 +561,10 @@ class Loader {
       const decomposition = product.decomposition;
       for (const capabilityRef of product.bundle_refs || []) {
         const capabilityId = this.capIds.get(capabilityRef);
-        const existing = await this.api.get(`/api/products/${productId}/bundles`);
+        // A product this dry run would create has no bundles to look up yet.
+        const existing = String(productId).startsWith("dry-run:")
+          ? []
+          : await this.api.get(`/api/products/${productId}/bundles`);
         if (existing.some((cap) => cap.id === capabilityId)) {
           this.note("bundles", "reused");
         } else if (this.dryRun) {

@@ -1,6 +1,17 @@
 import uuid
+from typing import TYPE_CHECKING
 
-from sqlalchemy import CheckConstraint, Enum, ForeignKey, Index, Integer, Text, UniqueConstraint
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    Enum,
+    ForeignKey,
+    Index,
+    Integer,
+    Text,
+    UniqueConstraint,
+    false,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -8,6 +19,9 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db import Base
 from app.models.base import PKMixin, TimestampMixin
 from app.models.enums import EdgeKind, WorkStatus
+
+if TYPE_CHECKING:
+    from app.models.product import Product
 
 
 class Feature(PKMixin, TimestampMixin, Base):
@@ -40,6 +54,20 @@ class Feature(PKMixin, TimestampMixin, Base):
     )
     priority: Mapped[int | None] = mapped_column(Integer)
     priority_rationale: Mapped[str | None] = mapped_column(Text)
+    #: Declared, not assumed: the feature relies on capabilities nobody has
+    #: identified yet (typical for an external product). The links it does
+    #: have are known; the list is incomplete and may be empty.
+    unknown_capabilities: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=false()
+    )
+
+    product: Mapped["Product | None"] = relationship(lazy="joined")
+
+    @property
+    def external(self) -> bool:
+        """Someone else's feature: its product is external. A feature with no
+        product is ours (internal work)."""
+        return bool(self.product is not None and self.product.external)
 
     #: selectin, so every query that loads a Feature has its links in hand —
     #: async sessions cannot lazy-load on attribute access.

@@ -1,6 +1,6 @@
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,6 +17,7 @@ from app.schemas.product import (
     ProductUpdate,
 )
 from app.services import capabilities as capability_service
+from app.services import features as feature_service
 from app.services.slugs import unique_slug
 from app.services import decomposition as decomposition_service
 
@@ -48,16 +49,27 @@ async def get_product(product_id: uuid.UUID, session: AsyncSession = Depends(get
 
 @router.patch("/products/{product_id}", response_model=ProductRead)
 async def update_product(
-    product_id: uuid.UUID, data: ProductUpdate, session: AsyncSession = Depends(get_db)
+    product_id: uuid.UUID,
+    data: ProductUpdate,
+    request: Request,
+    session: AsyncSession = Depends(get_db),
 ):
     product = await decomposition_service.get_product(session, product_id)
     updates = data.model_dump(exclude_unset=True)
+    if updates.get("external") is None:
+        updates.pop("external", None)
+    flipped = "external" in updates and updates["external"] != product.external
     for key, value in updates.items():
         setattr(product, key, value)
     if {"name", "summary", "body"} & updates.keys():
         product.version = product.version + 1
     await session.commit()
     await session.refresh(product)
+    if flipped:
+        # Whether its features are our work just changed.
+        await feature_service.refresh_product_features(
+            session, product.id, getattr(request.app.state, "graph", None)
+        )
     return product
 
 

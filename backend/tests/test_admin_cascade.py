@@ -497,3 +497,17 @@ async def test_a_feature_still_realizing_something_survives_the_cascade(db):
         survivor = await session.get(Feature, both.id)
         assert survivor is not None and survivor.capability_ids == [kept.id]
         assert await session.get(Feature, only.id) is None
+
+
+@pytest.mark.asyncio
+async def test_a_feature_declaring_unknown_capabilities_survives_losing_its_last_link(db):
+    async with db() as session:
+        known = await make_capability(session, "Activity sync")
+        feature = await feature_service.create_feature(
+            session,
+            FeatureCreate(name="live tracking", capability_ids=[known.id], unknown_capabilities=True),
+        )
+        to_delete, _, _ = await admin_cascade.compute_closure(
+            session, [ref("capabilities", known.id)]
+        )
+        assert Feature not in to_delete or feature.id not in to_delete[Feature]

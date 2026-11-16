@@ -17,7 +17,12 @@ and is never "done". Containment: a capability may have one parent (PART_OF fore
 Progress is derived from realizing features, never stored.
 - Feature: fast plane. A user-facing CHANGE (verb phrase) that REALIZES one or \
 more capabilities — every capability built or used to implement it — and belongs \
-to at most one product. Has status pending|in_progress|done, priority 1-5 (1 hottest), \
+to at most one product. When the capabilities cannot all be named (typical for \
+someone else's product), set `unknown_capabilities` and link only the known ones — \
+possibly none. Never guess a link to fill the list.
+- External product: someone else's product, known from the outside as a user \
+(`external`). Its features describe what it does; they are never our work and \
+its capabilities never count as ours. Has status pending|in_progress|done, priority 1-5 (1 hottest), \
 priority_rationale, and facets (e.g. layer: ui|service|integration|infra).
 - Goal (OG-xx / PG-xx): why layer. Goals MOTIVATE capabilities, never features \
 directly — a feature inherits its justification through its capability.

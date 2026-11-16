@@ -41,6 +41,14 @@ _SLUG_BACKFILL = (
 )
 
 
+#: Flags added after their tables existed. Same rules as above: idempotent,
+#: one statement each, defaulting every existing row to the old meaning.
+_FLAG_COLUMNS = (
+    "alter table products add column if not exists external boolean not null default false",
+    "alter table features add column if not exists unknown_capabilities boolean not null default false",
+)
+
+
 async def init_db(engine: AsyncEngine) -> None:
     from app import models  # noqa: F401 — register all tables on Base
 
@@ -52,6 +60,8 @@ async def init_db(engine: AsyncEngine) -> None:
                 await conn.execute(
                     text(statement.format(table=table, fallback=fallback))
                 )
+        for statement in _FLAG_COLUMNS:
+            await conn.execute(text(statement))
 
 
 async def get_db(request: Request) -> AsyncIterator[AsyncSession]:

@@ -307,7 +307,15 @@ async def _orphaned_features(
             )
         )
     )
-    return touched - survivors
+    # A feature that declares its capabilities unknown may stand with none.
+    declared = set(
+        await session.scalars(
+            select(Feature.id).where(
+                Feature.id.in_(touched), Feature.unknown_capabilities.is_(True)
+            )
+        )
+    )
+    return touched - survivors - declared
 
 
 async def _label(session: AsyncSession, model: type, row_id: uuid.UUID) -> str:

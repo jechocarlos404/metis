@@ -2,7 +2,8 @@
 """Seed a running metis instance from a metis-seed JSON file (format v1).
 
 Stdlib only — no dependencies. Idempotent and add-only: existing entities are
-matched (goals by type+title; capabilities, features, and products by name;
+matched (goals by type+title; capabilities and products by name; features by
+(product, name);
 edges by src+dst+kind; motivations by pair) and reused rather than duplicated,
 so re-running the same file is safe. Nothing is ever updated or deleted.
 
@@ -52,6 +53,15 @@ def _check_facets(errors, where, item):
         errors.append(f"{where}: facets must be an object of string -> string")
 
 
+def feature_capability_refs(feature):
+    """Every capability ref a feature REALIZES. `capability_refs` (list) is
+    current; a legacy single `capability_ref` reads as a one-element list."""
+    refs = feature.get("capability_refs")
+    if refs is None and feature.get("capability_ref") is not None:
+        refs = [feature["capability_ref"]]
+    return refs
+
+
 def validate(doc):
     """Return a list of error strings; empty means the document is loadable."""
     errors = []
@@ -74,7 +84,7 @@ def validate(doc):
     goal_refs = check_refs("goals")
     cap_refs = check_refs("capabilities")
     feat_refs = check_refs("features")
-    check_refs("products")
+    prod_refs = check_refs("products")
 
     def check_parent_forest(collection, refs):
         parents = {}
@@ -137,10 +147,17 @@ def validate(doc):
         where = f"features[{i}] ({f.get('ref')})"
         if not f.get("name"):
             errors.append(f"{where}: 'name' is required")
-        if f.get("capability_ref") not in cap_refs:
-            errors.append(
-                f"{where}: capability_ref {f.get('capability_ref')!r} does not match a capability"
-            )
+        refs = feature_capability_refs(f)
+        if not isinstance(refs, list) or not refs:
+            errors.append(f"{where}: capability_refs must be a non-empty list of capability refs")
+        else:
+            for ref in refs:
+                if ref not in cap_refs:
+                    errors.append(f"{where}: capability ref {ref!r} does not match a capability")
+            if len(set(map(str, refs))) != len(refs):
+                errors.append(f"{where}: capability_refs lists a capability twice")
+        if f.get("product_ref") is not None and f["product_ref"] not in prod_refs:
+            errors.append(f"{where}: unknown product_ref {f['product_ref']!r}")
         _check_priority(errors, where, f)
         _check_status(errors, where, f)
         _check_facets(errors, where, f)
@@ -314,6 +331,7 @@ class Loader:
         self.goal_ids = {}
         self.cap_ids = {}
         self.feat_ids = {}
+        self.prod_ids = {}
 
     def note(self, collection, action):
         self.counts[(collection, action)] = self.counts.get((collection, action), 0) + 1
@@ -401,17 +419,25 @@ class Loader:
                     self.note("motivations", "created")
 
     def load_features(self):
-        existing = {f["name"]: f["id"] for f in self.api.get("/api/features")}
+        # Add-only: an existing feature keeps its capability links as they
+        # are — the seeder never rewrites a row. Identity is (product, name):
+        # features belong to their product, so another product's "Sign in" is
+        # a different feature, not a reuse.
+        existing = {
+            (f.get("product_id"), f["name"]): f["id"] for f in self.api.get("/api/features")
+        }
         for f in self.doc.get("features") or []:
-            if f["name"] in existing:
-                self.feat_ids[f["ref"]] = existing[f["name"]]
+            key = (self.prod_ids.get(f.get("product_ref")), f["name"])
+            if key in existing:
+                self.feat_ids[f["ref"]] = existing[key]
                 self.note("features", "reused")
                 continue
             self.feat_ids[f["ref"]] = self.create(
                 "features",
                 "/api/features",
                 {
-                    "capability_id": self.cap_ids[f["capability_ref"]],
+                    "capability_ids": [self.cap_ids[r] for r in feature_capability_refs(f)],
+                    "product_id": self.prod_ids.get(f.get("product_ref")),
                     "name": f["name"],
                     "description": f.get("description"),
                     "facets": f.get("facets"),
@@ -447,7 +473,8 @@ class Loader:
                 self.warnings.append(f"edge {label} rejected ({status}): {body}")
                 self.note("edges", "rejected")
 
-    def load_products(self):
+    def load_product_rows(self):
+        """Products before features: a feature's product_ref needs the id."""
         existing = {p["name"]: p["id"] for p in self.api.get("/api/products")}
         for p in self.doc.get("products") or []:
             pid = existing.get(p["name"])
@@ -465,6 +492,12 @@ class Loader:
                     },
                     p["name"],
                 )
+            self.prod_ids[p["ref"]] = pid
+
+    def load_products(self):
+        """Bundles and PRDs, once features exist for stories to pin."""
+        for p in self.doc.get("products") or []:
+            pid = self.prod_ids[p["ref"]]
             existing_bundles = []
             if not str(pid).startswith(DRY_PREFIX):
                 existing_bundles = self.api.get(f"/api/products/{pid}/bundles")
@@ -611,6 +644,7 @@ def main():
     loader.load_goals()
     loader.load_capabilities()
     loader.load_motivations()
+    loader.load_product_rows()
     loader.load_features()
     loader.load_edges()
     loader.load_products()

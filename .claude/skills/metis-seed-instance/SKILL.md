@@ -29,8 +29,11 @@ reset with `docker compose down -v` first (warn the user: this erases instance d
   work items), read `references/seed-format.md` and author a seed file yourself —
   write it to a temp location, show the user a short summary of what it contains,
   then load it. Follow the ontology rules in the reference strictly: capabilities
-  are durable nouns, features are verb phrases realizing exactly one capability,
-  goals motivate capabilities only, and the precedence graph must stay acyclic.
+  are durable nouns shared across products by exact name (check
+  `GET /api/capabilities/inventory` and reuse existing names), features are
+  user-facing verb phrases listing every capability they realize in
+  `capability_refs` and naming their product in `product_ref`, goals motivate
+  capabilities only, and the precedence graph must stay acyclic.
 
 ## Load it
 
@@ -48,9 +51,13 @@ The script is stdlib-only (no venv needed) and defaults to
 Loading is **idempotent and add-only**: existing entities are matched (goals by
 type+title; capabilities, features, products by name; edges by src+dst+kind;
 motivations by pair) and reused, never duplicated, updated, or deleted. Because
-names are identity, a seed entity whose name collides with an unrelated existing
-entity will be silently reused instead of created — check the dry-run counts
-("reused" vs "would create") against your expectations before the real run.
+names are identity, a seed entity whose name matches an existing one is reused
+instead of created. For capabilities that is intended — a shared name is how two
+products show they use the same ability — but a feature or product name that
+matches an unrelated entity is silently reused too, so check the dry-run counts
+("reused" vs "would create") against your expectations before the real run. A
+reused feature keeps its existing capability links and product; the loader never
+rewrites them. Legacy files with a single `capability_ref` per feature still load.
 
 ## Verify
 

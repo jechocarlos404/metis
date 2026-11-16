@@ -1,8 +1,12 @@
 # metis
 
-**Metis turns org intent into scoped, executable work.** One AI-assisted pipeline runs
-from why-the-company-cares down to a ticket sized to fit a single Claude session —
-known context, clear inputs, a verifiable done condition.
+**Metis is a capability inventory shared across products.** Every product's user-facing
+features are mapped to the capabilities built to implement them, and capabilities are
+shared by name across products — so the question *what could we build next from what
+already exists?* has a computed answer, not a meeting.
+
+Downstream, the same graph turns intent into scoped, executable work: a pipeline from
+why-the-company-cares down to a ticket sized to fit a single Claude session.
 
 Named for the Titan of practical wisdom. The intelligence before the build.
 
@@ -27,7 +31,9 @@ and unusable for an agent.
 Metis makes one bet: **separate the durable nouns from the churning verbs.**
 
 - A **capability** is what the product *can do* — a noun that matures and never ships.
-- A **feature** is a *change* that moves one capability — a verb that does ship, then archives.
+- A **feature** is a user-facing *change* that realizes the capabilities it is built on —
+  a verb that does ship, then archives. It belongs to one product; its capabilities
+  may be shared with any number of others.
 
 Because capabilities are stable, documents can pin to them permanently, provenance
 becomes a pure graph traversal instead of a meeting, and a pivot rewrites the features
@@ -42,6 +48,8 @@ chat and over MCP:
 
 | Question a PM actually asks | Where it comes from |
 |---|---|
+| What can we already do, and which products reuse it? | `GET /api/capabilities/inventory` |
+| How much of this product idea already exists? | `POST /api/capabilities/coverage` |
 | What breaks if we change this? | `GET /api/graph/impact/{feature_id}` |
 | What can we start right now, with nothing blocking it? | `GET /api/graph/ready` |
 | What order do we have to build these in? | `GET /api/graph/topo` |
@@ -117,10 +125,15 @@ flowchart TB
 ```
 
 **Capability is the exchange currency.** A feature `REALIZES` a capability — the *build*
-side. A technology `SATISFIES` one — the *buy* side. Same node, same currency. The
-asymmetry is deliberate: a feature realizes exactly one capability
-(`features.capability_id NOT NULL`), a technology serves many. A change belongs to one
-durable noun; a technology serves several.
+side. A technology `SATISFIES` one — the *buy* side. Same node, same currency. Both
+sides are many-to-many: a feature realizes every capability implementing it
+(`feature_capabilities`, at least one), and a technology serves many. A feature's
+product is its own (`features.product_id`), never derived from capabilities — a shared
+capability says nothing about whose feature this is.
+
+Capability identity is the exact name (slug), on purpose: reuse is only visible when two
+products name the same ability the same way. Coverage matches exactly and offers near
+names as candidates; it never guesses, because a wrong match overstates what exists.
 
 Goals motivate **capabilities**, never features directly — features inherit their
 justification through `REALIZES`, which is what makes `why(feature)` a pure traversal

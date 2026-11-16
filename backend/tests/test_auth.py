@@ -79,9 +79,17 @@ def test_recommend_is_a_read_despite_being_a_post(surface):
     authorize("POST", _p("viewer", surface=surface), "/api/stacks/metis/recommend")
 
 
+@pytest.mark.parametrize("surface", [Surface.api, Surface.mcp])
+def test_coverage_is_a_read_despite_being_a_post(surface):
+    """The idea travels in the body; nothing is written."""
+    authorize("POST", _p("viewer", surface=surface), "/api/capabilities/coverage")
+
+
 @pytest.mark.parametrize(
     "path",
     [
+        "/api/capabilities/coverage/x",
+        "/api/capabilities/abc/coverage",
         "/api/stacks/slots/abc/bind/recommend",  # suffix match would exempt this
         "/api/stacks/a/b/recommend",
         "/api/tech/recommend",

@@ -3,12 +3,14 @@
 
 The inverse of seed_instance.py. Stdlib only — no dependencies. Entities are
 matched exactly the way the loader matches them (goals by type+title;
-capabilities, features, and products by name; edges by src+dst+kind;
+capabilities and products by name, features by (product, name); edges by src+dst+kind;
 motivations by pair) and deleted via the REST API.
 
 Entities entangled with material outside the seed are kept, with a warning:
 
-- a capability is kept if foreign features realize it, or if any child
+- a product is kept if features outside the seed belong to it
+- a capability is kept if foreign features realize it (any of a feature's
+  capability_ids counts), or if any child
   capability is foreign or itself kept
 - a goal is kept if it has foreign child goals or foreign products
 
@@ -105,15 +107,18 @@ class Unseeder:
             {c["name"]: c for c in self.inst_caps},
             lambda c: c.get("name"),
         )
-        self.feats = self._match(
-            "features", lambda f: f.get("name"),
-            {f["name"]: f for f in self.inst_feats},
-            lambda f: f.get("name"),
-        )
         self.prods = self._match(
             "products", lambda p: p.get("name"),
             {p["name"]: p for p in self.inst_prods},
             lambda p: p.get("name"),
+        )
+        # A feature is its product's: identity is (product, name), so two
+        # products may each have a "Sign in" without one unseed taking both.
+        self.feats = self._match(
+            "features",
+            lambda f: ((self.prods.get(f.get("product_ref")) or {}).get("id"), f.get("name")),
+            {(f.get("product_id"), f["name"]): f for f in self.inst_feats},
+            lambda f: f.get("name"),
         )
 
     def _match(self, collection, key, existing, label):
@@ -158,7 +163,8 @@ class Unseeder:
         for c in self.inst_caps:
             children.setdefault(c["parent_id"], []).append(c)
         for f in self.inst_feats:
-            feats_of.setdefault(f["capability_id"], []).append(f)
+            for cid in f.get("capability_ids") or []:
+                feats_of.setdefault(cid, []).append(f)
         for s in self.inst_sats:
             sats_of.setdefault(s["capability_id"], []).append(s)
 
@@ -205,7 +211,10 @@ class Unseeder:
     def deletable_goals(self):
         """Matched goals safe to delete, children before parents."""
         matched_ids = {g["id"] for g in self.goals.values()}
-        matched_prod_ids = {p["id"] for p in self.prods.values()}
+        # Products kept for their foreign features count as foreign here too.
+        matched_prod_ids = {p["id"] for p in self.prods.values()} - set(
+            self.foreign_feature_counts()
+        )
         children = {}
         for g in self.inst_goals:
             children.setdefault(g["parent_goal_id"], []).append(g)
@@ -247,6 +256,15 @@ class Unseeder:
 
     # ---- removal passes, safest order ----
 
+    def _dead(self, kind):
+        """Ids the capability/goal passes will delete, computed once — the
+        deletable_* checks record keep-warnings, so they must not run twice."""
+        cache = self.__dict__.setdefault("_dead_cache", {})
+        if kind not in cache:
+            rows = self.deletable_caps() if kind == "caps" else self.deletable_goals()
+            cache[kind] = rows
+        return {r["id"] for r in cache[kind]}
+
     def remove_motivations(self):
         for m in self.doc.get("motivations") or []:
             goal = self.goals.get(m.get("goal_ref"))
@@ -257,6 +275,11 @@ class Unseeder:
             existing = {g["id"] for g in self.api.get(f"/api/capabilities/{cap['id']}/motivations")}
             if goal["id"] not in existing:
                 self.note("motivations", "absent")
+                continue
+            # Both ends survive: the pair is someone else's too (another
+            # product's seed motivated the same capability by the same goal).
+            if cap["id"] not in self._dead("caps") and goal["id"] not in self._dead("goals"):
+                self.note("motivations", "kept")
                 continue
             self.remove(
                 "motivations",
@@ -280,8 +303,29 @@ class Unseeder:
                 f"edge {src['name']!r} -{kind}-> {dst['name']!r}",
             )
 
+    def foreign_feature_counts(self):
+        """Matched product id -> number of features outside the seed that belong
+        to it. Deleting such a product would silently orphan them (product_id
+        SET NULL), so it is shared state and kept."""
+        matched_feat_ids = {f["id"] for f in self.feats.values()}
+        matched_prod_ids = {p["id"] for p in self.prods.values()}
+        counts = {}
+        for f in self.inst_feats:
+            pid = f.get("product_id")
+            if pid in matched_prod_ids and f["id"] not in matched_feat_ids:
+                counts[pid] = counts.get(pid, 0) + 1
+        return counts
+
     def remove_products(self):
+        foreign = self.foreign_feature_counts()
         for prod in self.prods.values():
+            if prod["id"] in foreign:
+                self.keep(
+                    "products",
+                    f"product {prod['name']!r}",
+                    [f"{foreign[prod['id']]} feature(s) outside the seed belong to it"],
+                )
+                continue
             self.remove(
                 "products",
                 f"/api/products/{prod['id']}",
@@ -305,7 +349,8 @@ class Unseeder:
             )
 
     def remove_capabilities(self):
-        for cap in self.deletable_caps():
+        self._dead("caps")
+        for cap in self._dead_cache["caps"]:
             self.remove(
                 "capabilities",
                 f"/api/capabilities/{cap['id']}",
@@ -313,7 +358,8 @@ class Unseeder:
             )
 
     def remove_goals(self):
-        for goal in self.deletable_goals():
+        self._dead("goals")
+        for goal in self._dead_cache["goals"]:
             self.remove("goals", f"/api/goals/{goal['id']}", f"goal {goal['title']!r}")
 
     def report(self):

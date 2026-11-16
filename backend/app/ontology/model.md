@@ -13,19 +13,20 @@ Status: **implemented** — data model, HTTP API, MCP server and the six routes.
 ## The organising idea
 
 Metis modelled three things: Product (a Spec), Capability (the slow plane — a durable
-noun that matures and never ships), Feature (the fast plane — a change that `REALIZES`
-exactly one Capability). This adds a fourth: **Tech** — a world-scope catalog of
+noun that matures and never ships), Feature (the fast plane — a user-facing change that
+`REALIZES` every Capability it is built on, and belongs to one Product). This adds a fourth: **Tech** — a world-scope catalog of
 technologies, the group's **adoption** stance on them, and the **stacks** that bind them
 to Products.
 
 > **Capability is the exchange currency.** A Feature `REALIZES` a Capability — the *build*
 > side. A Tech `SATISFIES` a Capability — the *buy* side. Same node, same currency.
 
-That asymmetry is deliberate: a Feature realizes exactly one Capability
-(`features.capability_id NOT NULL`), a Tech serves many. A change belongs to one durable
-noun; a technology serves several.
+Both sides are many-to-many. A Feature realizes every Capability implementing it
+(`feature_capabilities`), and a Tech serves many. Capabilities are shared across
+Products by exact name, which is what makes the inventory question — *what could we
+build next from what already exists?* — answerable at all.
 
-Everything else exists to make that one edge trustworthy — a world catalog to point at,
+Everything else exists to make those edges trustworthy — a world catalog to point at,
 an adoption stance to record where the group stands, versions and vendors so deprecation
 is computable, and slots to record which offer a Product actually accepted.
 
@@ -240,8 +241,11 @@ the caller named it on purpose.
 
 ## Invariants
 
-1. `features.capability_id` stays `NOT NULL`. The build plane's one-to-one is what makes
-   the buy plane's many-to-many meaningful by contrast.
+1. A Feature realizes at least one Capability, through `feature_capabilities` only —
+   enforced on write (422) and reported by `/api/capabilities/health` as
+   `unlinked_feature`, because no column can express "at least one". The link's
+   `capability_id` is `RESTRICT`. A Feature's Product is direct (`features.product_id`),
+   never derived from the Capabilities it shares with other Products.
 2. `technologies` has no column whose value depends on who is asking.
 3. `REQUIRES ∪ RUNS_ON` is jointly acyclic, rejected at write time. `ALTERNATIVE_TO`
    is symmetric — write both rows, or read with the detail endpoint's `OR`.

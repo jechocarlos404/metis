@@ -7,6 +7,7 @@ from app.services.graph_service import FeatureGraph, GraphCycleError
 
 CAP_A = uuid.uuid4()
 CAP_B = uuid.uuid4()
+CAP_C = uuid.uuid4()
 
 
 def fake_feature(seq: int, name: str, **kw):
@@ -14,7 +15,8 @@ def fake_feature(seq: int, name: str, **kw):
         id=uuid.uuid4(),
         seq=seq,
         name=name,
-        capability_id=kw.get("capability_id", CAP_A),
+        capability_ids=kw.get("capability_ids", (kw.get("capability_id", CAP_A),)),
+        product_id=kw.get("product_id"),
         facets=kw.get("facets", {"layer": "service"}),
         status=kw.get("status", "pending"),
         priority=kw.get("priority"),
@@ -197,3 +199,24 @@ def test_capability_coupling_projection():
     impact = graph.capability_impact({CAP_B})
     assert impact["dependents"] == []
     assert impact["dependencies"] == [CAP_A]
+
+
+def test_coupling_projects_every_realized_capability():
+    """A feature realizing two capabilities couples each of them to what it needs."""
+    graph = FeatureGraph(sessionmaker=None)
+    summary = fake_feature(1, "ride summary", capability_ids=(CAP_A, CAP_B))
+    importer = fake_feature(2, "import rides", capability_id=CAP_C)
+    for f in (summary, importer):
+        graph.upsert_node(f)
+    graph.add_edge(summary.id, importer.id, "DEPENDS_ON")
+    assert graph.coupling_edges() == {(CAP_A, CAP_C), (CAP_B, CAP_C)}
+
+
+def test_layout_carries_the_features_own_product():
+    product_id = uuid.uuid4()
+    graph = FeatureGraph(sessionmaker=None)
+    graph.upsert_node(fake_feature(1, "owned", product_id=product_id))
+    graph.upsert_node(fake_feature(2, "unowned"))
+    nodes = {n["name"]: n for n in graph.layout()["nodes"]}
+    assert nodes["owned"]["product_id"] == str(product_id)
+    assert nodes["unowned"]["product_id"] is None

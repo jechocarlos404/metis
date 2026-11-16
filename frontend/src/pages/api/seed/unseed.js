@@ -69,15 +69,18 @@ class Unseeder {
       (capability) => capability.name,
       new Map(this.instCaps.map((capability) => [capability.name, capability])),
     );
-    this.features = this.match(
-      "features",
-      (feature) => feature.name,
-      new Map(this.instFeatures.map((feature) => [feature.name, feature])),
-    );
     this.products = this.match(
       "products",
       (product) => product.name,
       new Map(this.instProducts.map((product) => [product.name, product])),
+    );
+    // A feature is its product's: identity is (product, name), so two products
+    // may each have a "Sign in" without one unseed taking both.
+    const featureKey = (productId, name) => `${productId ?? ""}\u0000${name}`;
+    this.features = this.match(
+      "features",
+      (feature) => featureKey(this.products.get(feature.product_ref)?.id, feature.name),
+      new Map(this.instFeatures.map((feature) => [featureKey(feature.product_id, feature.name), feature])),
     );
   }
 
@@ -141,9 +144,11 @@ class Unseeder {
       children.set(cap.parent_id, bucket);
     }
     for (const feature of this.instFeatures) {
-      const bucket = featuresOf.get(feature.capability_id) || [];
-      bucket.push(feature);
-      featuresOf.set(feature.capability_id, bucket);
+      for (const capabilityId of feature.capability_ids || []) {
+        const bucket = featuresOf.get(capabilityId) || [];
+        bucket.push(feature);
+        featuresOf.set(capabilityId, bucket);
+      }
     }
 
     const verdict = new Map();
@@ -180,9 +185,29 @@ class Unseeder {
     return [...this.caps.values()].filter(check).sort((a, b) => depth(b) - depth(a));
   }
 
+  // Matched product id -> number of features outside the seed that belong to
+  // it. Deleting such a product would silently orphan them (product_id SET
+  // NULL), so it is shared state and kept.
+  foreignFeatureCounts() {
+    const matchedFeatureIds = new Set([...this.features.values()].map((feature) => feature.id));
+    const matchedProductIds = new Set([...this.products.values()].map((product) => product.id));
+    const counts = new Map();
+    for (const feature of this.instFeatures) {
+      const productId = feature.product_id;
+      if (matchedProductIds.has(productId) && !matchedFeatureIds.has(feature.id)) {
+        counts.set(productId, (counts.get(productId) || 0) + 1);
+      }
+    }
+    return counts;
+  }
+
   deletableGoals() {
     const matchedGoalIds = new Set([...this.goals.values()].map((goal) => goal.id));
-    const matchedProductIds = new Set([...this.products.values()].map((product) => product.id));
+    // Products kept for their foreign features count as foreign here too.
+    const keptProducts = this.foreignFeatureCounts();
+    const matchedProductIds = new Set(
+      [...this.products.values()].map((product) => product.id).filter((id) => !keptProducts.has(id)),
+    );
     const children = new Map();
     for (const goal of this.instGoals) {
       const bucket = children.get(goal.parent_goal_id) || [];
@@ -224,6 +249,18 @@ class Unseeder {
     return [...this.goals.values()].filter(check).sort((a, b) => depth(b) - depth(a));
   }
 
+  /** Rows the capability/goal passes will delete, computed once — the
+   * deletable* checks record keep-warnings, so they must not run twice. */
+  deadRows(kind) {
+    this.deadCache ??= {};
+    this.deadCache[kind] ??= kind === "caps" ? this.deletableCaps() : this.deletableGoals();
+    return this.deadCache[kind];
+  }
+
+  dead(kind) {
+    return new Set(this.deadRows(kind).map((row) => row.id));
+  }
+
   async removeMotivations() {
     for (const motivation of this.doc.motivations || []) {
       const goal = this.goals.get(motivation.goal_ref);
@@ -237,6 +274,12 @@ class Unseeder {
       );
       if (!existing.has(goal.id)) {
         this.note("motivations", "absent");
+        continue;
+      }
+      // Both ends survive: the pair is someone else's too (another product's
+      // seed motivated the same capability by the same goal).
+      if (!this.dead("caps").has(cap.id) && !this.dead("goals").has(goal.id)) {
+        this.note("motivations", "kept");
         continue;
       }
       await this.remove(
@@ -269,7 +312,14 @@ class Unseeder {
   }
 
   async removeProducts() {
+    const foreign = this.foreignFeatureCounts();
     for (const product of this.products.values()) {
+      if (foreign.has(product.id)) {
+        this.keep("products", `product ${JSON.stringify(product.name)}`, [
+          `${foreign.get(product.id)} feature(s) outside the seed belong to it`,
+        ]);
+        continue;
+      }
       await this.remove(
         "products",
         `/api/products/${product.id}`,
@@ -296,13 +346,13 @@ class Unseeder {
   }
 
   async removeCaps() {
-    for (const cap of this.deletableCaps()) {
+    for (const cap of this.deadRows("caps")) {
       await this.remove("capabilities", `/api/capabilities/${cap.id}`, `capability ${JSON.stringify(cap.name)}`);
     }
   }
 
   async removeGoals() {
-    for (const goal of this.deletableGoals()) {
+    for (const goal of this.deadRows("goals")) {
       await this.remove("goals", `/api/goals/${goal.id}`, `goal ${JSON.stringify(goal.title)}`);
     }
   }

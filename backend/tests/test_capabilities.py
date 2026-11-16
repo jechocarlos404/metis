@@ -21,7 +21,7 @@ async def make_capability(session, name, parent_id=None, maturity=CapabilityMatu
 async def make_feature(session, name, capability_id, status=WorkStatus.pending, graph=None):
     return await feature_service.create_feature(
         session,
-        FeatureCreate(name=name, capability_id=capability_id, status=status),
+        FeatureCreate(name=name, capability_ids=[capability_id], status=status),
         graph,
     )
 
@@ -103,27 +103,6 @@ async def test_why_chain_reaches_org_intent(db):
         assert ("goal", "MOTIVATES") in kinds
         assert ("goal", "parent") in kinds  # climbed to the org goal
         assert chain[-1].name == "Be the default tool"
-
-
-@pytest.mark.asyncio
-async def test_product_attribution_follows_bundles_and_containment(db):
-    async with db() as session:
-        root = await make_capability(session, "feature intelligence")
-        child = await make_capability(session, "feature search", parent_id=root.id)
-        stray = await make_capability(session, "ticket export")
-        pg = Goal(goal_type=GoalType.product, title="Ship search")
-        session.add(pg)
-        await session.flush()
-        spec = Product(slug="search-spec", name="Search Spec", goal_id=pg.id)
-        session.add(spec)
-        await session.commit()
-        await capability_service.bundle_product(session, spec.id, root.id)
-
-        attribution = await capability_service.product_attribution(session)
-        assert attribution[str(root.id)] == [str(spec.id)]
-        # bundled capability children inherit attribution through PART_OF
-        assert attribution[str(child.id)] == [str(spec.id)]
-        assert attribution[str(stray.id)] == []
 
 
 @pytest.mark.asyncio

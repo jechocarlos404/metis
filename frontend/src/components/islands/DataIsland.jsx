@@ -414,6 +414,20 @@ export default function DataIsland() {
 }
 
 function Field({ field, refs, value, onChange }) {
+  if (field.type === "multiselect") {
+    const chosen = new Set(value ?? []);
+    const toggle = (id, on) => onChange(on ? [...(value ?? []), id] : (value ?? []).filter((x) => x !== id));
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        <span style={TH}>{field.label} · {chosen.size} selected</span>
+        <div style={{ maxHeight: 180, overflowY: "auto", display: "flex", flexDirection: "column", gap: 6, padding: "8px 10px", border: "1px solid var(--border-default)", borderRadius: "var(--radius-md)" }}>
+          {(refs[field.optionsFrom]?.list ?? []).map((r) => (
+            <Checkbox key={r.id} label={field.optionLabel(r)} checked={chosen.has(r.id)} onChange={(on) => toggle(r.id, on)} />
+          ))}
+        </div>
+      </div>
+    );
+  }
   if (field.type === "select") {
     const options = field.optionsFrom
       ? (refs[field.optionsFrom]?.list ?? []).map((r) => ({

@@ -9,7 +9,10 @@ from app.schemas.capability import (
     CapabilityNode,
     CapabilityRead,
     CapabilityUpdate,
+    CoverageReport,
+    CoverageRequest,
     HealthFinding,
+    InventoryEntry,
     MotivationCreate,
     Rollup,
 )
@@ -43,6 +46,17 @@ async def capability_map(session: AsyncSession = Depends(get_db)):
 @router.get("/health", response_model=list[HealthFinding])
 async def health(session: AsyncSession = Depends(get_db)):
     return await capability_service.health(session)
+
+
+@router.get("/inventory", response_model=list[InventoryEntry])
+async def inventory(session: AsyncSession = Depends(get_db)):
+    return await capability_service.inventory(session)
+
+
+@router.post("/coverage", response_model=CoverageReport)
+async def coverage(data: CoverageRequest, session: AsyncSession = Depends(get_db)):
+    """A read: the idea travels in the body, nothing is written."""
+    return await capability_service.coverage(session, data)
 
 
 @router.get("/{capability_id}", response_model=CapabilityRead)

@@ -38,9 +38,17 @@ one file to edit.
 - **Capabilities** are durable *nouns* — areas of the system that mature and never
   ship (e.g. "Ticket Decomposition"). They form a single-parent forest via
   `parent_ref` (PART_OF).
-- **Features** are *verb phrases* — shippable units of work (e.g. "Compute the MVP
-  cut"). Each feature REALIZES **exactly one** capability: `capability_ref` is
-  required.
+- **Features** are *user-facing* verb phrases — what a changelog for end users would
+  list (e.g. "Estimate climb power"). If only a developer could observe it, it is a
+  (sub-)capability, not a feature. Each feature REALIZES **every** capability built
+  to implement it: `capability_refs` is required and lists at least one. List them
+  all — a missing link understates reuse, an invented one overstates it.
+- **Products** are the unit of a project: one product per exported project. Each
+  feature names its product with `product_ref`.
+- **Capabilities are shared across products.** Identity is the exact name, on
+  purpose: when two projects both have "Authentication", they must use that exact
+  name so metis can see the reuse. Never prefix names to keep projects apart, and
+  never create a near-duplicate ("Auth" next to "Authentication").
 - **Goals** motivate capabilities (via `motivations`), never features directly.
 - Edge semantics: `A DEPENDS_ON B` means *A needs B*. `A BLOCKS B` means *A stands in
   B's way* (≈ B depends on A). The precedence graph — `DEPENDS_ON` plus reversed
@@ -94,8 +102,9 @@ Goal MOTIVATES capability. One object per pair:
 ```json
 {
   "ref": "feat-impact",
-  "capability_ref": "cap-graph",   // required: the one capability this REALIZES
-  "name": "Traverse blast radius from a changed feature",  // required; verb phrase
+  "capability_refs": ["cap-graph", "cap-search"],  // required, ≥1: every capability this REALIZES
+  "product_ref": "prod-export",    // optional: whose feature this is (a products[] ref)
+  "name": "Traverse blast radius from a changed feature",  // required; user-facing verb phrase
   "description": "…",
   "facets": { "layer": "service" },
   "status": "pending",             // "pending" | "in_progress" | "done"
@@ -103,6 +112,9 @@ Goal MOTIVATES capability. One object per pair:
   "priority_rationale": "…"
 }
 ```
+
+A legacy single `"capability_ref": "cap-graph"` is still accepted and read as
+`["cap-graph"]`; new files should use `capability_refs`.
 
 ### edges
 
@@ -115,7 +127,9 @@ No self-loops, no duplicate (src, dst, kind) triples.
 
 ### products
 
-A product is a Spec; its optional `decomposition` is a PRD that metis materializes
+A product is one project (an app, a service, a tool) — features belong to it through
+their `product_ref`, and the capabilities it uses are derived from those features.
+It doubles as a Spec: its optional `decomposition` is a PRD that metis materializes
 into real epic/story/ticket rows. Epics pin a capability, stories pin a feature —
 snapshots of the taxonomy, never a second hierarchy.
 
@@ -164,7 +178,12 @@ snapshots of the taxonomy, never a second hierarchy.
   (src, dst, kind); motivations by pair — and reuses them instead of duplicating.
   It never deletes or updates anything. Re-running the same file is safe.
 - Names are therefore identity: reuse the exact same name across runs to mean the
-  same entity, and avoid names that collide with unrelated entities already in the
-  instance.
+  same entity. For capabilities, also reuse the exact name another product already
+  uses for the same ability (read `GET /api/capabilities/inventory` first) — that
+  shared name is what links projects. Only features and products need names that
+  stay distinct across projects.
+- An existing feature (matched by name) is reused as-is: its capability links and
+  product are not rewritten.
+- Products load before features, so `product_ref` always resolves.
 - A product that already has any PRD is left untouched (the loader won't stack a
   second decomposition version).

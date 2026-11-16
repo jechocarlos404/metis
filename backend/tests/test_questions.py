@@ -161,7 +161,7 @@ async def test_supply_realizations_carry_the_build_side(db, client):
 
         await feature_service.create_feature(
             session,
-            FeatureCreate(name="Spec similarity", capability_id=seeded["capability"].id),
+            FeatureCreate(name="Spec similarity", capability_ids=[seeded["capability"].id]),
         )
     body = (await client.get("/api/capabilities/semantic-search/supply")).json()
     assert body["realizations"] == [

@@ -1,6 +1,6 @@
 import React from "react";
 import { PageHeader } from "../shell/PageHeader.jsx";
-import { Badge, Button, Card, Dialog, Icon, Input, Select, StatusBadge, Tabs, TicketCard, Toast } from "../../ds";
+import { Badge, Button, Card, Dialog, Icon, Input, Select, StatusBadge, Tabs, Tag, TicketCard, Toast } from "../../ds";
 import { api } from "../../lib/api.js";
 import { openChatWithPrompt } from "../../lib/chat-launch.js";
 

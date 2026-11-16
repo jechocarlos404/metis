@@ -16,7 +16,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
     Capability,
+    CapabilityMaturity,
     Feature,
+    FeatureCapability,
     Goal,
     GoalType,
     Motivation,
@@ -27,14 +29,21 @@ from app.models import (
 )
 from app.schemas.capability import (
     CapabilityCreate,
+    CapabilityMatch,
+    CapabilityNeed,
     CapabilityNode,
     CapabilityRead,
     CapabilityUpdate,
+    CoverageReport,
+    CoverageRequest,
+    FeatureCoverage,
     HealthFinding,
+    InventoryEntry,
+    ProductRef,
     Rollup,
 )
 from app.schemas.feature import WhyChain, WhyStep
-from app.services.slugs import unique_slug
+from app.services.slugs import slugify, unique_slug
 
 GA_OR_LATER = {"ga", "deprecated", "retired"}
 
@@ -97,13 +106,15 @@ async def update_capability(
 async def delete_capability(session: AsyncSession, capability_id: uuid.UUID) -> None:
     capability = await get_capability(session, capability_id)
     realizing = await session.scalar(
-        select(func.count()).select_from(Feature).where(Feature.capability_id == capability_id)
+        select(func.count())
+        .select_from(FeatureCapability)
+        .where(FeatureCapability.capability_id == capability_id)
     )
     if realizing:
         raise HTTPException(
             409,
-            f"{realizing} feature(s) realize this capability — re-point or delete "
-            "them first (features may not be orphaned).",
+            f"{realizing} feature(s) realize this capability — unlink or delete "
+            "them first (a capability in use cannot vanish from under them).",
         )
     # Buy side of the same currency: tech_satisfactions.capability_id is
     # RESTRICT, mirroring the feature FK. Report it rather than let the FK raise.
@@ -151,9 +162,13 @@ async def submap_ids(session: AsyncSession, capability_id: uuid.UUID) -> set[uui
 
 async def scope(session: AsyncSession, capability_id: uuid.UUID) -> list[Feature]:
     """All features realizing the capability or anything in its submap —
-    exactly what a PRD epic snapshot freezes."""
+    exactly what a PRD epic snapshot freezes. A feature realizing several
+    capabilities in the submap appears once."""
     ids = await submap_ids(session, capability_id)
-    stmt = select(Feature).where(Feature.capability_id.in_(ids)).order_by(Feature.seq)
+    realizing = select(FeatureCapability.feature_id).where(
+        FeatureCapability.capability_id.in_(ids)
+    )
+    stmt = select(Feature).where(Feature.id.in_(realizing)).order_by(Feature.seq)
     return list((await session.scalars(stmt)).all())
 
 
@@ -179,14 +194,19 @@ async def capability_map(session: AsyncSession) -> list[CapabilityNode]:
     features = list((await session.scalars(select(Feature))).all())
     by_capability: dict[uuid.UUID, list[Feature]] = defaultdict(list)
     for feature in features:
-        by_capability[feature.capability_id].append(feature)
+        for cid in feature.capability_ids:
+            by_capability[cid].append(feature)
 
     def build(capability: Capability) -> CapabilityNode:
-        in_scope = [
-            f
-            for cid in _submap_ids(capability.id, children)
-            for f in by_capability.get(cid, [])
-        ]
+        # Dedup by id: a feature realizing two capabilities in one submap is
+        # one feature of progress, not two.
+        in_scope = list(
+            {
+                f.id: f
+                for cid in _submap_ids(capability.id, children)
+                for f in by_capability.get(cid, [])
+            }.values()
+        )
         return CapabilityNode(
             **CapabilityRead.model_validate(capability).model_dump(),
             rollup=_rollup(in_scope),
@@ -248,54 +268,57 @@ async def mvp_cut(
 # ---- why (provenance chain) ----
 
 async def why(session: AsyncSession, feature: Feature) -> WhyChain:
-    """f --REALIZES--> c --PART_OF*--> root, collecting MOTIVATES goals (and
-    their org parents) at every capability on the path."""
+    """f --REALIZES--> c --PART_OF*--> root, for every capability f realizes,
+    collecting MOTIVATES goals (and their org parents) at each capability on
+    the way. One flat chain: each REALIZES step opens a branch, and a parent
+    or goal two branches share appears once."""
     chain: list[WhyStep] = [
         WhyStep(kind="feature", id=feature.id, name=feature.name, relation="")
     ]
     seen_goals: set[uuid.UUID] = set()
-    cursor: uuid.UUID | None = feature.capability_id
-    relation = "REALIZES"
-    guard: set[uuid.UUID] = set()
-    while cursor is not None and cursor not in guard:
-        guard.add(cursor)
-        capability = await session.get(Capability, cursor)
-        if capability is None:
-            break
-        chain.append(
-            WhyStep(
-                kind="capability",
-                id=capability.id,
-                name=capability.name,
-                relation=relation,
+    seen_capabilities: set[uuid.UUID] = set()
+    for start in feature.capability_ids:
+        cursor: uuid.UUID | None = start
+        relation = "REALIZES"
+        while cursor is not None and cursor not in seen_capabilities:
+            seen_capabilities.add(cursor)
+            capability = await session.get(Capability, cursor)
+            if capability is None:
+                break
+            chain.append(
+                WhyStep(
+                    kind="capability",
+                    id=capability.id,
+                    name=capability.name,
+                    relation=relation,
+                )
             )
-        )
-        motivations = await session.scalars(
-            select(Motivation).where(Motivation.capability_id == capability.id)
-        )
-        for motivation in motivations:
-            goal = await session.get(Goal, motivation.goal_id)
-            goal_relation = "MOTIVATES"
-            while goal is not None and goal.id not in seen_goals:
-                seen_goals.add(goal.id)
-                prefix = "OG" if goal.goal_type == GoalType.org else "PG"
-                chain.append(
-                    WhyStep(
-                        kind="goal",
-                        id=goal.id,
-                        display_id=f"{prefix}-{goal.seq:02d}",
-                        name=goal.title,
-                        relation=goal_relation,
+            motivations = await session.scalars(
+                select(Motivation).where(Motivation.capability_id == capability.id)
+            )
+            for motivation in motivations:
+                goal = await session.get(Goal, motivation.goal_id)
+                goal_relation = "MOTIVATES"
+                while goal is not None and goal.id not in seen_goals:
+                    seen_goals.add(goal.id)
+                    prefix = "OG" if goal.goal_type == GoalType.org else "PG"
+                    chain.append(
+                        WhyStep(
+                            kind="goal",
+                            id=goal.id,
+                            display_id=f"{prefix}-{goal.seq:02d}",
+                            name=goal.title,
+                            relation=goal_relation,
+                        )
                     )
-                )
-                goal_relation = "parent"
-                goal = (
-                    await session.get(Goal, goal.parent_goal_id)
-                    if goal.parent_goal_id
-                    else None
-                )
-        cursor = capability.parent_id
-        relation = "PART_OF"
+                    goal_relation = "parent"
+                    goal = (
+                        await session.get(Goal, goal.parent_goal_id)
+                        if goal.parent_goal_id
+                        else None
+                    )
+            cursor = capability.parent_id
+            relation = "PART_OF"
     return WhyChain(feature_id=feature.id, chain=chain)
 
 
@@ -394,25 +417,139 @@ async def unbundle_product(
     await session.commit()
 
 
-async def product_attribution(session: AsyncSession) -> dict[str, list[str]]:
-    """Derived capability -> products map from explicit product bundles.
-    A bundled capability attributes its product to itself and every child in its
-    PART_OF subtree. Keys and values are strings, ready for layout JSON."""
-    parent_of = {c.id: c.parent_id for c in await list_capabilities(session)}
-    cap_products: dict[uuid.UUID, set[uuid.UUID]] = defaultdict(set)
-    for bundle in (await session.scalars(select(ProductBundle))).all():
-        cap_products[bundle.capability_id].add(bundle.product_id)
+# ---- inventory & coverage ----
 
-    attribution: dict[str, list[str]] = {}
-    for cap_id in parent_of:
-        found: set[uuid.UUID] = set()
-        cursor, seen = cap_id, set()
-        while cursor is not None and cursor not in seen:
-            seen.add(cursor)
-            found.update(cap_products.get(cursor, ()))
-            cursor = parent_of.get(cursor)
-        attribution[str(cap_id)] = sorted(str(pid) for pid in found)
-    return attribution
+PROVEN = {CapabilityMaturity.beta, CapabilityMaturity.ga}
+
+
+def name_closeness(column, name: str):
+    """How near a stored name is to a typed one, for suggestions only. Plain
+    trigram similarity misses abbreviations ("Auth" vs "Authentication" is
+    0.25), so take the best of it and word similarity in both directions."""
+    return func.greatest(
+        func.similarity(column, name),
+        func.word_similarity(name, column),
+        func.word_similarity(column, name),
+    )
+
+
+async def _products_by_capability(
+    session: AsyncSession,
+) -> tuple[dict[uuid.UUID, set[uuid.UUID]], dict[uuid.UUID, set[uuid.UUID]], dict[uuid.UUID, Product]]:
+    """Direct REALIZES links, as (capability -> feature ids, capability ->
+    product ids, product by id). Submap aggregation is the caller's job."""
+    features: dict[uuid.UUID, set[uuid.UUID]] = defaultdict(set)
+    products: dict[uuid.UUID, set[uuid.UUID]] = defaultdict(set)
+    rows = await session.execute(
+        select(FeatureCapability.capability_id, Feature.id, Feature.product_id).join(
+            Feature, Feature.id == FeatureCapability.feature_id
+        )
+    )
+    for capability_id, feature_id, product_id in rows:
+        features[capability_id].add(feature_id)
+        if product_id is not None:
+            products[capability_id].add(product_id)
+    by_id = {p.id: p for p in (await session.scalars(select(Product))).all()}
+    return features, products, by_id
+
+
+def _refs(ids: set[uuid.UUID], by_id: dict[uuid.UUID, Product]) -> list[ProductRef]:
+    return sorted(
+        (ProductRef.model_validate(by_id[pid]) for pid in ids if pid in by_id),
+        key=lambda p: p.name,
+    )
+
+
+async def _usage(session: AsyncSession):
+    """Per capability, over its submap: (products, feature count). A parent is
+    in use wherever any of its children is."""
+    children = await _children_index(session)
+    features, products, by_id = await _products_by_capability(session)
+    usage: dict[uuid.UUID, tuple[list[ProductRef], int]] = {}
+    for capability in (c for group in children.values() for c in group):
+        submap = _submap_ids(capability.id, children)
+        feature_ids = set().union(*(features.get(cid, set()) for cid in submap))
+        product_ids = set().union(*(products.get(cid, set()) for cid in submap))
+        usage[capability.id] = (_refs(product_ids, by_id), len(feature_ids))
+    return usage
+
+
+async def inventory(session: AsyncSession) -> list[InventoryEntry]:
+    """Everything we can already do, most-reused first: the raw material for
+    the next product."""
+    usage = await _usage(session)
+    entries = [
+        InventoryEntry(
+            **CapabilityRead.model_validate(c).model_dump(),
+            products=usage[c.id][0],
+            features=usage[c.id][1],
+        )
+        for c in await list_capabilities(session)
+    ]
+    entries.sort(key=lambda e: (-len(e.products), -e.features, e.name.lower()))
+    return entries
+
+
+async def coverage(session: AsyncSession, request: CoverageRequest) -> CoverageReport:
+    """How much of a product idea already exists. Needs resolve by exact slug
+    only — a wrong match would overstate what we have, which is worse than an
+    honest gap — and every unresolved need lists near names to confirm."""
+    capabilities = await list_capabilities(session)
+    by_slug = {c.slug: c for c in capabilities}
+    usage = await _usage(session)
+
+    def as_match(c: Capability) -> CapabilityMatch:
+        return CapabilityMatch(
+            id=c.id, slug=c.slug, name=c.name, maturity=c.maturity, products=usage[c.id][0]
+        )
+
+    async def candidates(name: str) -> list[CapabilityMatch]:
+        score = name_closeness(Capability.name, name)
+        stmt = (
+            select(Capability)
+            .where(score > 0.3)
+            .order_by(score.desc(), Capability.seq)
+            .limit(3)
+        )
+        return [as_match(c) for c in await session.scalars(stmt)]
+
+    features: list[FeatureCoverage] = []
+    seen: dict[str, Capability | None] = {}
+    for idea in request.features:
+        needs: list[CapabilityNeed] = []
+        for name in dict.fromkeys(n.strip() for n in idea.capabilities if n.strip()):
+            key = slugify(name)
+            found = by_slug.get(key)
+            seen.setdefault(key, found)
+            needs.append(
+                CapabilityNeed(
+                    name=name,
+                    match=as_match(found) if found else None,
+                    candidates=[] if found else await candidates(name),
+                )
+            )
+        features.append(
+            FeatureCoverage(
+                name=idea.name,
+                capabilities=needs,
+                existing=sum(1 for n in needs if n.match),
+                total=len(needs),
+            )
+        )
+
+    found_caps = [c for c in seen.values() if c is not None]
+    missing: dict[str, str] = {}
+    for f in features:
+        for n in f.capabilities:
+            if n.match is None:
+                missing.setdefault(slugify(n.name), n.name)
+    return CoverageReport(
+        features=features,
+        needed=len(seen),
+        existing=len(found_caps),
+        mature=sum(1 for c in found_caps if c.maturity in PROVEN),
+        missing=list(missing.values()),
+    )
 
 
 # ---- health (findings generators) ----
@@ -424,9 +561,28 @@ async def health(session: AsyncSession) -> list[HealthFinding]:
 
     counts_by_capability: dict[uuid.UUID, int] = defaultdict(int)
     for capability_id, count in await session.execute(
-        select(Feature.capability_id, func.count()).group_by(Feature.capability_id)
+        select(FeatureCapability.capability_id, func.count()).group_by(
+            FeatureCapability.capability_id
+        )
     ):
         counts_by_capability[capability_id] = count
+
+    # The schema cannot refuse a feature with no capability (the link table
+    # can only add rows), so the invariant is checked here as well as on write.
+    unlinked = await session.scalars(
+        select(Feature)
+        .where(Feature.id.notin_(select(FeatureCapability.feature_id)))
+        .order_by(Feature.seq)
+    )
+    for feature in unlinked:
+        findings.append(
+            HealthFinding(
+                kind="unlinked_feature",
+                subject_id=feature.id,
+                subject_name=feature.name,
+                detail="realizes no capability — the inventory cannot see what it was built on.",
+            )
+        )
 
     motivated = {
         m.capability_id for m in (await session.scalars(select(Motivation))).all()

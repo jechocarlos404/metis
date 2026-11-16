@@ -13,9 +13,9 @@ cannot proceed until A lands* (structurally B needs A). Therefore:
 RELATES_TO participates in nothing.
 
 Containment is NOT here: the capability map (PART_OF) is relational
-(capabilities.parent_id). The bridge between planes is each feature's
-capability_id, carried as a node attribute so the capability coupling
-projection can be computed from this graph alone.
+(capabilities.parent_id). The bridge between planes is each feature's set of
+capability_ids (REALIZES, many-to-many), carried as a node attribute so the
+capability coupling projection can be computed from this graph alone.
 
 Postgres is the system of record: every mutation commits there first, then
 write-through updates this graph. Any in-memory failure marks the graph dirty
@@ -48,7 +48,8 @@ def _node_attrs(feature: Feature | Any) -> dict[str, Any]:
     return {
         "seq": feature.seq,
         "name": feature.name,
-        "capability_id": feature.capability_id,
+        "capability_ids": tuple(feature.capability_ids),
+        "product_id": feature.product_id,
         "facets": dict(feature.facets or {}),
         "status": str(feature.status),
         "priority": feature.priority,
@@ -131,7 +132,8 @@ class FeatureGraph:
         return {
             "id": str(node_id),
             "name": attrs["name"],
-            "capability_id": str(attrs["capability_id"]) if attrs.get("capability_id") else None,
+            "capability_ids": [str(c) for c in attrs.get("capability_ids", ())],
+            "product_id": str(attrs["product_id"]) if attrs.get("product_id") else None,
             "facets": attrs.get("facets", {}),
             "status": attrs["status"],
             "priority": attrs.get("priority"),
@@ -211,7 +213,8 @@ class FeatureGraph:
         """Prerequisite closure for a delivery cut: essential = targets ∪ their
         precedence-descendants (what must exist for the targets to work),
         dependencies-first; deferrable = every other feature, hottest priority
-        first. Capabilities are grouped flat by capability_id — submap
+        first. Capabilities are grouped flat — a feature counts toward every
+        capability it realizes — and submap
         aggregation is the caller's job. Raises GraphCycleError if the
         essential subgraph contains a cycle."""
         dep = self._precedence_subgraph()
@@ -235,13 +238,11 @@ class FeatureGraph:
         ]
         capabilities: dict[uuid.UUID, dict[str, int]] = {}
         for node in self._g.nodes:
-            cid = self._g.nodes[node].get("capability_id")
-            if not cid:
-                continue
-            entry = capabilities.setdefault(cid, {"required": 0, "total": 0})
-            entry["total"] += 1
-            if node in required:
-                entry["required"] += 1
+            for cid in self._g.nodes[node].get("capability_ids", ()):
+                entry = capabilities.setdefault(cid, {"required": 0, "total": 0})
+                entry["total"] += 1
+                if node in required:
+                    entry["required"] += 1
         return {"essential": essential, "deferrable": deferrable, "capabilities": capabilities}
 
     def find_cycles(self, limit: int = 20) -> list[list[dict[str, Any]]]:
@@ -256,13 +257,13 @@ class FeatureGraph:
     def coupling_edges(self) -> set[tuple[uuid.UUID, uuid.UUID]]:
         """Project the precedence graph onto capabilities: (c1, c2) means some
         feature realizing c1 needs a feature realizing c2. Computed, never
-        stored. Same-capability edges are internal and dropped."""
+        stored. Same-capability pairs are internal and dropped."""
         edges: set[tuple[uuid.UUID, uuid.UUID]] = set()
         for u, v in self._precedence_subgraph().edges:
-            cu = self._g.nodes[u].get("capability_id")
-            cv = self._g.nodes[v].get("capability_id")
-            if cu and cv and cu != cv:
-                edges.add((cu, cv))
+            for cu in self._g.nodes[u].get("capability_ids", ()):
+                for cv in self._g.nodes[v].get("capability_ids", ()):
+                    if cu != cv:
+                        edges.add((cu, cv))
         return edges
 
     def capability_impact(self, capability_ids: set[uuid.UUID]) -> dict[str, list[uuid.UUID]]:

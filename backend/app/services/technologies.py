@@ -29,8 +29,8 @@ from app.models import (
     ConstraintSeverity,
     Encounter,
     EncounterDepth,
-    Epic,
     Feature,
+    FeatureCapability,
     Product,
     ProductTechnology,
     StackSlot,
@@ -843,12 +843,13 @@ async def bindings_by_tech(session: AsyncSession) -> dict[uuid.UUID, list[str]]:
 
 
 async def realizations(session: AsyncSession, capability_id: uuid.UUID) -> list[dict]:
-    """The build side of the same question. A feature realizes exactly one
-    capability, so this is a direct lookup — and it is what the desktop's
-    supply frame renders opposite the buy side."""
+    """The build side of the same question: every feature realizing this
+    capability, with its own product — what the desktop's supply frame
+    renders opposite the buy side."""
     stmt = (
         select(Feature)
-        .where(Feature.capability_id == capability_id)
+        .join(FeatureCapability, FeatureCapability.feature_id == Feature.id)
+        .where(FeatureCapability.capability_id == capability_id)
         .order_by(Feature.seq)
     )
     features = list((await session.scalars(stmt)).all())
@@ -867,18 +868,10 @@ async def realizations(session: AsyncSession, capability_id: uuid.UUID) -> list[
     products = {
         p.id: p.slug for p in (await session.scalars(select(Product))).all()
     }
-    owners: dict[uuid.UUID, str | None] = {}
-    epic_stmt = (
-        select(Story.feature_id, Epic.product_id)
-        .join(Epic, Epic.id == Story.epic_id)
-        .where(Story.feature_id.in_([f.id for f in features]))
-    )
-    for feature_id, product_id in await session.execute(epic_stmt):
-        owners.setdefault(feature_id, products.get(product_id))
     return [
         {
             "feature": f.name,
-            "product": owners.get(f.id),
+            "product": products.get(f.product_id),
             "status": f.status,
             "tickets": counts.get(f.id, 0),
         }

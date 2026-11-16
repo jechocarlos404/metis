@@ -20,6 +20,7 @@ from app.models import (
     EdgeKind,
     Epic,
     Feature,
+    FeatureCapability,
     FeatureEdge,
     Goal,
     GoalType,
@@ -165,7 +166,10 @@ async def seed_demo_data(sessionmaker: async_sessionmaker[AsyncSession]) -> bool
         def feature(seq, name, capability, layer, priority, status, description, rationale=None):
             return Feature(
                 seq=seq,
-                capability_id=capability.id,
+                # Only the export work is PM Export's; search and graph are
+                # metis's own and carry no product rather than a wrong one.
+                product_id=product.id if capability is cap_export else None,
+                capability_links=[FeatureCapability(capability_id=capability.id)],
                 name=name,
                 description=description,
                 facets={"layer": layer},

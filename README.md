@@ -137,7 +137,8 @@ map them to the capabilities they need, declaring `unknown_capabilities` where y
 can't tell. External products show what exists in the world; they never count as what
 *we* can do — coverage of an idea counts only capabilities our own features realize. `GET /api/products/{id}/coverage` scores an existing product the same way: which of
 its features we could build from what we have — a lower bound, since a feature with
-unknown capabilities never counts as buildable.
+unknown capabilities never counts as buildable. Alongside it, `known_covered` lists the
+unknown-capability features whose every *named* capability is ours — a weaker signal.
 
 Capability identity is the exact name (slug), on purpose: reuse is only visible when two
 products name the same ability the same way. Coverage matches exactly and offers near

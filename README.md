@@ -139,6 +139,14 @@ can't tell. External products show what exists in the world; they never count as
 its features we could build from what we have — a lower bound, since a feature with
 unknown capabilities never counts as buildable.
 
+**Journeys** (`/journeys`, `/api/journeys`) are ordered paths of features a person moves
+through — inside one product or across several, ours or external. A step can also be one
+nobody has built, named with the capabilities it would need. Each journey's analysis is
+derived on every read through the same `coverage()` as the product score: per step, whether
+it is live in one of our products today and whether it is buildable, covered as far as
+anyone named, missing something, or unknown. Deleting a feature leaves its step as a
+labelled gap.
+
 Capability identity is the exact name (slug), on purpose: reuse is only visible when two
 products name the same ability the same way. Coverage matches exactly and offers near
 names as candidates; it never guesses, because a wrong match overstates what exists.

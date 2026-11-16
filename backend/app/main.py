@@ -17,6 +17,7 @@ from app.routers import (
     governance,
     graph,
     health,
+    journeys,
     products,
     questions,
     stacks,
@@ -63,6 +64,7 @@ def create_app() -> FastAPI:
     app.include_router(products.router, dependencies=rbac)
     app.include_router(work.router, dependencies=rbac)
     app.include_router(features.router, dependencies=rbac)
+    app.include_router(journeys.router, dependencies=rbac)
     app.include_router(graph.router, dependencies=rbac)
     app.include_router(strategies.router, dependencies=rbac)
     app.include_router(tech.router, dependencies=rbac)

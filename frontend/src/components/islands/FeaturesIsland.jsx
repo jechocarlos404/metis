@@ -9,6 +9,7 @@ export default function FeaturesIsland({ canWrite = true }) {
   const [layout, setLayout] = React.useState({ nodes: [], edges: [] });
   const [selected, setSelected] = React.useState(null);
   const [detail, setDetail] = React.useState(null);
+  const [inJourneys, setInJourneys] = React.useState([]);
   const [impact, setImpact] = React.useState(null);
   const [query, setQuery] = React.useState("");
   const [results, setResults] = React.useState(null);
@@ -78,15 +79,18 @@ export default function FeaturesIsland({ canWrite = true }) {
       return;
     }
     try {
-      const [feature, whyChain] = await Promise.all([
+      const [feature, whyChain, journeys] = await Promise.all([
         api(`/features/${id}`),
         api(`/features/${id}/why`),
+        api(`/journeys?feature_id=${id}`),
       ]);
       setDetail(feature);
       setWhy(whyChain);
+      setInJourneys(journeys);
     } catch {
       setDetail(null);
       setWhy(null);
+      setInJourneys([]);
     }
   }, []);
 
@@ -375,6 +379,11 @@ export default function FeaturesIsland({ canWrite = true }) {
                     </div>
                   )
                 )}
+                {inJourneys.map((j) => (
+                  <a key={j.id} href={`/journeys?id=${j.id}`} style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-accent)", textDecoration: "none" }}>
+                    IN JOURNEY → {j.name}
+                  </a>
+                ))}
                 {detail.priority != null && <PriorityBadge priority={detail.priority} rationale={detail.priority_rationale} />}
                 <WhyChainPanel chain={why?.chain} />
                 <div style={{ borderTop: "1px solid var(--border-hairline)", paddingTop: 12, display: "flex", flexDirection: "column", gap: 6 }}>

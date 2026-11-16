@@ -39,6 +39,7 @@ from app.models import (
     FeatureCapability,
     FeatureEdge,
     Goal,
+    JourneyStep,
     Motivation,
     Product,
     ProductBundle,
@@ -97,6 +98,8 @@ CHILDREN: dict[type, tuple[ChildSpec, ...]] = {
         ChildSpec(FeatureEdge, "src_id", "delete", "ontology"),
         ChildSpec(FeatureEdge, "dst_id", "delete", "ontology"),
         ChildSpec(Story, "feature_id", "detach", "delivery"),
+        # a journey keeps the step as a labelled gap (FK SET NULL)
+        ChildSpec(JourneyStep, "feature_id", "detach", "ontology"),
     ),
     Goal: (
         ChildSpec(Goal, "parent_goal_id", "delete", "ontology"),
@@ -179,6 +182,7 @@ LABELS: dict[type, tuple[str, Plane]] = {
     FeatureCapability: ("Feature capability links", "ontology"),
     FeatureEdge: ("Feature edges", "ontology"),
     Goal: ("Goals", "ontology"),
+    JourneyStep: ("Journey steps", "ontology"),
     Motivation: ("Motivations", "ontology"),
     Product: ("Products", "ontology"),
     ProductBundle: ("Product bundles", "ontology"),

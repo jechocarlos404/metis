@@ -19,6 +19,7 @@ from app.models.enums import (
     WorkStatus,
 )
 from app.models.feature import Feature, FeatureCapability, FeatureEdge
+from app.models.journey import Journey, JourneyStep
 from app.models.goal import Goal
 from app.models.governance import Concern, Constraint, ConstraintScope, StackConcernAnswer
 from app.models.llm import AgentLLMConfig
@@ -30,6 +31,8 @@ from app.models.technology import TechEdge, Technology, TechVersion, Vendor
 from app.models.work import Epic, Story, Ticket
 
 __all__ = [
+    "Journey",
+    "JourneyStep",
     "Adoption",
     "AdoptionStatus",
     "AgentLLMConfig",

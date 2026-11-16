@@ -695,6 +695,27 @@ async def health(session: AsyncSession) -> list[HealthFinding]:
     return findings
 
 
+async def score_items(
+    session: AsyncSession, items: list[tuple[str, list[str]]]
+) -> tuple[CoverageReport | None, list[FeatureCoverage | None]]:
+    """Run (name, capability names) items through coverage() and hand each item
+    its own FeatureCoverage by position — never by name, since two items may
+    share one. Items naming no capability get None and stay out of the report."""
+    indices = [i for i, (_, caps) in enumerate(items) if any(c.strip() for c in caps)]
+    scored: list[FeatureCoverage | None] = [None] * len(items)
+    if not indices:
+        return None, scored
+    report = await coverage(
+        session,
+        CoverageRequest(
+            features=[IdeaFeature(name=items[i][0], capabilities=items[i][1]) for i in indices]
+        ),
+    )
+    for k, i in enumerate(indices):
+        scored[i] = report.features[k]
+    return report, scored
+
+
 async def product_coverage(session: AsyncSession, product_id: uuid.UUID) -> ProductCoverage:
     """Score a product against our inventory — derived from coverage(), never a
     second computation: its features become the idea, its links the needs."""
@@ -707,26 +728,15 @@ async def product_coverage(session: AsyncSession, product_id: uuid.UUID) -> Prod
         )
     )
     names = {c.id: c.name for c in await list_capabilities(session)}
-    known = [f for f in features if f.capability_ids]
-    report = (
-        await coverage(
-            session,
-            CoverageRequest(
-                features=[
-                    IdeaFeature(name=f.name, capabilities=[names[c] for c in f.capability_ids])
-                    for f in known
-                ]
-            ),
-        )
-        if known
-        else None
+    report, scored = await score_items(
+        session, [(f.name, [names[c] for c in f.capability_ids]) for f in features]
     )
-    covered = {fc.name for fc in report.features if fc.existing == fc.total} if report else set()
+    covered = {i for i, fc in enumerate(scored) if fc is not None and fc.existing == fc.total}
     return ProductCoverage(
         product=ProductRef.model_validate(product),
         total_features=len(features),
         buildable=[
-            f.name for f in features if f.name in covered and not f.unknown_capabilities
+            f.name for i, f in enumerate(features) if i in covered and not f.unknown_capabilities
         ],
         unknown_features=[f.name for f in features if f.unknown_capabilities],
         report=report,

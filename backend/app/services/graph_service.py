@@ -25,6 +25,7 @@ The graph lives on ``app.state`` — run uvicorn with exactly one worker.
 """
 
 import asyncio
+import math
 import uuid
 from itertools import islice
 from typing import Any
@@ -36,6 +37,13 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.models import EdgeKind, Feature, FeatureEdge
 
 PRECEDENCE_KINDS = {str(EdgeKind.DEPENDS_ON), str(EdgeKind.BLOCKS)}
+
+# layout() grid, in svg units: column pitch, row pitch, space between product
+# blocks, and the rows-per-column budget factor (higher = taller blocks).
+_COL_W = 200
+_ROW_H = 96
+_BLOCK_GAP = 220
+_BLOCK_ASPECT = 1.2
 
 
 class GraphCycleError(Exception):
@@ -297,27 +305,64 @@ class FeatureGraph:
         }
 
     def layout(self) -> dict[str, Any]:
-        """Server-computed positions: column = dependency depth (dependencies left),
-        row = index within column. Cycles are collapsed via condensation so layout
-        never fails."""
+        """Server-computed positions, one block per product.
+
+        Inside a block, column order is dependency depth (dependencies left); a
+        depth with more nodes than the block's row budget wraps into extra
+        columns beside it, so every dependency still sits left of its dependents.
+        Blocks are shelf-packed into rows across a wide canvas. Cycles are
+        collapsed via condensation so layout never fails."""
         dep = self._precedence_subgraph()
         cond = nx.condensation(dep)  # DAG of strongly-connected components
         # cond edges follow dependent -> dependency; reverse so generation 0 = pure dependencies
         generations = list(nx.topological_generations(cond.reverse(copy=False)))
 
-        col_of: dict[uuid.UUID, int] = {}
-        for col, scc_ids in enumerate(generations):
+        depth_of: dict[uuid.UUID, int] = {}
+        for depth, scc_ids in enumerate(generations):
             for scc_id in scc_ids:
                 for node in cond.nodes[scc_id]["members"]:
-                    col_of[node] = col
+                    depth_of[node] = depth
 
-        rows: dict[int, int] = {}
+        blocks: dict[Any, list[uuid.UUID]] = {}
+        for node in sorted(self._g.nodes, key=lambda n: self._g.nodes[n]["seq"]):
+            blocks.setdefault(self._g.nodes[node].get("product_id"), []).append(node)
+
+        # Lay out each block locally: (col, row) per node.
+        placed: list[tuple[int, int, dict[uuid.UUID, tuple[int, int]]]] = []
+        for members in blocks.values():
+            row_budget = max(3, math.ceil(math.sqrt(len(members) * _BLOCK_ASPECT)))
+            by_depth: dict[int, list[uuid.UUID]] = {}
+            for node in members:
+                by_depth.setdefault(depth_of.get(node, 0), []).append(node)
+            cells: dict[uuid.UUID, tuple[int, int]] = {}
+            col = 0
+            for depth in sorted(by_depth):
+                column = by_depth[depth]
+                for i, node in enumerate(column):
+                    cells[node] = (col + i // row_budget, i % row_budget)
+                col += math.ceil(len(column) / row_budget)
+            rows = min(row_budget, max(len(c) for c in by_depth.values()))
+            placed.append((col, rows, cells))
+
+        # Shelf-pack blocks, biggest first, into a canvas about 16:10 wide.
+        placed.sort(key=lambda b: -b[0] * b[1])
+        area = sum((c * _COL_W + _BLOCK_GAP) * (r * _ROW_H + _BLOCK_GAP) for c, r, _ in placed)
+        width = max([c * _COL_W for c, _, _ in placed] + [math.sqrt(area * 1.6)])
+        pos: dict[uuid.UUID, tuple[int, int]] = {}
+        x = y = shelf_h = 0
+        for cols, rows, cells in placed:
+            w, h = cols * _COL_W, rows * _ROW_H
+            if x and x + w > width:
+                x, y, shelf_h = 0, y + shelf_h + _BLOCK_GAP, 0
+            for node, (c, r) in cells.items():
+                pos[node] = (40 + x + c * _COL_W, 30 + y + r * _ROW_H)
+            x += w + _BLOCK_GAP
+            shelf_h = max(shelf_h, h)
+
         nodes = []
         for node in sorted(self._g.nodes, key=lambda n: self._g.nodes[n]["seq"]):
-            col = col_of.get(node, 0)
-            row = rows.get(col, 0)
-            rows[col] = row + 1
-            nodes.append({**self._summary(node), "x": 40 + col * 200, "y": 30 + row * 96})
+            px, py = pos[node]
+            nodes.append({**self._summary(node), "x": px, "y": py})
 
         edges = [
             {"src": str(src), "dst": str(dst), "kind": data["kind"]}

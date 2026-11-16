@@ -221,3 +221,37 @@ def test_layout_carries_the_features_own_product():
     nodes = {n["name"]: n for n in graph.layout()["nodes"]}
     assert nodes["owned"]["product_id"] == str(product_id)
     assert nodes["unowned"]["product_id"] is None
+
+
+def test_layout_wraps_tall_columns_and_keeps_dependencies_left():
+    graph = FeatureGraph(sessionmaker=None)
+    loose = [fake_feature(i, f"loose{i}") for i in range(30)]
+    base = fake_feature(100, "base")
+    top = fake_feature(101, "top")
+    for f in (*loose, base, top):
+        graph.upsert_node(f)
+    graph.add_edge(top.id, base.id, "DEPENDS_ON")
+    nodes = {n["name"]: n for n in graph.layout()["nodes"]}
+    xs = {n["x"] for n in nodes.values()}
+    ys = {n["y"] for n in nodes.values()}
+    assert len(xs) > 2  # 31 dependency-free features no longer share one column
+    assert len(ys) < 31
+    assert nodes["top"]["x"] > nodes["base"]["x"]
+    assert len({(n["x"], n["y"]) for n in nodes.values()}) == len(nodes)
+
+
+def test_layout_separates_products_into_blocks():
+    graph = FeatureGraph(sessionmaker=None)
+    p1, p2 = uuid.uuid4(), uuid.uuid4()
+    a = [fake_feature(i, f"a{i}", product_id=p1) for i in range(6)]
+    b = [fake_feature(10 + i, f"b{i}", product_id=p2) for i in range(6)]
+    for f in (*a, *b):
+        graph.upsert_node(f)
+    nodes = graph.layout()["nodes"]
+
+    def box(pid):
+        pts = [(n["x"], n["y"]) for n in nodes if n["product_id"] == str(pid)]
+        return min(x for x, _ in pts), max(x for x, _ in pts), min(y for _, y in pts), max(y for _, y in pts)
+
+    (ax0, ax1, ay0, ay1), (bx0, bx1, by0, by1) = box(p1), box(p2)
+    assert ax1 < bx0 or bx1 < ax0 or ay1 < by0 or by1 < ay0  # bounding boxes don't overlap

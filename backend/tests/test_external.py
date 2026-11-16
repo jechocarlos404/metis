@@ -149,3 +149,42 @@ async def test_flipping_a_product_external_refreshes_the_graph(db):
         await session.commit()
         await feature_service.refresh_product_features(session, p.id, graph)
     assert "Do thing" not in {f["name"] for f in graph.ready_set()}
+
+
+@pytest.mark.asyncio
+async def test_how_much_of_an_external_product_we_could_build(db):
+    async with db() as session:
+        s = await estate(session)
+        await feature_service.create_feature(
+            session,
+            FeatureCreate(
+                name="Share routes",
+                product_id=s["strava"].id,
+                capability_ids=[s["sync"].id],
+                unknown_capabilities=True,
+            ),
+        )
+        score = await capability_service.product_coverage(session, s["strava"].id)
+
+    assert score.product.name == "Strava"
+    assert score.total_features == 4
+    # Only a feature whose every capability is known AND ours counts. Share routes
+    # needs only sync as far as we know — but "as far as we know" is not covered.
+    assert score.buildable == ["Sync activities"]
+    assert score.unknown_features == ["Beacon live tracking", "Share routes"]
+    report = score.report
+    assert (report.needed, report.existing) == (2, 1)
+    assert report.missing == ["Segment leaderboards"]
+
+
+@pytest.mark.asyncio
+async def test_a_product_with_only_unknown_features_scores_zero(db):
+    async with db() as session:
+        p = await product(session, "Mystery", external=True)
+        await feature_service.create_feature(
+            session,
+            FeatureCreate(name="Magic", product_id=p.id, capability_ids=[], unknown_capabilities=True),
+        )
+        score = await capability_service.product_coverage(session, p.id)
+    assert score.report is None
+    assert (score.total_features, score.buildable, score.unknown_features) == (1, [], ["Magic"])

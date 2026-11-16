@@ -1,6 +1,6 @@
 import React from "react";
 import { PageHeader } from "../shell/PageHeader.jsx";
-import { Badge, Button, Tag } from "../../ds";
+import { Badge, Button, Select, Tag } from "../../ds";
 import { api } from "../../lib/api.js";
 
 const MATURITY_TONES = {
@@ -60,10 +60,33 @@ export default function InventoryIsland() {
   const [report, setReport] = React.useState(null);
   const [checking, setChecking] = React.useState(false);
   const [error, setError] = React.useState(null);
+  const [products, setProducts] = React.useState([]);
+  const [scored, setScored] = React.useState(""); // product id being scored
+  const [score, setScore] = React.useState(null);
 
   React.useEffect(() => {
     api("/capabilities/inventory").then(setInventory).catch((e) => setError(String(e.message)));
+    api("/products").then(setProducts).catch(() => {});
   }, []);
+
+  // An existing product's features become the idea: how much of it could we build?
+  const scoreProduct = async (productId) => {
+    setScored(productId);
+    setScore(null);
+    setReport(null);
+    setError(null);
+    if (!productId) return;
+    setChecking(true);
+    try {
+      const result = await api(`/products/${productId}/coverage`);
+      setScore(result);
+      setReport(result.report);
+    } catch (e) {
+      setError(String(e.message));
+    } finally {
+      setChecking(false);
+    }
+  };
 
   const check = async (text = idea) => {
     const features = parseIdea(text);
@@ -73,6 +96,8 @@ export default function InventoryIsland() {
     }
     setChecking(true);
     setError(null);
+    setScored("");
+    setScore(null);
     try {
       setReport(await api("/capabilities/coverage", { method: "POST", body: { features } }));
     } catch (e) {
@@ -164,12 +189,38 @@ export default function InventoryIsland() {
             <textarea rows={6} value={idea} placeholder={PLACEHOLDER} onChange={(e) => setIdea(e.target.value)}
               style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-xs)", color: "var(--text-body)", background: "var(--surface-input, var(--surface-card))", border: "1px solid var(--border-default)", borderRadius: "var(--radius-md)", padding: "8px 10px", resize: "vertical" }} />
             <div><Button size="sm" variant="accent" disabled={checking || !idea.trim()} onClick={() => check()}>Check coverage</Button></div>
+            {products.length > 0 && (
+              <Select label="…or score an existing product" value={scored} onChange={(e) => scoreProduct(e.target.value)}
+                options={[{ value: "", label: "— pick a product —" },
+                  ...[...products].sort((a, b) => Number(b.external) - Number(a.external) || a.name.localeCompare(b.name))
+                    .map((p) => ({ value: p.id, label: p.external ? `${p.name} (external)` : p.name }))]} />
+            )}
             {error && <div style={{ fontSize: "var(--text-xs)", color: "var(--danger-fg)" }}>{error}</div>}
           </div>
+          {score && <ProductScore score={score} />}
           {report && <CoverageReport report={report} onCandidate={useCandidate} />}
         </section>
       </div>
     </>
+  );
+}
+
+function ProductScore({ score }) {
+  return (
+    <div style={{ borderTop: "1px solid var(--border-hairline)", padding: "14px 16px 0", display: "flex", flexDirection: "column", gap: 6, fontSize: "var(--text-xs)" }}>
+      <div style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-sm)", color: "var(--text-heading)" }}>
+        {score.buildable.length}/{score.total_features} of {score.product.name}'s features buildable from what we have
+      </div>
+      {score.buildable.length > 0 && (
+        <div style={{ color: "var(--text-secondary)" }}>Buildable now: {score.buildable.join(", ")}</div>
+      )}
+      {score.unknown_features.length > 0 && (
+        <div style={{ color: "var(--text-secondary)" }}>
+          A lower bound — {score.unknown_features.length} feature{score.unknown_features.length === 1 ? " has" : "s have"} capabilities nobody has identified yet: {score.unknown_features.join(", ")}
+        </div>
+      )}
+      {!score.report && <div style={{ color: "var(--text-disabled)" }}>No capability links known for this product yet.</div>}
+    </div>
   );
 }
 

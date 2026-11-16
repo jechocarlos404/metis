@@ -8,7 +8,9 @@ motivations by pair) and deleted via the REST API.
 
 Entities entangled with material outside the seed are kept, with a warning:
 
-- a capability is kept if foreign features realize it, or if any child
+- a product is kept if features outside the seed belong to it
+- a capability is kept if foreign features realize it (any of a feature's
+  capability_ids counts), or if any child
   capability is foreign or itself kept
 - a goal is kept if it has foreign child goals or foreign products
 
@@ -158,7 +160,8 @@ class Unseeder:
         for c in self.inst_caps:
             children.setdefault(c["parent_id"], []).append(c)
         for f in self.inst_feats:
-            feats_of.setdefault(f["capability_id"], []).append(f)
+            for cid in f.get("capability_ids") or []:
+                feats_of.setdefault(cid, []).append(f)
         for s in self.inst_sats:
             sats_of.setdefault(s["capability_id"], []).append(s)
 
@@ -205,7 +208,10 @@ class Unseeder:
     def deletable_goals(self):
         """Matched goals safe to delete, children before parents."""
         matched_ids = {g["id"] for g in self.goals.values()}
-        matched_prod_ids = {p["id"] for p in self.prods.values()}
+        # Products kept for their foreign features count as foreign here too.
+        matched_prod_ids = {p["id"] for p in self.prods.values()} - set(
+            self.foreign_feature_counts()
+        )
         children = {}
         for g in self.inst_goals:
             children.setdefault(g["parent_goal_id"], []).append(g)
@@ -280,8 +286,29 @@ class Unseeder:
                 f"edge {src['name']!r} -{kind}-> {dst['name']!r}",
             )
 
+    def foreign_feature_counts(self):
+        """Matched product id -> number of features outside the seed that belong
+        to it. Deleting such a product would silently orphan them (product_id
+        SET NULL), so it is shared state and kept."""
+        matched_feat_ids = {f["id"] for f in self.feats.values()}
+        matched_prod_ids = {p["id"] for p in self.prods.values()}
+        counts = {}
+        for f in self.inst_feats:
+            pid = f.get("product_id")
+            if pid in matched_prod_ids and f["id"] not in matched_feat_ids:
+                counts[pid] = counts.get(pid, 0) + 1
+        return counts
+
     def remove_products(self):
+        foreign = self.foreign_feature_counts()
         for prod in self.prods.values():
+            if prod["id"] in foreign:
+                self.keep(
+                    "products",
+                    f"product {prod['name']!r}",
+                    [f"{foreign[prod['id']]} feature(s) outside the seed belong to it"],
+                )
+                continue
             self.remove(
                 "products",
                 f"/api/products/{prod['id']}",

@@ -37,13 +37,16 @@ It deletes in dependency-safe order (motivations, edges, products, features,
 capabilities leaf-first, goals children-first) and protects anything the seed
 shares with the rest of the instance:
 
+- a **product is kept** (warning) if features outside the seed belong to it —
+  deleting it would silently strip their product
 - a **capability is kept** (warning, not deleted) if features outside the
-  seed realize it, if any technology satisfies it, or if any child capability
+  seed realize it (any of a feature's capabilities counts — capabilities are
+  shared across products), if any technology satisfies it, or if any child capability
   is outside the seed or kept. A seed carries no tech, so a satisfaction on a
   seeded capability was recorded by someone else — deleting it would drop data
   the seed never created, and would strand any stack slot bound through it
 - a **goal is kept** if it has child goals outside the seed, or a product
-  outside the seed points at it
+  outside the seed (or a kept one) points at it
 - deleting a **feature cascades its edges**, including edges a foreign
   feature had to it — those are reported as notes
 - deleting a **product cascades its PRD and all epics/stories/tickets**,

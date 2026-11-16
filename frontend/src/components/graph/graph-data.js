@@ -64,7 +64,7 @@ export function buildFeatureGraph(layout) {
       id: n.id,
       name: n.name,
       layer: n.facets?.layer,
-      capabilityId: n.capability_id,
+      capabilityIds: n.capability_ids ?? [],
       status: n.status,
       priority: n.priority,
       inDegree: d.in,

@@ -1,6 +1,6 @@
 import React from "react";
 import { PageHeader } from "../shell/PageHeader.jsx";
-import { Button, Dialog, Icon, IconButton, Input, PriorityBadge, Select, StatusBadge, Tabs, Tag } from "../../ds";
+import { Button, Checkbox, Dialog, Icon, IconButton, Input, PriorityBadge, Select, StatusBadge, Tabs, Tag } from "../../ds";
 import { api, ApiError } from "../../lib/api.js";
 import { FeatureGraphView } from "../graph/FeatureGraphView.jsx";
 
@@ -17,7 +17,8 @@ export default function FeaturesIsland({ canWrite = true }) {
   const [edgeList, setEdgeList] = React.useState([]);
   const [products, setProducts] = React.useState([]);
   const [productFilter, setProductFilter] = React.useState(""); // "" | "unattributed" | product id
-  const [draft, setDraft] = React.useState({ name: "", description: "", capabilityId: "", layer: "service", priority: "3", status: "pending" });
+  const [draft, setDraft] = React.useState(EMPTY_DRAFT);
+  const [capQuery, setCapQuery] = React.useState("");
   const [edgeDraft, setEdgeDraft] = React.useState({ kind: "DEPENDS_ON", targetId: "" });
   const [saving, setSaving] = React.useState(false);
   const [confirmingDelete, setConfirmingDelete] = React.useState(false);
@@ -59,7 +60,6 @@ export default function FeaturesIsland({ canWrite = true }) {
       }
     }
     setSelected((sel) => sel && data.nodes.some((n) => n.id === sel) ? sel : data.nodes[0]?.id ?? null);
-    setDraft((d) => (d.capabilityId ? d : { ...d, capabilityId: caps[0]?.id ?? "" }));
   }, []);
 
   const capabilityById = React.useMemo(
@@ -113,8 +113,8 @@ export default function FeaturesIsland({ canWrite = true }) {
   const nodeById = React.useMemo(() => new Map(layout.nodes.map((n) => [n.id, n])), [layout]);
   const productById = React.useMemo(() => new Map(products.map((p) => [p.id, p])), [products]);
 
-  // Attribution is derived server-side (feature -> capability -> motivating
-  // goals -> specs); search results lack it, so always read it off the layout node.
+  // A feature's product is its own (features.product_id); search results lack
+  // it, so always read it off the layout node.
   const matchesProduct = React.useCallback((id) => {
     if (!productFilter) return true;
     const ids = nodeById.get(id)?.product_ids ?? [];
@@ -173,6 +173,7 @@ export default function FeaturesIsland({ canWrite = true }) {
   }, [cut]);
 
   const openNew = () => {
+    setCapQuery("");
     setConfirmingDelete(false);
     setDialog({ mode: "new" });
   };
@@ -182,24 +183,27 @@ export default function FeaturesIsland({ canWrite = true }) {
     setDraft({
       name: detail.name,
       description: detail.description ?? "",
-      capabilityId: detail.capability_id,
+      capabilityIds: detail.capability_ids,
+      productId: detail.product_id ?? "",
       layer: detail.facets?.layer ?? "service",
       priority: detail.priority != null ? String(detail.priority) : "",
       status: detail.status,
     });
+    setCapQuery("");
     setConfirmingDelete(false);
     setDialog({ mode: "edit" });
   };
 
   const save = async () => {
-    if (!draft.name.trim() || !draft.capabilityId) return;
+    if (!draft.name.trim() || draft.capabilityIds.length === 0) return;
     setSaving(true);
     setError(null);
     try {
       const body = {
         name: draft.name.trim(),
         description: draft.description.trim() || null,
-        capability_id: draft.capabilityId,
+        capability_ids: draft.capabilityIds,
+        product_id: draft.productId || null,
         priority: draft.priority === "" ? null : Number(draft.priority),
       };
       if (dialog.mode === "new") {
@@ -207,7 +211,7 @@ export default function FeaturesIsland({ canWrite = true }) {
           method: "POST",
           body: { ...body, facets: { layer: draft.layer } },
         });
-        setDraft((d) => ({ name: "", description: "", capabilityId: d.capabilityId, layer: "service", priority: "3", status: "pending" }));
+        setDraft((d) => ({ ...EMPTY_DRAFT, productId: d.productId }));
         await load();
         setSelected(created.id);
       } else {
@@ -282,7 +286,7 @@ export default function FeaturesIsland({ canWrite = true }) {
               <Select value={productFilter} onChange={(e) => setProductFilter(e.target.value)} style={{ width: 200 }}
                 options={[{ value: "", label: "All products" },
                   ...products.map((p) => ({ value: p.id, label: p.name })),
-                  { value: "unattributed", label: "Unattributed" }]} />
+                  { value: "unattributed", label: "No product" }]} />
             )}
             <Input placeholder="Find features like…" style={{ width: 220 }} inputStyle={{ height: 30 }}
               value={query}
@@ -344,21 +348,21 @@ export default function FeaturesIsland({ canWrite = true }) {
                   {detail.facets?.layer && <Tag type={detail.facets.layer}>{detail.facets.layer}</Tag>}
                   <StatusBadge status={detail.status} />
                 </div>
-                {capabilityById.get(detail.capability_id) && (
-                  <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-secondary)" }}>
-                    REALIZES → {capabilityById.get(detail.capability_id).name}
+                {detail.capability_ids.map((cid) => (
+                  <div key={cid} style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-secondary)" }}>
+                    REALIZES → {capabilityById.get(cid)?.name ?? "unknown capability"}
                   </div>
-                )}
+                ))}
                 {products.length > 0 && (
                   (nodeById.get(detail.id)?.product_ids ?? []).length > 0 ? (
                     nodeById.get(detail.id).product_ids.map((pid) => (
                       <div key={pid} style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-secondary)" }}>
-                        SPEC → {productById.get(pid)?.name ?? "unknown spec"}
+                        PRODUCT → {productById.get(pid)?.name ?? "unknown product"}
                       </div>
                     ))
                   ) : (
                     <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-disabled)" }}>
-                      no product attribution
+                      no product
                     </div>
                   )
                 )}
@@ -427,7 +431,7 @@ export default function FeaturesIsland({ canWrite = true }) {
             {directory.map((n, i) => (
               <div key={n.id} onClick={() => { setSelected(n.id); setTab("graph"); }} style={{ display: "grid", gridTemplateColumns: "1fr 160px 110px 110px 120px", alignItems: "center", padding: "10px 16px", borderBottom: i < directory.length - 1 ? "1px solid var(--border-hairline)" : "none", cursor: "pointer", fontSize: "var(--text-sm)" }}>
                 <span style={{ color: "var(--text-heading)", fontWeight: "var(--weight-medium)" }}>{n.name}</span>
-                <span style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>{capabilityById.get(n.capability_id)?.name ?? "—"}</span>
+                <span title={(n.capability_ids ?? []).map((c) => capabilityById.get(c)?.name).join(", ")} style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", ...ELLIPSIS }}>{capabilityNames(n.capability_ids, capabilityById)}</span>
                 <span>{n.facets?.layer ? <Tag type={n.facets.layer}>{n.facets.layer}</Tag> : <span style={{ color: "var(--text-disabled)" }}>—</span>}</span>
                 <span>{n.priority != null ? <PriorityBadge priority={n.priority} /> : <span style={{ color: "var(--text-disabled)" }}>—</span>}</span>
                 <span><StatusBadge status={n.status} /></span>
@@ -456,17 +460,19 @@ export default function FeaturesIsland({ canWrite = true }) {
               </Button>
             )}
             <Button size="sm" variant="secondary" onClick={() => setDialog(null)}>Cancel</Button>
-            <Button size="sm" variant="accent" disabled={saving || !draft.name.trim()} onClick={save}>
+            <Button size="sm" variant="accent" disabled={saving || !draft.name.trim() || draft.capabilityIds.length === 0} onClick={save}>
               {dialog?.mode === "new" ? "Create feature" : "Save"}
             </Button>
           </>
         }
       >
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-          <Input label="Name (a change, verb phrase)" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="Add Notion export backend" />
+          <Input label="Name (what the user gets, verb phrase)" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="Export tickets to Notion" />
           <Input label="Description" value={draft.description} onChange={(e) => setDraft({ ...draft, description: e.target.value })} />
-          <Select label="Realizes capability" value={draft.capabilityId} onChange={(e) => setDraft({ ...draft, capabilityId: e.target.value })}
-            options={capabilities.map((c) => ({ value: c.id, label: c.name }))} />
+          <Select label="Product" value={draft.productId} onChange={(e) => setDraft({ ...draft, productId: e.target.value })}
+            options={[{ value: "", label: "— none —" }, ...products.map((p) => ({ value: p.id, label: p.name }))]} />
+          <CapabilityPicker capabilities={capabilities} selected={draft.capabilityIds} query={capQuery} onQuery={setCapQuery}
+            onChange={(ids) => setDraft({ ...draft, capabilityIds: ids })} />
           <Select label="Layer" value={draft.layer} onChange={(e) => setDraft({ ...draft, layer: e.target.value })} options={["ui", "service", "integration", "infra"]} />
           <Select label="Priority (1 hottest)" value={draft.priority} onChange={(e) => setDraft({ ...draft, priority: e.target.value })}
             options={dialog?.mode === "edit" ? [{ value: "", label: "—" }, "1", "2", "3", "4", "5"] : ["1", "2", "3", "4", "5"]} />
@@ -477,6 +483,36 @@ export default function FeaturesIsland({ canWrite = true }) {
         </div>
       </Dialog>
     </>
+  );
+}
+
+const EMPTY_DRAFT = { name: "", description: "", capabilityIds: [], productId: "", layer: "service", priority: "3", status: "pending" };
+
+function capabilityNames(ids, capabilityById) {
+  const names = (ids ?? []).map((c) => capabilityById.get(c)?.name).filter(Boolean);
+  return names.length ? names.join(", ") : "—";
+}
+
+// Every capability the feature REALIZES. Exact picks only: the inventory is only
+// as accurate as these links, so there is no free-text entry here.
+function CapabilityPicker({ capabilities, selected, query, onQuery, onChange }) {
+  const chosen = new Set(selected);
+  const q = query.trim().toLowerCase();
+  const shown = capabilities.filter((c) => chosen.has(c.id) || !q || c.name.toLowerCase().includes(q));
+  const toggle = (id, on) => onChange(on ? [...selected, id] : selected.filter((x) => x !== id));
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      <div style={{ ...CAPS_HEADER, color: "var(--text-secondary)" }}>
+        Realizes capabilities · {selected.length} selected
+      </div>
+      <Input value={query} onChange={(e) => onQuery(e.target.value)} placeholder="Filter capabilities" />
+      <div style={{ maxHeight: 180, overflowY: "auto", display: "flex", flexDirection: "column", gap: 6, padding: "8px 10px", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-sm)" }}>
+        {shown.map((c) => (
+          <Checkbox key={c.id} label={c.name} checked={chosen.has(c.id)} onChange={(on) => toggle(c.id, on)} />
+        ))}
+        {shown.length === 0 && <span style={{ fontSize: "var(--text-xs)", color: "var(--text-disabled)" }}>0 capabilities match.</span>}
+      </div>
+    </div>
   );
 }
 

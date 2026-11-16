@@ -29,23 +29,15 @@ function collectGoalChain(goalById, startId) {
   return ids;
 }
 
-function productAttributedCapabilityIds(capabilities, motivations, goalIds) {
-  const byCap = new Map();
-  for (const motivation of motivations) {
-    const bucket = byCap.get(motivation.capability_id) || [];
-    bucket.push(motivation.goal_id);
-    byCap.set(motivation.capability_id, bucket);
-  }
+// The product's own features, every capability they realize, and each of
+// those capabilities' PART_OF ancestors (so parent_ref resolves in the file).
+function withAncestors(capabilities, startIds) {
   const byId = new Map(capabilities.map((cap) => [cap.id, cap]));
   const included = new Set();
-  for (const capability of capabilities) {
-    let cursor = capability;
-    while (cursor) {
-      const goals = byCap.get(cursor.id) || [];
-      if (goals.some((goalId) => goalIds.has(goalId))) {
-        included.add(capability.id);
-        break;
-      }
+  for (const id of startIds) {
+    let cursor = byId.get(id);
+    while (cursor && !included.has(cursor.id)) {
+      included.add(cursor.id);
       cursor = cursor.parent_id ? byId.get(cursor.parent_id) : null;
     }
   }
@@ -112,13 +104,12 @@ export async function GET({ request, locals }) {
     const allMotivations = motivationLists.flatMap(({ capability_id, goals: linkedGoals }) =>
       linkedGoals.map((goal) => ({ capability_id, goal_id: goal.id })),
     );
-    const includedCapabilityIds = productAttributedCapabilityIds(
-      capabilityList,
-      allMotivations,
-      productGoalIds,
-    );
+    const includedFeatures = features.filter((feature) => feature.product_id === productId);
+    const includedCapabilityIds = withAncestors(capabilityList, [
+      ...includedFeatures.flatMap((feature) => feature.capability_ids || []),
+      ...bundles.map((capability) => capability.id),
+    ]);
     const includedCapabilities = capabilityList.filter((capability) => includedCapabilityIds.has(capability.id));
-    const includedFeatures = features.filter((feature) => includedCapabilityIds.has(feature.capability_id));
     const includedFeatureIds = new Set(includedFeatures.map((feature) => feature.id));
     const includedEdges = edges.filter(
       (edge) => includedFeatureIds.has(edge.src_id) && includedFeatureIds.has(edge.dst_id),
@@ -138,6 +129,7 @@ export async function GET({ request, locals }) {
     const featureRef = new Map(includedFeatures.map((feature, i) => [feature.id, `feat-${slug(feature.name)}-${i + 1}`]));
 
     const latestDecomposition = decompositions[0]?.document;
+    const productRef = `prod-${slug(product.display_id || product.name)}`;
 
     const doc = {
       format: "metis-seed/v1",
@@ -170,7 +162,8 @@ export async function GET({ request, locals }) {
       })),
       features: includedFeatures.map((feature) => ({
         ref: featureRef.get(feature.id),
-        capability_ref: capRef.get(feature.capability_id),
+        capability_refs: (feature.capability_ids || []).map((id) => capRef.get(id)),
+        product_ref: productRef,
         name: feature.name,
         description: feature.description,
         facets: feature.facets,
@@ -185,7 +178,7 @@ export async function GET({ request, locals }) {
       })),
       products: [
         {
-          ref: `prod-${slug(product.display_id || product.name)}`,
+          ref: productRef,
           goal_ref: product.goal_id ? goalRef.get(product.goal_id) : null,
           name: product.name,
           summary: product.summary,

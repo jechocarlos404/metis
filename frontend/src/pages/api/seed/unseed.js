@@ -141,9 +141,11 @@ class Unseeder {
       children.set(cap.parent_id, bucket);
     }
     for (const feature of this.instFeatures) {
-      const bucket = featuresOf.get(feature.capability_id) || [];
-      bucket.push(feature);
-      featuresOf.set(feature.capability_id, bucket);
+      for (const capabilityId of feature.capability_ids || []) {
+        const bucket = featuresOf.get(capabilityId) || [];
+        bucket.push(feature);
+        featuresOf.set(capabilityId, bucket);
+      }
     }
 
     const verdict = new Map();
@@ -180,9 +182,29 @@ class Unseeder {
     return [...this.caps.values()].filter(check).sort((a, b) => depth(b) - depth(a));
   }
 
+  // Matched product id -> number of features outside the seed that belong to
+  // it. Deleting such a product would silently orphan them (product_id SET
+  // NULL), so it is shared state and kept.
+  foreignFeatureCounts() {
+    const matchedFeatureIds = new Set([...this.features.values()].map((feature) => feature.id));
+    const matchedProductIds = new Set([...this.products.values()].map((product) => product.id));
+    const counts = new Map();
+    for (const feature of this.instFeatures) {
+      const productId = feature.product_id;
+      if (matchedProductIds.has(productId) && !matchedFeatureIds.has(feature.id)) {
+        counts.set(productId, (counts.get(productId) || 0) + 1);
+      }
+    }
+    return counts;
+  }
+
   deletableGoals() {
     const matchedGoalIds = new Set([...this.goals.values()].map((goal) => goal.id));
-    const matchedProductIds = new Set([...this.products.values()].map((product) => product.id));
+    // Products kept for their foreign features count as foreign here too.
+    const keptProducts = this.foreignFeatureCounts();
+    const matchedProductIds = new Set(
+      [...this.products.values()].map((product) => product.id).filter((id) => !keptProducts.has(id)),
+    );
     const children = new Map();
     for (const goal of this.instGoals) {
       const bucket = children.get(goal.parent_goal_id) || [];
@@ -269,7 +291,14 @@ class Unseeder {
   }
 
   async removeProducts() {
+    const foreign = this.foreignFeatureCounts();
     for (const product of this.products.values()) {
+      if (foreign.has(product.id)) {
+        this.keep("products", `product ${JSON.stringify(product.name)}`, [
+          `${foreign.get(product.id)} feature(s) outside the seed belong to it`,
+        ]);
+        continue;
+      }
       await this.remove(
         "products",
         `/api/products/${product.id}`,

@@ -39,6 +39,14 @@ function checkFacets(errors, where, item) {
   if (!valid) errors.push(`${where}: facets must be an object of string -> string`);
 }
 
+// Every capability ref a feature REALIZES. `capability_refs` (list) is current;
+// a legacy single `capability_ref` reads as a one-element list.
+function featureCapabilityRefs(feature) {
+  if (feature.capability_refs != null) return feature.capability_refs;
+  if (feature.capability_ref != null) return [feature.capability_ref];
+  return null;
+}
+
 function validateSeed(doc) {
   const errors = [];
   if (doc.format !== "metis-seed/v1") {
@@ -88,7 +96,7 @@ function validateSeed(doc) {
   const goalRefs = checkRefs("goals");
   const capRefs = checkRefs("capabilities");
   const featureRefs = checkRefs("features");
-  checkRefs("products");
+  const productRefs = checkRefs("products");
   checkParentForest("goals", goalRefs);
   checkParentForest("capabilities", capRefs);
 
@@ -126,8 +134,19 @@ function validateSeed(doc) {
   for (const [i, feature] of (doc.features || []).entries()) {
     const where = `features[${i}] (${feature.ref})`;
     if (!feature.name) errors.push(`${where}: 'name' is required`);
-    if (!capRefs.has(feature.capability_ref)) {
-      errors.push(`${where}: capability_ref ${JSON.stringify(feature.capability_ref)} does not match a capability`);
+    const refs = featureCapabilityRefs(feature);
+    if (!Array.isArray(refs) || refs.length === 0) {
+      errors.push(`${where}: capability_refs must be a non-empty list of capability refs`);
+    } else {
+      for (const ref of refs) {
+        if (!capRefs.has(ref)) errors.push(`${where}: capability ref ${JSON.stringify(ref)} does not match a capability`);
+      }
+      if (new Set(refs.map(String)).size !== refs.length) {
+        errors.push(`${where}: capability_refs lists a capability twice`);
+      }
+    }
+    if (feature.product_ref != null && !productRefs.has(feature.product_ref)) {
+      errors.push(`${where}: unknown product_ref ${JSON.stringify(feature.product_ref)}`);
     }
     checkPriority(errors, where, feature);
     checkStatus(errors, where, feature);
@@ -308,6 +327,7 @@ class Loader {
     this.goalIds = new Map();
     this.capIds = new Map();
     this.featureIds = new Map();
+    this.productIds = new Map();
   }
 
   note(collection, action) {
@@ -422,6 +442,8 @@ class Loader {
   }
 
   async loadFeatures() {
+    // Add-only: an existing feature (matched by name) keeps its capability
+    // links and product as they are — the importer never rewrites a row.
     const existing = new Map(
       (await this.api.get("/api/features")).map((feature) => [feature.name, feature.id]),
     );
@@ -434,7 +456,8 @@ class Loader {
       this.featureIds.set(
         feature.ref,
         await this.create("features", "/api/features", {
-          capability_id: this.capIds.get(feature.capability_ref),
+          capability_ids: featureCapabilityRefs(feature).map((ref) => this.capIds.get(ref)),
+          product_id: this.productIds.get(feature.product_ref),
           name: feature.name,
           description: feature.description,
           facets: feature.facets,
@@ -502,7 +525,8 @@ class Loader {
     });
   }
 
-  async loadProducts() {
+  // Products before features: a feature's product_ref needs the id.
+  async loadProductRows() {
     const existing = new Map(
       (await this.api.get("/api/products")).map((product) => [product.name, product.id]),
     );
@@ -518,6 +542,14 @@ class Loader {
           body: product.body,
         }, product.name);
       }
+      this.productIds.set(product.ref, productId);
+    }
+  }
+
+  // Bundles and PRDs, once features exist for stories to pin.
+  async loadProducts() {
+    for (const product of this.doc.products || []) {
+      const productId = this.productIds.get(product.ref);
       const decomposition = product.decomposition;
       for (const capabilityRef of product.bundle_refs || []) {
         const capabilityId = this.capIds.get(capabilityRef);
@@ -567,6 +599,7 @@ class Loader {
     await this.loadGoals();
     await this.loadCapabilities();
     await this.loadMotivations();
+    await this.loadProductRows();
     await this.loadFeatures();
     await this.loadEdges();
     await this.loadProducts();

@@ -44,6 +44,15 @@ def _check_facets(errors, where, item):
         errors.append(f"{where}: facets must be an object of string -> string")
 
 
+def feature_capability_refs(feature):
+    """Every capability ref a feature REALIZES. `capability_refs` (list) is
+    current; a legacy single `capability_ref` reads as a one-element list."""
+    refs = feature.get("capability_refs")
+    if refs is None and feature.get("capability_ref") is not None:
+        refs = [feature["capability_ref"]]
+    return refs
+
+
 def validate(doc):
     """Return a list of error strings; empty means the document is loadable."""
     errors = []
@@ -66,7 +75,7 @@ def validate(doc):
     goal_refs = check_refs("goals")
     cap_refs = check_refs("capabilities")
     feat_refs = check_refs("features")
-    check_refs("products")
+    prod_refs = check_refs("products")
 
     def check_parent_forest(collection, refs):
         parents = {}
@@ -129,10 +138,17 @@ def validate(doc):
         where = f"features[{i}] ({f.get('ref')})"
         if not f.get("name"):
             errors.append(f"{where}: 'name' is required")
-        if f.get("capability_ref") not in cap_refs:
-            errors.append(
-                f"{where}: capability_ref {f.get('capability_ref')!r} does not match a capability"
-            )
+        refs = feature_capability_refs(f)
+        if not isinstance(refs, list) or not refs:
+            errors.append(f"{where}: capability_refs must be a non-empty list of capability refs")
+        else:
+            for ref in refs:
+                if ref not in cap_refs:
+                    errors.append(f"{where}: capability ref {ref!r} does not match a capability")
+            if len(set(map(str, refs))) != len(refs):
+                errors.append(f"{where}: capability_refs lists a capability twice")
+        if f.get("product_ref") is not None and f["product_ref"] not in prod_refs:
+            errors.append(f"{where}: unknown product_ref {f['product_ref']!r}")
         _check_priority(errors, where, f)
         _check_status(errors, where, f)
         _check_facets(errors, where, f)

@@ -558,13 +558,20 @@ export default function ProductsIsland({ canWrite = true }) {
         ) : (
           <div style={{ maxWidth: 860, border: "1px dashed var(--border-default)", borderRadius: "var(--radius-md)", padding: 24, color: "var(--text-secondary)", fontSize: "var(--text-sm)" }}>
             No products yet. Create one with New product, or import a seed file below.
+            {canWrite && (
+              <SeedTools
+                onImport={() => { setSeedDialog(true); setSeedResult(null); }}
+                onUnseed={() => { setUnseedDialog(true); setUnseedResult(null); }}
+              />
+            )}
           </div>
         )}
       </div>
 
       <Dialog
         open={seedDialog}
-        title="Import metis-seed.json"
+        title="Import a seed file"
+        width="640px"
         onClose={() => {
           setSeedDialog(false);
           setSeedAction(null);
@@ -597,6 +604,7 @@ export default function ProductsIsland({ canWrite = true }) {
         }
       >
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <AgentPromptPanel />
           <div style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)", lineHeight: "var(--leading-body)" }}>
             Paste a `metis-seed/v1` document or load a local `.json` file. Validate runs the
             same seed-format checks as the loader; import uses the same add-only identity rules.
@@ -914,17 +922,78 @@ function ProductOverview({ product, features, score, capabilities }) {
   );
 }
 
+// The prompt a coding agent needs to describe a repo it can read as a seed
+// file: built by the backend from the canonical format spec and the live
+// inventory, so the agent reuses today's exact capability names.
+function AgentPromptPanel() {
+  const [prompt, setPrompt] = React.useState(null);
+  const [capabilities, setCapabilities] = React.useState(0);
+  const [state, setState] = React.useState("idle"); // idle | loading | copied | error
+  const [error, setError] = React.useState(null);
+
+  const load = async () => {
+    setState("loading");
+    setError(null);
+    try {
+      const r = await api("/ontology/agent-export-prompt");
+      setPrompt(r.prompt);
+      setCapabilities(r.capabilities);
+      return r.prompt;
+    } catch (e) {
+      setError(`Couldn't build the prompt: ${e.message}`);
+      setState("error");
+      return null;
+    }
+  };
+  const copy = async () => {
+    const text = prompt ?? (await load());
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      setState("copied");
+    } catch {
+      setState("idle");
+      setError("Your browser blocked copying. Select the prompt below and copy it by hand.");
+    }
+  };
+
+  return (
+    <div style={{ border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", padding: 14, background: "var(--surface-inset)", display: "flex", flexDirection: "column", gap: 8 }}>
+      <div style={{ fontSize: "var(--text-sm)", fontWeight: "var(--weight-semibold)", color: "var(--text-heading)" }}>No file yet? Have a coding agent write one</div>
+      <ol style={{ margin: 0, paddingLeft: 18, fontSize: "var(--text-sm)", color: "var(--text-body)", lineHeight: "var(--leading-body)" }}>
+        <li>Copy the prompt and paste it into a coding agent (Claude Code, Codex, Cursor…) opened in the repo.</li>
+        <li>It reads the repo and writes <code>metis-seed.json</code>, reusing the capability names metis already has.</li>
+        <li>Load that file below, Validate, then Import.</li>
+      </ol>
+      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+        <Button size="sm" variant="accent" disabled={state === "loading"} onClick={copy}>
+          {state === "loading" ? "Building the prompt…" : state === "copied" ? "Copied" : "Copy prompt for a coding agent"}
+        </Button>
+        {state === "copied" && <span role="status" style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>Includes {capabilities} capability names and the full seed format.</span>}
+      </div>
+      {error && <div role="alert" style={{ fontSize: "var(--text-xs)", color: "var(--danger-fg)" }}>{error}</div>}
+      <details onToggle={(e) => { if (e.currentTarget.open && !prompt) load().then(() => setState("idle")); }}>
+        <summary style={{ cursor: "pointer", fontSize: "var(--text-xs)", color: "var(--text-accent)" }}>See the prompt</summary>
+        <textarea readOnly aria-label="Prompt for a coding agent" value={prompt ?? "Building the prompt…"} rows={12}
+          style={{ marginTop: 8, width: "100%", boxSizing: "border-box", fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-body)", background: "var(--surface-card)", border: "1px solid var(--border-control)", borderRadius: "var(--radius-sm)", padding: 8 }} />
+      </details>
+    </div>
+  );
+}
+
 function SeedTools({ productName, saving, onExport, onImport, onUnseed }) {
   return (
     <section style={{ marginTop: 16, paddingTop: 16, borderTop: "1px solid var(--border-hairline)", display: "flex", flexDirection: "column", gap: 8 }}>
       <div style={{ fontSize: "var(--text-sm)", fontWeight: "var(--weight-semibold)", color: "var(--text-heading)" }}>Seed files</div>
       <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>
-        Move a project between metis instances as a metis-seed JSON file.
+        Add a repo by having a coding agent describe it as a metis-seed JSON file, or move a project between metis instances.
       </div>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-        <Button size="sm" variant="secondary" style={{ gap: 6 }} disabled={saving} onClick={onExport}>
-          <Icon name="arrow-right" size={13} />Export {productName}
-        </Button>
+        {productName && (
+          <Button size="sm" variant="secondary" style={{ gap: 6 }} disabled={saving} onClick={onExport}>
+            <Icon name="arrow-right" size={13} />Export {productName}
+          </Button>
+        )}
         <Button size="sm" variant="secondary" style={{ gap: 6 }} onClick={onImport}>
           <Icon name="paperclip" size={13} />Import a seed file
         </Button>

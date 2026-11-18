@@ -527,3 +527,28 @@ async def test_ontology_model_is_served_verbatim(db, client):
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/markdown")
     assert response.text == ONTOLOGY_MODEL.read_text(encoding="utf-8")
+
+
+@pytest.mark.asyncio
+async def test_agent_export_prompt_carries_the_spec_and_live_names(db, client):
+    """A coding agent gets one self-contained prompt: the canonical seed format
+    verbatim and the inventory's exact capability names, never a stale copy."""
+    from app.routers.questions import SEED_FORMAT
+
+    await seed(db)
+    inventory = (await client.get("/api/capabilities/inventory")).json()
+    response = await client.get("/api/ontology/agent-export-prompt")
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store"
+    body = response.json()
+    assert body["capabilities"] == len(inventory) > 0
+    prompt = body["prompt"]
+    assert SEED_FORMAT.read_text(encoding="utf-8").strip() in prompt
+    assert all(f"- {c['name']} (" in prompt for c in inventory)
+    assert "{{" not in prompt
+    # It must stand alone: no paths or tools that only exist on this machine.
+    assert "localhost" not in prompt.split("## The metis-seed/v1 format")[0]
+    assert "validate_seed.py" not in prompt
+
+    served = await client.get("/api/ontology/seed-format")
+    assert served.text == SEED_FORMAT.read_text(encoding="utf-8")

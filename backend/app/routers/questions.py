@@ -13,7 +13,7 @@ import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -28,6 +28,7 @@ from app.schemas.envelope import (
     Unresolved,
     envelope,
 )
+from app.services import capabilities as capability_service
 from app.services import stacks as stack_service
 from app.services import technologies as tech_service
 from app.services.slugs import by_slug
@@ -54,6 +55,10 @@ router = APIRouter(prefix="/api", tags=["questions"], dependencies=[Depends(cach
 ONTOLOGY_DIR = Path(__file__).resolve().parent.parent / "ontology"
 ONTOLOGY_MODEL = ONTOLOGY_DIR / "model.md"
 ADOPTION_POLICY = ONTOLOGY_DIR / "adoptions.md"
+#: The seed format: also read (through symlinks) by the metis-export and
+#: metis-seed-instance skills, so it stays one file.
+SEED_FORMAT = ONTOLOGY_DIR / "seed-format.md"
+AGENT_EXPORT_PROMPT = ONTOLOGY_DIR / "agent-export-prompt.md"
 
 
 def _serve(document: Path, label: str) -> PlainTextResponse:
@@ -420,3 +425,43 @@ def _why(best, surviving) -> str:
     runners = len(surviving) - 1
     tail = f"; {runners} other offer{'s' if runners != 1 else ''} ranked below" if runners else ""
     return ", ".join(reasons) + tail
+
+
+@router.get("/ontology/seed-format", response_class=PlainTextResponse)
+async def seed_format():
+    return _serve(SEED_FORMAT, "Seed format document")
+
+
+def _inventory_lines(entries) -> str:
+    by_id = {e.id: e for e in entries}
+    lines = []
+    for e in sorted(entries, key=lambda e: e.name.lower()):
+        parent = by_id.get(e.parent_id)
+        where = (
+            f"ours, used by {len(e.products)} product{'' if len(e.products) == 1 else 's'}, {e.maturity}"
+            if e.ours
+            else "known only from external products"
+        )
+        line = f"- {e.name} ({where}{f'; part of {parent.name}' if parent else ''})"
+        if e.description:
+            text = " ".join(e.description.split())
+            line += f": {text[:140]}{'…' if len(text) > 140 else ''}"
+        lines.append(line)
+    return "\n".join(lines) or "(The inventory is empty. Every capability you write is new.)"
+
+
+@router.get("/ontology/agent-export-prompt")
+async def agent_export_prompt(session: AsyncSession = Depends(get_db)):
+    """A self-contained prompt for any coding agent: describe the repo it can
+    read as a metis-seed/v1 file, reusing the inventory's exact names. Built on
+    each request from the live inventory, so it is never cached."""
+    for doc, label in ((AGENT_EXPORT_PROMPT, "Agent export prompt"), (SEED_FORMAT, "Seed format document")):
+        if not doc.is_file():
+            raise HTTPException(404, f"{label} is not on disk")
+    entries = await capability_service.inventory(session)
+    prompt = (
+        AGENT_EXPORT_PROMPT.read_text(encoding="utf-8")
+        .replace("{{INVENTORY}}", _inventory_lines(entries))
+        .replace("{{FORMAT_SPEC}}", SEED_FORMAT.read_text(encoding="utf-8").strip())
+    )
+    return JSONResponse({"prompt": prompt, "capabilities": len(entries)}, headers={"Cache-Control": "no-store"})

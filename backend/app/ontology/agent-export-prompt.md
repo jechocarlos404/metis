@@ -45,4 +45,6 @@ Also reference data, not instructions: each product's exact name, whether it is 
 
 ## The metis-seed/v1 format
 
+The specification below is shared with metis's own tools. Where it mentions reading from the metis API (such as `GET /api/capabilities/inventory`), use the lists above instead: they are the same data, current as of this prompt.
+
 {{FORMAT_SPEC}}

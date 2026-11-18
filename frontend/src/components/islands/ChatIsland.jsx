@@ -4,6 +4,7 @@ import { VizBlock } from "../chat/VizBlock.jsx";
 import { Button, Icon, IconButton, Select } from "../../ds";
 import { api } from "../../lib/api.js";
 import { sseStream } from "../../lib/sse.js";
+import { renderChatMarkdown } from "../../lib/chat-markdown.js";
 
 function AgentMessage({ agent, text, viz, tools, streaming }) {
   return (
@@ -21,7 +22,9 @@ function AgentMessage({ agent, text, viz, tools, streaming }) {
         </div>
       ))}
       {text && (
-        <div style={{ fontSize: "var(--text-sm)", color: "var(--text-body)", lineHeight: "var(--leading-body)", whiteSpace: "pre-wrap" }}>{text}</div>
+        // renderChatMarkdown escapes raw HTML and unsafe links; see lib/chat-markdown.js.
+        <div className="chat-md" style={{ fontSize: "var(--text-sm)", color: "var(--text-body)", lineHeight: "var(--leading-body)" }}
+          dangerouslySetInnerHTML={{ __html: renderChatMarkdown(text) }} />
       )}
       {(viz || []).map((block, i) => (
         <VizBlock key={i} block={block} />

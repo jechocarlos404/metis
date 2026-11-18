@@ -3,6 +3,9 @@ import { PageHeader } from "../shell/PageHeader.jsx";
 import { Badge, Button, Card, Checkbox, Dialog, Icon, Input, Select, StatusBadge, Tabs, Tag, TicketCard, Toast } from "../../ds";
 import { api } from "../../lib/api.js";
 import { openChatWithPrompt } from "../../lib/chat-launch.js";
+import { pressable } from "../../lib/pressable.js";
+import { useParamRestore, writeParams } from "../../lib/url-state.js";
+import { CoverageReport, ProductScore } from "../shared/coverage.jsx";
 
 export default function ProductsIsland({ canWrite = true }) {
   const [products, setProducts] = React.useState([]);
@@ -14,7 +17,9 @@ export default function ProductsIsland({ canWrite = true }) {
   const [strategies, setStrategies] = React.useState([]);
   const [capabilities, setCapabilities] = React.useState([]);
   const [bundles, setBundles] = React.useState([]);
-  const [tab, setTab] = React.useState("prd");
+  const [tab, setTab] = React.useState("overview");
+  const [features, setFeatures] = React.useState(null); // this product's features, from the graph layout
+  const [score, setScore] = React.useState(null);
   const [toast, setToast] = React.useState(null);
   const [ticketDialog, setTicketDialog] = React.useState(null); // null | {mode:'new'} | {mode:'edit', ticket}
   const [productDialog, setProductDialog] = React.useState(null); // null | {mode:'new'} | {mode:'edit'}
@@ -31,6 +36,9 @@ export default function ProductsIsland({ canWrite = true }) {
   const [saving, setSaving] = React.useState(false);
 
   const product = products.find((p) => p.id === productId);
+  // ?product=<id>: linkable from Goals and Inventory, and Back restores it.
+  useParamRestore("product", (v) => v && setProductId(v));
+  const selectProduct = (id) => { setProductId(id); setTab("overview"); writeParams({ product: id }, { push: true }); };
   const prd = decompositions[0];
   const strategy = strategies[0];
 
@@ -57,6 +65,12 @@ export default function ProductsIsland({ canWrite = true }) {
     setStrategies(strategyList);
     setCapabilities(capabilityList);
     setBundles(bundleList);
+    setFeatures(null);
+    setScore(null);
+    api("/graph/layout")
+      .then((layout) => setFeatures(layout.nodes.filter((n) => (n.product_ids ?? []).includes(id))))
+      .catch(() => setFeatures([]));
+    api(`/products/${id}/coverage`).then(setScore).catch(() => setScore(false));
   }, []);
 
   React.useEffect(() => {
@@ -103,14 +117,14 @@ export default function ProductsIsland({ canWrite = true }) {
       if (d.mode === "new") {
         const created = await api("/products", { method: "POST", body });
         await loadProducts();
-        setProductId(created.id);
+        selectProduct(created.id);
       } else {
         await api(`/products/${productId}`, { method: "PATCH", body });
         await loadProducts();
       }
       setProductDialog(null);
     } catch (e) {
-      showError("Spec save failed")(e);
+      showError("Product save failed")(e);
     } finally {
       setSaving(false);
     }
@@ -121,7 +135,7 @@ export default function ProductsIsland({ canWrite = true }) {
     try {
       await api(`/products/${productId}`, { method: "DELETE" });
       setProductDialog(null);
-      setToast({ tone: "ok", title: "Spec deleted" });
+      setToast({ tone: "ok", title: "Product deleted" });
       await loadProducts();
     } catch (e) {
       showError("Delete failed")(e);
@@ -332,53 +346,17 @@ export default function ProductsIsland({ canWrite = true }) {
     <>
       <PageHeader
         title="Products"
-        meta={product ? `${product.display_id} · v${product.version}${product.external ? " · external" : ""}` : "no products"}
+        meta={product ? `${product.name}${product.external ? " · external" : ""} · ${product.display_id}` : products.length ? "loading" : "no products"}
         actions={
           <>
             {products.length > 1 && (
-              <Select value={productId ?? ""} onChange={(e) => setProductId(e.target.value)} style={{ width: 240 }}
-                options={products.map((p) => ({ value: p.id, label: p.name }))} />
+              <Select aria-label="Product" value={productId ?? ""} onChange={(e) => selectProduct(e.target.value)} style={{ width: 240 }}
+                options={[...products].sort((a, b) => Number(a.external) - Number(b.external) || a.name.localeCompare(b.name))
+                  .map((p) => ({ value: p.id, label: p.external ? `${p.name} (external)` : p.name }))} />
             )}
             {canWrite && (
               <Button size="sm" variant="accent" style={{ gap: 6 }} onClick={openNewProduct}>
-                <Icon name="plus" size={13} />New spec
-              </Button>
-            )}
-            {canWrite && (
-              <Button
-                size="sm"
-                variant="secondary"
-                style={{ gap: 6 }}
-                disabled={!productId || saving}
-                onClick={exportSeed}
-              >
-                <Icon name="arrow-right" size={13} />Export seed
-              </Button>
-            )}
-            {canWrite && (
-              <Button
-                size="sm"
-                variant="secondary"
-                style={{ gap: 6 }}
-                onClick={() => {
-                  setSeedDialog(true);
-                  setSeedResult(null);
-                }}
-              >
-                <Icon name="paperclip" size={13} />Import seed
-              </Button>
-            )}
-            {canWrite && (
-              <Button
-                size="sm"
-                variant="secondary"
-                style={{ gap: 6 }}
-                onClick={() => {
-                  setUnseedDialog(true);
-                  setUnseedResult(null);
-                }}
-              >
-                <Icon name="trash" size={13} />Remove seeded project
+                <Icon name="plus" size={13} />New product
               </Button>
             )}
           </>
@@ -400,8 +378,8 @@ export default function ProductsIsland({ canWrite = true }) {
                       <Icon name="pencil" size={13} />Edit
                     </Button>
                   )}
-                  {canWrite && product.status === "draft" && (
-                    <Button size="sm" onClick={approveProduct}>Approve</Button>
+                  {canWrite && !product.external && product.status === "draft" && (
+                    <Button size="sm" onClick={approveProduct}>Approve spec</Button>
                   )}
                 </>
               }
@@ -411,7 +389,7 @@ export default function ProductsIsland({ canWrite = true }) {
               </span>
               <div style={{ marginTop: 14, display: "flex", flexDirection: "column", gap: 8 }}>
                 <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-secondary)", letterSpacing: "var(--tracking-caps)", textTransform: "uppercase" }}>
-                  Bundled capabilities
+                  Also offers (added by hand)
                 </div>
                 {bundles.length > 0 ? (
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
@@ -426,7 +404,7 @@ export default function ProductsIsland({ canWrite = true }) {
                   </div>
                 ) : (
                   <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>
-                    No explicit bundles yet. Add capabilities this product offers.
+                    None. Capabilities its features realize are listed under Overview; add one here only if the product offers it without a feature.
                   </div>
                 )}
                 {canWrite && addableBundles.length > 0 && (
@@ -449,15 +427,23 @@ export default function ProductsIsland({ canWrite = true }) {
 
             <Tabs
               tabs={[
-                { value: "prd", label: "PRD", count: epics.length },
-                { value: "tickets", label: "Tickets", count: tickets.length },
-                { value: "strategy", label: "Delivery strategy" },
+                { value: "overview", label: "Overview", count: features?.length },
+                // Spec, PRD and delivery planning only apply to products we build.
+                ...(product.external ? [] : [
+                  { value: "prd", label: "PRD", count: epics.length },
+                  { value: "tickets", label: "Tickets", count: tickets.length },
+                  { value: "strategy", label: "Delivery strategy" },
+                ]),
               ]}
               value={tab}
               onChange={setTab}
             />
 
-            {tab === "prd" && (
+            {tab === "overview" && (
+              <ProductOverview product={product} features={features} score={score} capabilities={capabilities} />
+            )}
+
+            {!product.external && tab === "prd" && (
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                 {canWrite && (
                   <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -508,13 +494,13 @@ export default function ProductsIsland({ canWrite = true }) {
                 })}
                 {epics.length === 0 && (
                   <div style={{ border: "1px dashed var(--border-default)", borderRadius: "var(--radius-md)", padding: 16, color: "var(--text-secondary)", fontSize: "var(--text-sm)" }}>
-                    No PRD yet. Ask `spec_decomposer` in Chat to decompose this Spec.
+                    No PRD yet. Use Decompose spec above to draft one in Chat.
                   </div>
                 )}
               </div>
             )}
 
-            {tab === "tickets" && (
+            {!product.external && tab === "tickets" && (
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                 {tickets.map((t) => (
                   <TicketCard key={t.id} id={t.display_id} title={t.title} description={t.description}
@@ -522,7 +508,7 @@ export default function ProductsIsland({ canWrite = true }) {
                     onClick={canWrite ? () => setTicketDialog({ mode: "edit", ticket: t, title: t.title, description: t.description || "", budget: t.context_budget, status: t.status, files: (t.affected_files || []).join(", ") }) : undefined} />
                 ))}
                 {canWrite && (
-                  <div onClick={() => setTicketDialog({ mode: "new", title: "", description: "", budget: "M", files: "" })}
+                  <div {...pressable(() => setTicketDialog({ mode: "new", title: "", description: "", budget: "M", files: "" }))}
                     style={{ border: "1px dashed var(--border-default)", borderRadius: "var(--radius-md)", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, color: "var(--text-secondary)", fontSize: "var(--text-sm)", minHeight: 90, cursor: "pointer" }}>
                     <Icon name="plus" size={14} /> New ticket
                   </div>
@@ -530,7 +516,7 @@ export default function ProductsIsland({ canWrite = true }) {
               </div>
             )}
 
-            {tab === "strategy" && (
+            {!product.external && tab === "strategy" && (
               <div style={{ background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", padding: 20, display: "flex", flexDirection: "column", gap: 10 }}>
                 {canWrite && (
                   <Button size="sm" variant="secondary" style={{ alignSelf: "flex-start", gap: 6 }}
@@ -554,15 +540,24 @@ export default function ProductsIsland({ canWrite = true }) {
                   </div>
                 ) : (
                   <div style={{ color: "var(--text-secondary)", fontSize: "var(--text-sm)" }}>
-                    No delivery strategy yet. Ask `strategist` in Chat to create one.
+                    No delivery strategy yet. Use Create strategy above to draft one in Chat.
                   </div>
                 )}
               </div>
             )}
+            {canWrite && (
+              <SeedTools
+                productName={product.name}
+                saving={saving}
+                onExport={exportSeed}
+                onImport={() => { setSeedDialog(true); setSeedResult(null); }}
+                onUnseed={() => { setUnseedDialog(true); setUnseedResult(null); }}
+              />
+            )}
           </div>
         ) : (
           <div style={{ maxWidth: 860, border: "1px dashed var(--border-default)", borderRadius: "var(--radius-md)", padding: 24, color: "var(--text-secondary)", fontSize: "var(--text-sm)" }}>
-            No products yet. Ask `spec_decomposer` in Chat to create a Spec from a product goal.
+            No products yet. Create one with New product, or import a seed file below.
           </div>
         )}
       </div>
@@ -776,7 +771,7 @@ export default function ProductsIsland({ canWrite = true }) {
             {ticketDialog?.mode === "edit" && (
               <Button size="sm" variant={confirmingTicketDelete ? "danger" : "secondary"} disabled={saving}
                 style={{ marginRight: "auto", gap: 6 }}
-                onClick={() => (confirmingTicketDelete ? deleteTicket() : setConfirmingTicketDelete(true))}>
+                onClick={(e) => (confirmingTicketDelete ? (e.detail > 1 ? null : deleteTicket()) : setConfirmingTicketDelete(true))}>
                 <Icon name="trash" size={13} />{confirmingTicketDelete ? "Confirm delete" : "Delete"}
               </Button>
             )}
@@ -796,7 +791,7 @@ export default function ProductsIsland({ canWrite = true }) {
               options={[{ value: "S", label: "S — single file change" }, { value: "M", label: "M — 2-4 files" }, { value: "L", label: "L — must be split" }]} />
             {ticketDialog.mode === "edit" && (
               <Select label="Status" value={ticketDialog.status} onChange={(e) => setTicketDialog({ ...ticketDialog, status: e.target.value })}
-                options={["pending", "in_progress", "done"]} />
+                options={[{ value: "pending", label: "planned" }, { value: "in_progress", label: "in progress" }, { value: "done", label: "done" }]} />
             )}
           </div>
         )}
@@ -804,20 +799,20 @@ export default function ProductsIsland({ canWrite = true }) {
 
       <Dialog
         open={productDialog != null}
-        title={productDialog?.mode === "new" ? "New spec" : `Edit ${product?.display_id ?? ""}`}
+        title={productDialog?.mode === "new" ? "New product" : `Edit ${product?.name ?? ""}`}
         onClose={() => setProductDialog(null)}
         footer={
           <>
             {productDialog?.mode === "edit" && (
               <Button size="sm" variant={confirmingDelete ? "danger" : "secondary"} disabled={saving}
                 style={{ marginRight: "auto", gap: 6 }}
-                onClick={() => (confirmingDelete ? deleteProduct() : setConfirmingDelete(true))}>
+                onClick={(e) => (confirmingDelete ? (e.detail > 1 ? null : deleteProduct()) : setConfirmingDelete(true))}>
                 <Icon name="trash" size={13} />{confirmingDelete ? "Confirm delete" : "Delete"}
               </Button>
             )}
             <Button size="sm" variant="secondary" onClick={() => setProductDialog(null)}>Cancel</Button>
             <Button size="sm" variant="accent" disabled={saving || !productDialog?.name?.trim()} onClick={saveProduct}>
-              {productDialog?.mode === "new" ? "Create spec" : "Save"}
+              {productDialog?.mode === "new" ? "Create product" : "Save"}
             </Button>
           </>
         }
@@ -851,4 +846,98 @@ function formatCounts(collection, counts) {
     .map(([action, value]) => `${value} ${action}`)
     .join(", ");
   return detail ? `${collection}: ${detail}` : null;
+}
+
+function ProductOverview({ product, features, score, capabilities }) {
+  const capById = React.useMemo(() => new Map(capabilities.map((c) => [c.id, c])), [capabilities]);
+  if (features == null) {
+    return <div role="status" style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>Loading {product.name}'s features…</div>;
+  }
+  const realized = new Map();
+  for (const f of features) for (const cid of f.capability_ids ?? []) realized.set(cid, (realized.get(cid) ?? 0) + 1);
+  const caps = [...realized.entries()]
+    .map(([id, n]) => ({ cap: capById.get(id), n }))
+    .filter((x) => x.cap)
+    .sort((a, b) => b.n - a.n || a.cap.name.localeCompare(b.cap.name));
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <section style={{ background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)" }}>
+        <div style={{ padding: "12px 16px", fontSize: "var(--text-sm)", fontWeight: "var(--weight-semibold)", color: "var(--text-heading)" }}>
+          {product.external ? `How much of ${product.name} we could build` : "Coverage"}
+        </div>
+        {score == null && <div role="status" style={{ padding: "0 16px 14px", fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>Scoring…</div>}
+        {score === false && <div style={{ padding: "0 16px 14px", fontSize: "var(--text-xs)", color: "var(--danger-fg)" }}>Couldn't score this product.</div>}
+        {score && score.report && (
+          <div style={{ padding: "0 16px 4px", fontSize: "var(--text-sm)", color: "var(--text-heading)" }}>
+            We have {score.report.existing} of the {score.report.needed} capabilities its features need · {score.report.mature} proven (beta or later)
+          </div>
+        )}
+        {score && <ProductScore score={score} />}
+        {score && score.report && (
+          <details style={{ borderTop: "1px solid var(--border-hairline)" }}>
+            <summary style={{ padding: "10px 16px", cursor: "pointer", fontSize: "var(--text-xs)", color: "var(--text-accent)" }}>Show the capability-by-capability breakdown</summary>
+            <CoverageReport report={score.report} onCandidate={() => {}} />
+          </details>
+        )}
+        {score && !score.report && <div style={{ padding: "0 16px 14px", fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>No capability links known for this product yet.</div>}
+      </section>
+
+      <section>
+        <div style={{ fontSize: "var(--text-sm)", fontWeight: "var(--weight-semibold)", color: "var(--text-heading)", marginBottom: 8 }}>
+          Features · {features.length}
+        </div>
+        {features.length === 0 ? (
+          <div style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>No features recorded for {product.name} yet.</div>
+        ) : (
+          <div style={{ background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)" }}>
+            {features.map((f, i) => (
+              <a key={f.id} href={`/features?feature=${f.id}`}
+                style={{ display: "flex", gap: 12, alignItems: "center", padding: "9px 14px", borderBottom: i < features.length - 1 ? "1px solid var(--border-hairline)" : "none", textDecoration: "none", fontSize: "var(--text-sm)" }}>
+                <span style={{ flex: 1, minWidth: 0, color: "var(--text-heading)" }}>{f.name}</span>
+                <span style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", maxWidth: "45%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {(f.capability_ids ?? []).map((c) => capById.get(c)?.name).filter(Boolean).join(", ") || "capabilities not identified"}
+                </span>
+                {!product.external && <StatusBadge status={f.status} />}
+              </a>
+            ))}
+          </div>
+        )}
+      </section>
+
+      {caps.length > 0 && (
+        <section>
+          <div style={{ fontSize: "var(--text-sm)", fontWeight: "var(--weight-semibold)", color: "var(--text-heading)", marginBottom: 8 }}>
+            Capabilities its features realize · {caps.length}
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "6px 14px", fontSize: "var(--text-sm)" }}>
+            {caps.map(({ cap, n }) => (
+              <a key={cap.id} href={`/capabilities/${cap.slug}`}>{cap.name}<span style={{ color: "var(--text-secondary)", fontFamily: "var(--font-mono)", fontSize: 11 }}> {n}</span></a>
+            ))}
+          </div>
+        </section>
+      )}
+    </div>
+  );
+}
+
+function SeedTools({ productName, saving, onExport, onImport, onUnseed }) {
+  return (
+    <section style={{ marginTop: 16, paddingTop: 16, borderTop: "1px solid var(--border-hairline)", display: "flex", flexDirection: "column", gap: 8 }}>
+      <div style={{ fontSize: "var(--text-sm)", fontWeight: "var(--weight-semibold)", color: "var(--text-heading)" }}>Seed files</div>
+      <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>
+        Move a project between metis instances as a metis-seed JSON file.
+      </div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <Button size="sm" variant="secondary" style={{ gap: 6 }} disabled={saving} onClick={onExport}>
+          <Icon name="arrow-right" size={13} />Export {productName}
+        </Button>
+        <Button size="sm" variant="secondary" style={{ gap: 6 }} onClick={onImport}>
+          <Icon name="paperclip" size={13} />Import a seed file
+        </Button>
+        <Button size="sm" variant="secondary" style={{ gap: 6 }} onClick={onUnseed}>
+          <Icon name="trash" size={13} />Remove a seeded project
+        </Button>
+      </div>
+    </section>
+  );
 }

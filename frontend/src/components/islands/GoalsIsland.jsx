@@ -1,6 +1,6 @@
 import React from "react";
 import { PageHeader } from "../shell/PageHeader.jsx";
-import { Badge, Button, Dialog, Icon, IconButton, Input, PriorityBadge, Select, StatusBadge } from "../../ds";
+import { Button, Dialog, Icon, IconButton, Input, PriorityBadge, Select, StatusBadge } from "../../ds";
 import { api } from "../../lib/api.js";
 
 const EMPTY_DRAFT = { goal_type: "product", parent_goal_id: "", title: "", description: "", success_criteria: "", priority: "3", status: "pending" };
@@ -17,11 +17,12 @@ export default function GoalsIsland({ canWrite = true }) {
   const load = React.useCallback(async () => {
     const [goalList, products] = await Promise.all([api("/goals"), api("/products")]);
     setGoals(goalList);
-    const counts = {};
+    // Per goal, the products that serve it, so each goal links to its own product.
+    const byGoal = {};
     for (const p of products) {
-      if (p.goal_id) counts[p.goal_id] = (counts[p.goal_id] || 0) + 1;
+      if (p.goal_id) (byGoal[p.goal_id] ??= []).push(p);
     }
-    setProductCounts(counts);
+    setProductCounts(byGoal);
   }, []);
 
   React.useEffect(() => {
@@ -192,7 +193,7 @@ export default function GoalsIsland({ canWrite = true }) {
             {dialog?.mode === "edit" && (
               <Button size="sm" variant={confirmingDelete ? "danger" : "secondary"} disabled={saving}
                 style={{ marginRight: "auto", gap: 6 }}
-                onClick={() => (confirmingDelete ? remove() : setConfirmingDelete(true))}>
+                onClick={(e) => (confirmingDelete ? (e.detail > 1 ? null : remove()) : setConfirmingDelete(true))}>
                 <Icon name="trash" size={13} />{confirmingDelete ? "Confirm delete" : "Delete"}
               </Button>
             )}
@@ -259,7 +260,7 @@ export default function GoalsIsland({ canWrite = true }) {
               label="Status"
               value={draft.status}
               onChange={(e) => setDraft({ ...draft, status: e.target.value })}
-              options={["pending", "in_progress", "done"]}
+              options={[{ value: "pending", label: "planned" }, { value: "in_progress", label: "in progress" }, { value: "done", label: "done" }]}
             />
           )}
         </div>
@@ -276,7 +277,7 @@ function GoalList({ goals, productCounts, editButton, emptyText }) {
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         {goals.map((g) => {
-          const specs = productCounts[g.id] || 0;
+          const served = productCounts[g.id] || [];
           return (
             <div key={g.id} style={{ display: "flex", alignItems: "center", gap: 14, background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", boxShadow: "var(--shadow-card)", padding: "14px 18px" }}>
               <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-secondary)", width: 46 }}>{g.display_id}</span>
@@ -287,7 +288,9 @@ function GoalList({ goals, productCounts, editButton, emptyText }) {
                 )}
               </div>
               {g.priority != null && <PriorityBadge priority={g.priority} />}
-              {specs > 0 && <Badge tone="accent">{specs} spec{specs > 1 ? "s" : ""}</Badge>}
+              {served.map((p) => (
+                <a key={p.id} href={`/products?product=${p.id}`} style={{ fontSize: "var(--text-xs)", whiteSpace: "nowrap" }}>{p.name}</a>
+              ))}
               <StatusBadge status={g.status} />
               {editButton(g)}
             </div>

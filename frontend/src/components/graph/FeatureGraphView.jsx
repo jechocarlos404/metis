@@ -12,7 +12,7 @@ const useIsomorphicLayoutEffect = typeof window !== "undefined" ? React.useLayou
 const EDGE_KINDS = ["DEPENDS_ON", "BLOCKS", "RELATES_TO"];
 const STATUS_DOT = { pending: "var(--text-secondary)", in_progress: "var(--warn-fg)", done: "var(--ok-fg)" };
 
-export function FeatureGraphView({ layout, selectedId, onSelect, impactIds, cutStates, fadedIds, style }) {
+export function FeatureGraphView({ layout, selectedId, onSelect, impactIds, cutStates, fadedIds, style, fitKey }) {
   const svgRef = React.useRef(null);
   const viewportRef = React.useRef(null);
   const engineRef = React.useRef(null);
@@ -85,6 +85,14 @@ export function FeatureGraphView({ layout, selectedId, onSelect, impactIds, cutS
     }
   }, [graphData]);
 
+  // A new filter shows a different set of nodes: frame them.
+  const lastFitKey = React.useRef(fitKey);
+  useIsomorphicLayoutEffect(() => {
+    if (lastFitKey.current === fitKey) return;
+    lastFitKey.current = fitKey;
+    engineRef.current?.fitToView();
+  }, [fitKey]);
+
   // With a cut overlay active, tier coloring owns the canvas — selection no
   // longer dims non-neighbors (hover still focuses transiently).
   const focusId = hoveredId ?? (cutStates != null ? null : selectedId) ?? null;
@@ -140,6 +148,7 @@ export function FeatureGraphView({ layout, selectedId, onSelect, impactIds, cutS
                 key={n.id}
                 node={n}
                 isSelected={selectedId === n.id}
+                isTabStop={selectedId ? selectedId === n.id : n.id === graphData.nodes[0]?.id}
                 isHovered={hoveredId === n.id}
                 isDimmed={focusId != null && focusId !== n.id && !focusNeighbors?.has(n.id)}
                 isFaded={fadedIds ? fadedIds.has(n.id) : false}
@@ -189,7 +198,7 @@ export function FeatureGraphView({ layout, selectedId, onSelect, impactIds, cutS
   );
 }
 
-function FeatureNode({ node, isSelected, isHovered, isDimmed, isFaded, isImpacted, cutState, isPinned, onSelect, onHoverChange, registerEl }) {
+function FeatureNode({ node, isSelected, isTabStop, isHovered, isDimmed, isFaded, isImpacted, cutState, isPinned, onSelect, onHoverChange, registerEl }) {
   const accent = `var(${nodeAccentVar(node.layer)})`;
   const ring = isSelected ? "var(--accent)"
     : isImpacted ? "var(--danger-fg)"
@@ -204,7 +213,10 @@ function FeatureNode({ node, isSelected, isHovered, isDimmed, isFaded, isImpacte
     <g
       ref={registerEl}
       data-node-id={node.id}
-      tabIndex={0}
+      // One tab stop for the whole graph (the selected node, else the first);
+      // the Directory tab is the keyboard route through every feature.
+      tabIndex={isTabStop ? 0 : -1}
+      className="graph-node"
       role="button"
       aria-label={node.name}
       aria-pressed={isSelected}
@@ -216,7 +228,7 @@ function FeatureNode({ node, isSelected, isHovered, isDimmed, isFaded, isImpacte
           onSelect && onSelect(node.id);
         }
       }}
-      style={{ opacity: isDimmed || isDeferred ? 0.25 : 1, transition: "opacity var(--dur-med) var(--ease-out)", cursor: "grab", outline: "none" }}
+      style={{ opacity: isDimmed || isDeferred ? 0.25 : 1, transition: "opacity var(--dur-med) var(--ease-out)", cursor: "grab" }}
     >
       <rect
         x={-NODE_W / 2} y={-NODE_H / 2} width={NODE_W} height={NODE_H} rx={8}

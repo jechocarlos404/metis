@@ -265,6 +265,7 @@ export default function DataIsland() {
         <div style={{ background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", overflow: "hidden" }}>
           <div style={{ display: "grid", gridTemplateColumns: cols, alignItems: "center", gap: 8, padding: "8px 16px", borderBottom: "1px solid var(--border-hairline)", ...TH }}>
             <Checkbox
+              aria-label={allSelected ? "Deselect all rows" : "Select all rows"}
               checked={allSelected}
               onChange={() => setSelected(allSelected ? new Set() : new Set(rows.map((r) => r.id)))}
             />
@@ -280,11 +281,11 @@ export default function DataIsland() {
                 padding: "10px 16px", fontSize: "var(--text-sm)",
                 borderBottom: i < rows.length - 1 ? "1px solid var(--border-hairline)" : "none",
                 cursor: ent.editable ? "pointer" : "default",
-                background: selected.has(row.id) ? "var(--surface-raised)" : "transparent",
+                background: selected.has(row.id) ? "var(--accent-wash)" : "transparent",
               }}
             >
               <span onClick={(e) => e.stopPropagation()}>
-                <Checkbox checked={selected.has(row.id)} onChange={() => toggle(row.id)} />
+                <Checkbox aria-label={`Select ${ent.title?.(row) ?? row.name ?? row.title ?? "row"}`} checked={selected.has(row.id)} onChange={() => toggle(row.id)} />
               </span>
               {ent.columns.map((c) => {
                 const value = c.render(row, refs);
@@ -320,7 +321,7 @@ export default function DataIsland() {
             {dialog?.mode === "edit" && (
               <Button size="sm" variant={confirming ? "danger" : "secondary"} disabled={saving}
                 style={{ marginRight: "auto", gap: 6 }}
-                onClick={() => (confirming ? removeOne() : setConfirming(true))}>
+                onClick={(e) => (confirming ? (e.detail > 1 ? null : removeOne()) : setConfirming(true))}>
                 <Icon name="trash" size={13} />{confirming ? "Confirm delete" : "Delete"}
               </Button>
             )}
@@ -353,7 +354,7 @@ export default function DataIsland() {
             <Button size="sm" variant={confirming ? "danger" : "secondary"}
               disabled={saving || !previewData}
               style={{ marginRight: "auto", gap: 6 }}
-              onClick={() => (confirming ? runBulkDelete() : setConfirming(true))}>
+              onClick={(e) => (confirming ? (e.detail > 1 ? null : runBulkDelete()) : setConfirming(true))}>
               <Icon name="trash" size={13} />
               {confirming ? `Confirm — delete ${previewData?.total_rows ?? 0} rows` : "Delete"}
             </Button>

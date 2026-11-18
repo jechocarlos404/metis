@@ -62,6 +62,30 @@ function Empty({ children }) {
   );
 }
 
+const STATUS_LABEL = { pending: "planned", in_progress: "in progress", done: "done" };
+
+function Realization({ r }) {
+  return (
+    <Row>
+      <span style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 2 }}>
+        {r.id ? (
+          <a href={`/features?feature=${r.id}`} style={{ fontSize: "var(--text-sm)", color: "var(--text-heading)" }}>{r.feature}</a>
+        ) : (
+          <span style={{ fontSize: "var(--text-sm)", color: "var(--text-heading)" }}>{r.feature}</span>
+        )}
+        {r.via && <span style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>through {r.via}</span>}
+      </span>
+      {r.tickets > 0 && <span style={MONO}>{r.tickets} ticket{r.tickets === 1 ? "" : "s"}</span>}
+      {r.product_name && <span style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>{r.product_name}</span>}
+      {!r.external && (
+        <Badge tone={r.status === "done" ? "ok" : r.status === "in_progress" ? "accent" : "neutral"}>
+          {STATUS_LABEL[r.status] ?? r.status}
+        </Badge>
+      )}
+    </Row>
+  );
+}
+
 export default function CapabilitySupplyIsland({ slug }) {
   const [envelope, setEnvelope] = React.useState(null);
   const [capability, setCapability] = React.useState(null);
@@ -91,11 +115,16 @@ export default function CapabilitySupplyIsland({ slug }) {
     );
   }
   if (!envelope) {
-    return <div style={{ padding: "var(--space-6)", ...MICRO }}>loading</div>;
+    return <div role="status" style={{ padding: "var(--space-6)", fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>Loading {slug}…</div>;
   }
 
   const offers = envelope.answer;
   const realizations = envelope.realizations ?? [];
+  // Same rule as the Inventory: our features, sub-capabilities included.
+  // External products' features are listed apart and not counted.
+  const ours = realizations.filter((r) => !r.external);
+  const theirs = realizations.filter((r) => r.external);
+  const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
   const unresolved = envelope.unresolved ?? [];
 
   return (
@@ -104,7 +133,7 @@ export default function CapabilitySupplyIsland({ slug }) {
         title={capability?.name ?? slug}
         meta={
           <span style={MONO}>
-            {slug} · {offers.length} offer(s) · {realizations.length} feature(s) ·{" "}
+            {plural(ours.length, "feature")} of ours · {offers.length === 1 ? "1 technology" : `${offers.length} technologies`} ·{" "}
             {formatAsOf(envelope.as_of)}
           </span>
         }
@@ -124,10 +153,8 @@ export default function CapabilitySupplyIsland({ slug }) {
             }}
           >
             <span style={{ flex: 1, textWrap: "pretty" }}>
-              A Capability is the exchange currency. A Feature{" "}
-              <code style={MONO}>REALIZES</code> it — the build side. A Technology{" "}
-              <code style={MONO}>SATISFIES</code> it — the buy side. Same node, same
-              currency, which is what makes build-vs-buy a query rather than a meeting.
+              Left: features that do this, which we built. Right: technologies that
+              could do it, which we'd buy. Seeing both is how you decide build or buy.
             </span>
             <button
               type="button"
@@ -164,27 +191,22 @@ export default function CapabilitySupplyIsland({ slug }) {
           }}
         >
           <section style={FRAME_HALF}>
-            <div style={MICRO}>build · REALIZES</div>
-            {realizations.length === 0 ? (
-              <Empty>No feature realizes this capability yet.</Empty>
+            <div style={MICRO}>build · {plural(ours.length, "feature")} of ours, sub-capabilities included</div>
+            {ours.length === 0 ? (
+              <Empty>None of our features does this yet.</Empty>
             ) : (
-              realizations.map((r) => (
-                <Row key={r.feature}>
-                  <span style={{ flex: 1, fontSize: "var(--text-sm)", color: "var(--text-heading)", minWidth: 0 }}>
-                    {r.feature}
-                  </span>
-                  <span style={MONO}>{r.tickets} ticket(s)</span>
-                  {r.product && <span style={MONO}>{r.product}</span>}
-                  <Badge tone={r.status === "done" ? "ok" : r.status === "in_progress" ? "accent" : "neutral"}>
-                    {r.status}
-                  </Badge>
-                </Row>
-              ))
+              ours.map((r) => <Realization key={r.id ?? r.feature} r={r} />)
+            )}
+            {theirs.length > 0 && (
+              <>
+                <div style={{ ...MICRO, marginTop: "var(--space-3)" }}>also in external products · not counted</div>
+                {theirs.map((r) => <Realization key={r.id ?? r.feature} r={r} />)}
+              </>
             )}
           </section>
 
           <section style={FRAME_HALF}>
-            <div style={MICRO}>buy · SATISFIES</div>
+            <div style={MICRO}>buy · technologies</div>
             {offers.length === 0 ? (
               <Empty>
                 {unresolved[0]?.reason ?? "Nothing satisfies this capability."}
@@ -229,24 +251,6 @@ export default function CapabilitySupplyIsland({ slug }) {
           </section>
         </div>
 
-        <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-3)" }}>
-          <div style={{ ...CARD, flex: "1 1 300px", padding: "var(--space-4)" }}>
-            <div style={MICRO}>why the bound offer stays in the list</div>
-            <p style={{ margin: "8px 0 0", fontSize: "var(--text-sm)", color: "var(--text-secondary)", textWrap: "pretty" }}>
-              Filtering out the current binding would make every alternative
-              argue against nothing. You cannot re-evaluate a decision you
-              cannot see, so it is marked in place rather than removed.
-            </p>
-          </div>
-          <div style={{ ...CARD, flex: "1 1 300px", padding: "var(--space-4)" }}>
-            <div style={MICRO}>why workarounds are shown</div>
-            <p style={{ margin: "8px 0 0", fontSize: "var(--text-sm)", color: "var(--text-secondary)", textWrap: "pretty" }}>
-              <code style={MONO}>workaround</code> means it can be made to do
-              this and someone will be surprised. That is a known ceiling worth
-              seeing — hiding it just moves the surprise later.
-            </p>
-          </div>
-        </div>
       </div>
     </div>
   );

@@ -1,11 +1,12 @@
 import React from "react";
 import { StatusBadge } from "./StatusBadge.jsx";
 import { BudgetBadge } from "./BudgetBadge.jsx";
+import { pressable } from "../../lib/pressable.js";
 
 export function TicketCard({ id, title, description, status = "pending", budget = "M", files = [], onClick, style }) {
   const [hover, setHover] = React.useState(false);
   return (
-    <div onClick={onClick}
+    <div {...(onClick ? pressable(onClick) : {})}
       onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
       style={{
         background: "var(--surface-card)",

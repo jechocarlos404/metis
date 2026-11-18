@@ -2,6 +2,7 @@ import React from "react";
 import { PageHeader } from "../shell/PageHeader.jsx";
 import { Badge, Button, Dialog, Input } from "../../ds";
 import { api } from "../../lib/api.js";
+import { statusLabel } from "../../lib/words.js";
 
 // A journey is an ordered path of features. The map draws the steps in order
 // across the top and the capabilities they stand on below, so it shows at a
@@ -50,6 +51,7 @@ export default function JourneysIsland({ canWrite }) {
   const [features, setFeatures] = React.useState([]);
   const [products, setProducts] = React.useState([]);
   const [editing, setEditing] = React.useState(null); // draft or null
+  const [inventory, setInventory] = React.useState([]);
   const [confirmDelete, setConfirmDelete] = React.useState(false);
   const [error, setError] = React.useState(null);
 
@@ -61,8 +63,8 @@ export default function JourneysIsland({ canWrite }) {
 
   React.useEffect(() => {
     loadList().catch((e) => setError(e.message));
-    Promise.all([api("/features"), api("/products")])
-      .then(([f, p]) => { setFeatures(f); setProducts(p); })
+    Promise.all([api("/features"), api("/products"), api("/capabilities/inventory")])
+      .then(([f, p, inv]) => { setFeatures(f); setProducts(p); setInventory(inv); })
       .catch((e) => setError(e.message));
   }, [loadList]);
 
@@ -137,13 +139,24 @@ export default function JourneysIsland({ canWrite }) {
       <PageHeader
         title="Journeys"
         meta={journeys ? `${journeys.length} journey${journeys.length === 1 ? "" : "s"}` : "loading…"}
-        actions={canWrite && <Button size="sm" onClick={startNew}>New journey</Button>}
+        actions={canWrite && !editing && <Button size="sm" variant="accent" onClick={startNew}>New journey</Button>}
       />
       {error && <div style={{ padding: "8px 24px", color: "var(--danger-fg)", fontSize: "var(--text-xs)" }}>{error}</div>}
-      <div style={{ display: "grid", gridTemplateColumns: "260px minmax(0,1fr)", gap: 16, padding: "16px 24px", alignItems: "start" }}>
+      <div style={{ flex: 1, minHeight: 0, overflowY: "auto", display: "grid", gridTemplateColumns: "260px minmax(0,1fr)", gap: 16, padding: "16px 24px", alignItems: "start" }}>
         <JourneyList journeys={journeys} selected={selected} onSelect={setSelected} canWrite={canWrite} onNew={startNew} />
         <div style={{ minWidth: 0 }}>
-          {analysis && (
+          {editing && (
+            <JourneyEditor
+              key={editing.id ?? "new"}
+              draft={editing}
+              features={features}
+              productById={productById}
+              inventory={inventory}
+              onCancel={() => setEditing(null)}
+              onSave={save}
+            />
+          )}
+          {!editing && analysis && (
             <JourneyDetail
               analysis={analysis}
               canWrite={canWrite}
@@ -151,18 +164,9 @@ export default function JourneysIsland({ canWrite }) {
               onDelete={() => setConfirmDelete(true)}
             />
           )}
-          {journeys && journeys.length === 0 && <EmptyState canWrite={canWrite} onNew={startNew} />}
+          {!editing && journeys && journeys.length === 0 && <EmptyState canWrite={canWrite} onNew={startNew} />}
         </div>
       </div>
-      {editing && (
-        <JourneyEditor
-          draft={editing}
-          features={features}
-          productById={productById}
-          onCancel={() => setEditing(null)}
-          onSave={save}
-        />
-      )}
       {confirmDelete && analysis && (
         <Dialog open title="Delete journey" onClose={() => setConfirmDelete(false)}
           footer={<>
@@ -188,7 +192,7 @@ function EmptyState({ canWrite, onNew }) {
         and a step nobody has built yet can name the capabilities it would need. Metis then shows
         which steps exist today, which we could build from what we have, and what’s missing.
       </div>
-      {canWrite && <div><Button size="sm" onClick={onNew}>New journey</Button></div>}
+      {canWrite && <div><Button size="sm" variant="accent" onClick={onNew}>New journey</Button></div>}
     </div>
   );
 }
@@ -438,12 +442,30 @@ function StepCard({ step, x, dim, onEnter, onLeave }) {
   );
 }
 
-function JourneyEditor({ draft: initial, features, productById, onCancel, onSave }) {
+// Mirrors the backend's slugify: step needs resolve by exact slug.
+const slugify = (v) => v.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+
+// Up to three inventory names close to what was typed, for "did you mean".
+function nearNames(name, inventory) {
+  const words = slugify(name).split("-").filter((w) => w.length > 2);
+  if (words.length === 0) return [];
+  return inventory
+    .map((c) => ({ c, hits: words.filter((w) => c.slug.includes(w)).length }))
+    .filter((x) => x.hits > 0)
+    .sort((a, b) => b.hits - a.hits || Number(b.c.ours) - Number(a.c.ours))
+    .slice(0, 3)
+    .map((x) => x.c);
+}
+
+function JourneyEditor({ draft: initial, features, productById, inventory, onCancel, onSave }) {
   const [draft, setDraft] = React.useState(initial);
   const [query, setQuery] = React.useState("");
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState(null);
+  const [confirmDiscard, setConfirmDiscard] = React.useState(false);
   const featureById = React.useMemo(() => new Map(features.map((f) => [f.id, f])), [features]);
+  const bySlug = React.useMemo(() => new Map(inventory.map((c) => [c.slug, c])), [inventory]);
+  const dirty = JSON.stringify(draft) !== JSON.stringify(initial);
 
   const set = (patch) => setDraft((d) => ({ ...d, ...patch }));
   const setStep = (i, patch) => setDraft((d) => ({ ...d, steps: d.steps.map((s, k) => (k === i ? { ...s, ...patch } : s)) }));
@@ -459,20 +481,37 @@ function JourneyEditor({ draft: initial, features, productById, onCancel, onSave
     setDraft((d) => ({ ...d, steps: [...d.steps, { feature_id: f.id, label: f.name, needs: "", note: "" }] }));
     setQuery("");
   };
-  const addUnbuilt = () => setDraft((d) => ({ ...d, steps: [...d.steps, { feature_id: null, label: query.trim(), needs: "", note: "" }] }));
+  const addUnbuilt = () => {
+    setDraft((d) => ({ ...d, steps: [...d.steps, { feature_id: null, label: query.trim(), needs: "", note: "" }] }));
+    setQuery("");
+  };
+  const replaceNeed = (i, from, to) => setStep(i, {
+    needs: draft.steps[i].needs.split(",").map((n) => (n.trim() === from ? to : n.trim())).filter(Boolean).join(", "),
+  });
+  const cancel = () => (dirty ? setConfirmDiscard(true) : onCancel());
 
-  const matches = React.useMemo(() => {
+  const allMatches = React.useMemo(() => {
     const q = query.trim().toLowerCase();
     if (q.length < 2) return [];
-    return features
-      .filter((f) => {
-        const p = productById.get(f.product_id)?.name ?? "";
-        return f.name.toLowerCase().includes(q) || p.toLowerCase().includes(q);
-      })
-      .slice(0, 8);
+    return features.filter((f) => {
+      const p = productById.get(f.product_id)?.name ?? "";
+      return f.name.toLowerCase().includes(q) || p.toLowerCase().includes(q);
+    });
   }, [query, features, productById]);
+  const matches = allMatches.slice(0, 8);
 
-  const valid = draft.name.trim() && draft.steps.every((s) => s.feature_id || s.label.trim());
+  // Live coverage while composing, by the same rule the saved analysis uses.
+  const verdicts = draft.steps.map((s) => {
+    if (s.feature_id) return "exists";
+    const needs = s.needs.split(",").map((n) => n.trim()).filter(Boolean);
+    if (needs.length === 0) return "unknown";
+    return needs.every((n) => bySlug.get(slugify(n))?.ours) ? "buildable" : "missing";
+  });
+  const tally = (v) => verdicts.filter((x) => x === v).length;
+
+  const blocker = !draft.name.trim() ? "Give the journey a name to save it."
+    : draft.steps.some((s) => !s.feature_id && !s.label.trim()) ? "Every step needs a name to save it."
+      : null;
 
   async function submit() {
     setSaving(true);
@@ -486,65 +525,120 @@ function JourneyEditor({ draft: initial, features, productById, onCancel, onSave
   }
 
   return (
-    <Dialog open title={draft.id ? "Edit journey" : "New journey"} onClose={onCancel} width="760px"
-      footer={<>
-        {error && <span style={{ color: "var(--danger-fg)", fontSize: "var(--text-xs)", marginRight: "auto" }}>{error}</span>}
-        <Button variant="secondary" onClick={onCancel}>Cancel</Button>
-        <Button disabled={!valid || saving} onClick={submit}>{saving ? "Saving…" : "Save"}</Button>
-      </>}>
-      <div style={{ display: "flex", flexDirection: "column", gap: 12, maxHeight: "70vh", overflowY: "auto" }}>
-        <Input label="Name" value={draft.name} onChange={(e) => set({ name: e.target.value })} placeholder="Plan a Saturday climb" />
-        <Input label="Who walks it (optional)" value={draft.persona} onChange={(e) => set({ persona: e.target.value })} placeholder="a rider new to the hills" />
-        <Input label="What they're after (optional)" value={draft.description} onChange={(e) => set({ description: e.target.value })} />
+    <div
+      onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); cancel(); } }}
+      style={{ ...PANEL, padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 12 }}>
+        <div style={{ fontSize: "var(--text-lg)", color: "var(--text-heading)", fontWeight: "var(--weight-semibold)", flex: 1 }}>
+          {draft.id ? "Edit journey" : "New journey"}
+        </div>
+        {draft.steps.length > 0 && (
+          <div role="status" style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>
+            {tally("exists")} of {draft.steps.length} exist today · {tally("buildable")} buildable from what we have · {tally("missing")} need something new
+            {tally("unknown") > 0 ? ` · ${tally("unknown")} not described yet` : ""}
+          </div>
+        )}
+      </div>
 
-        <div style={CAPS}>Steps, in order</div>
-        {draft.steps.length === 0 && <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>Add a feature from any product, or a step nobody has built yet.</div>}
-        {draft.steps.map((s, i) => {
-          const f = s.feature_id ? featureById.get(s.feature_id) : null;
-          const product = f ? productById.get(f.product_id) : null;
-          return (
-            <div key={i} style={{ display: "grid", gridTemplateColumns: "24px minmax(0,1fr) auto", gap: 8, alignItems: "start", padding: 10, border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-sm)", borderStyle: s.feature_id ? "solid" : "dashed" }}>
-              <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-secondary)", paddingTop: 9 }}>{String(i + 1).padStart(2, "0")}</div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                <Input value={s.label} onChange={(e) => setStep(i, { label: e.target.value })} placeholder={f?.name ?? "What the person does"} />
-                {s.feature_id ? (
-                  <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>
-                    Feature: {f?.name ?? "(removed)"}{product ? ` · ${product.name}${product.external ? " (external)" : ""}` : ""}
-                  </div>
-                ) : (
-                  <Input value={s.needs} onChange={(e) => setStep(i, { needs: e.target.value })}
-                    placeholder="Not built yet — capabilities it would need, comma-separated (optional)" />
-                )}
-                <Input value={s.note} onChange={(e) => setStep(i, { note: e.target.value })} placeholder="Note (optional)" />
-              </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                <Button size="sm" variant="ghost" disabled={i === 0} onClick={() => move(i, -1)} aria-label="Move up">↑</Button>
-                <Button size="sm" variant="ghost" disabled={i === draft.steps.length - 1} onClick={() => move(i, 1)} aria-label="Move down">↓</Button>
-                <Button size="sm" variant="ghost" onClick={() => drop(i)} aria-label="Remove step">✕</Button>
-              </div>
+      <Input autoFocus label="Name" value={draft.name} onChange={(e) => set({ name: e.target.value })} placeholder="e.g. Plan a Saturday climb" />
+      <Input label="Who walks it (optional)" value={draft.persona} onChange={(e) => set({ persona: e.target.value })} placeholder="e.g. a rider new to the hills" />
+      <Input label="What they're after (optional)" value={draft.description} onChange={(e) => set({ description: e.target.value })} />
+
+      <div style={CAPS}>Steps, in order</div>
+      {draft.steps.length === 0 && <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>Add a feature from any product, or a step nobody has built yet.</div>}
+      {draft.steps.map((s, i) => {
+        const f = s.feature_id ? featureById.get(s.feature_id) : null;
+        const product = f ? productById.get(f.product_id) : null;
+        const needs = s.needs.split(",").map((n) => n.trim()).filter(Boolean);
+        return (
+          <div key={i} style={{ display: "grid", gridTemplateColumns: "24px minmax(0,1fr) auto", gap: 8, alignItems: "start", padding: 10, border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-sm)", borderStyle: s.feature_id ? "solid" : "dashed" }}>
+            <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-secondary)", paddingTop: 9 }}>{i + 1}</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <Input aria-label={`Step ${i + 1} name`} value={s.label} onChange={(e) => setStep(i, { label: e.target.value })} placeholder={f?.name ?? "What the person does"} />
+              {s.feature_id ? (
+                <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>
+                  {f ? (product ? `${product.name}${product.external ? " (external)" : ""}` : "no product") : "This feature was removed"}
+                  {f && s.label.trim() && s.label.trim() !== f.name ? ` · feature: ${f.name}` : ""}
+                </div>
+              ) : (
+                <>
+                  <Input aria-label={`Step ${i + 1} capabilities`} value={s.needs} onChange={(e) => setStep(i, { needs: e.target.value })}
+                    placeholder="Not built yet: capabilities it would need, comma-separated (optional)" />
+                  {needs.length > 0 && (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 3, fontSize: "var(--text-xs)" }}>
+                      {needs.map((n) => {
+                        const hit = bySlug.get(slugify(n));
+                        const near = hit ? [] : nearNames(n, inventory);
+                        return (
+                          <div key={n} style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+                            <Badge tone={hit ? (hit.ours ? "ok" : "warn") : "neutral"}>{hit ? (hit.ours ? "ours" : "known elsewhere") : "not in inventory"}</Badge>
+                            <span style={{ color: "var(--text-body)" }}>{hit?.name ?? n}</span>
+                            {near.length > 0 && <span style={{ color: "var(--text-secondary)" }}>did you mean</span>}
+                            {near.map((c) => (
+                              <button key={c.id} type="button" onClick={() => replaceNeed(i, n, c.name)}
+                                style={{ font: "inherit", fontSize: 11, color: "var(--text-accent)", background: "var(--accent-wash)", border: "none", borderRadius: "var(--radius-pill)", padding: "1px 8px", cursor: "pointer" }}>
+                                {c.name}
+                              </button>
+                            ))}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </>
+              )}
+              <Input aria-label={`Step ${i + 1} note`} value={s.note} onChange={(e) => setStep(i, { note: e.target.value })} placeholder="Note (optional)" />
             </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <Button size="sm" variant="ghost" disabled={i === 0} onClick={() => move(i, -1)} aria-label={`Move step ${i + 1} up`}>↑</Button>
+              <Button size="sm" variant="ghost" disabled={i === draft.steps.length - 1} onClick={() => move(i, 1)} aria-label={`Move step ${i + 1} down`}>↓</Button>
+              <Button size="sm" variant="ghost" onClick={() => drop(i)} aria-label={`Remove step ${i + 1}`}>✕</Button>
+            </div>
+          </div>
+        );
+      })}
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 6, padding: 10, background: "var(--surface-inset)", borderRadius: "var(--radius-sm)" }}>
+        <Input label="Add a step" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search features by name or product…" />
+        {matches.map((f) => {
+          const p = productById.get(f.product_id);
+          return (
+            <button key={f.id} type="button" onClick={() => addFeature(f)}
+              style={{ textAlign: "left", border: "none", background: "transparent", cursor: "pointer", padding: "4px 2px", fontFamily: "var(--font-body)", fontSize: "var(--text-sm)", color: "var(--text-heading)" }}>
+              + {f.name}
+              <span style={{ color: "var(--text-secondary)", fontSize: "var(--text-xs)" }}> · {p ? `${p.name}${p.external ? " (external)" : ""}` : "no product"} · {statusLabel(f.status)}</span>
+            </button>
           );
         })}
-
-        <div style={{ display: "flex", flexDirection: "column", gap: 6, padding: 10, background: "var(--surface-inset)", borderRadius: "var(--radius-sm)" }}>
-          <Input label="Add a step" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search features by name or product…" />
-          {matches.map((f) => {
-            const p = productById.get(f.product_id);
-            return (
-              <button key={f.id} onClick={() => addFeature(f)}
-                style={{ textAlign: "left", border: "none", background: "transparent", cursor: "pointer", padding: "4px 2px", fontFamily: "var(--font-body)", fontSize: "var(--text-sm)", color: "var(--text-heading)" }}>
-                + {f.name}
-                <span style={{ color: "var(--text-secondary)", fontSize: "var(--text-xs)" }}> · {p ? `${p.name}${p.external ? " (external)" : ""}` : "no product"} · {f.status.replace("_", " ")}</span>
-              </button>
-            );
-          })}
-          <div>
-            <Button size="sm" variant="secondary" onClick={addUnbuilt}>
-              {query.trim() ? `Add “${truncate(query.trim(), 40)}” as a step nobody has built` : "Add a step nobody has built"}
-            </Button>
+        {allMatches.length > matches.length && (
+          <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>
+            {allMatches.length - matches.length} more match. Keep typing to narrow it down.
           </div>
+        )}
+        <div>
+          <Button size="sm" variant="secondary" disabled={!query.trim()} onClick={addUnbuilt}>
+            {query.trim() ? `Add “${truncate(query.trim(), 40)}” as a step nobody has built` : "Type a step to add one nobody has built"}
+          </Button>
         </div>
       </div>
-    </Dialog>
+
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", borderTop: "1px solid var(--border-hairline)", paddingTop: 12 }}>
+        {error && <span role="alert" style={{ color: "var(--danger-fg)", fontSize: "var(--text-xs)" }}>{error}</span>}
+        {!error && blocker && <span style={{ color: "var(--text-secondary)", fontSize: "var(--text-xs)" }}>{blocker}</span>}
+        <span style={{ flex: 1 }} />
+        {confirmDiscard ? (
+          <>
+            <span style={{ fontSize: "var(--text-xs)", color: "var(--text-body)" }}>Discard your changes?</span>
+            <Button size="sm" variant="secondary" onClick={() => setConfirmDiscard(false)}>Keep editing</Button>
+            <Button size="sm" variant="danger" onClick={onCancel}>Discard</Button>
+          </>
+        ) : (
+          <>
+            <Button size="sm" variant="secondary" onClick={cancel}>Cancel</Button>
+            <Button size="sm" variant="accent" disabled={!!blocker || saving} onClick={submit}>{saving ? "Saving…" : "Save journey"}</Button>
+          </>
+        )}
+      </div>
+    </div>
   );
 }

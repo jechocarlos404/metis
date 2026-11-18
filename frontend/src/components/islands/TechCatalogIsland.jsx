@@ -13,6 +13,7 @@ import {
   STANCE_TONE,
   formatAsOf,
 } from "../../lib/ontology.js";
+import { count } from "../../lib/words.js";
 
 /**
  * `/tech` — the catalog, and `?view=exposure` — what is dying.
@@ -74,12 +75,12 @@ function Skeleton({ columns, rows = 12 }) {
   ));
 }
 
-export default function TechCatalogIsland({ initialView = "catalog", initialQuery = "" }) {
+export default function TechCatalogIsland({ initialView = "catalog", initialQuery = "", initialKind = "", initialLayer = "", initialAdoption = "" }) {
   const [view, setView] = React.useState(initialView);
   const [q, setQ] = React.useState(initialQuery);
-  const [kind, setKind] = React.useState("");
-  const [layer, setLayer] = React.useState("");
-  const [adoption, setAdoption] = React.useState("");
+  const [kind, setKind] = React.useState(initialKind);
+  const [layer, setLayer] = React.useState(initialLayer);
+  const [adoption, setAdoption] = React.useState(initialAdoption);
   const [offset, setOffset] = React.useState(0);
   const [page, setPage] = React.useState(null);
   const [exposure, setExposure] = React.useState(null);
@@ -95,9 +96,10 @@ export default function TechCatalogIsland({ initialView = "catalog", initialQuer
     set("view", view === "exposure" ? "exposure" : "");
     set("q", q);
     set("kind", kind);
+    set("layer", layer);
     set("adoption", adoption);
     window.history.replaceState(null, "", url);
-  }, [view, q, kind, adoption]);
+  }, [view, q, kind, layer, adoption]);
 
   React.useEffect(() => {
     if (view !== "catalog") return;
@@ -144,7 +146,7 @@ export default function TechCatalogIsland({ initialView = "catalog", initialQuer
         meta={
           view === "exposure"
             ? `${exposure?.answer.length ?? 0} exposed · ${formatAsOf(exposure?.as_of)}`
-            : `${total} technolog(ies)`
+            : loading ? "loading" : `${total} ${total === 1 ? "technology" : "technologies"}`
         }
         actions={
           <div style={{ display: "flex", gap: 4 }}>
@@ -201,7 +203,9 @@ export default function TechCatalogIsland({ initialView = "catalog", initialQuer
                     <Skeleton columns={COLUMNS} />
                   ) : rows.length === 0 ? (
                     <div style={{ margin: 16, padding: "var(--space-4)", border: "1px dashed var(--border-default)", borderRadius: "var(--radius-sm)", color: "var(--text-secondary)", fontSize: "var(--text-sm)" }}>
-                      No technology matches those facets.
+                      {q || kind || layer || adoption
+                        ? "No technology matches these filters."
+                        : "No technologies recorded yet. Technologies are added through the metis API or MCP tools (POST /api/tech); once one exists it appears here with what it satisfies and who uses it."}
                     </div>
                   ) : (
                     rows.map((r) => (
@@ -223,7 +227,7 @@ export default function TechCatalogIsland({ initialView = "catalog", initialQuer
                         <span style={{ ...MONO, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                           {r.satisfies.join(", ") || "—"}
                         </span>
-                        <span style={MONO}>{r.used_by} product(s)</span>
+                        <span style={MONO}>{count(r.used_by, "product")}</span>
                       </a>
                     ))
                   )}

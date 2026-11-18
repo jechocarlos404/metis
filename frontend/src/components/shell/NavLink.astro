@@ -6,6 +6,9 @@ const { href, label, icon, active } = Astro.props;
 
 <a
   href={href}
+  class="nav-link"
+  title={label}
+  aria-current={active ? "page" : undefined}
   style={`display:flex; align-items:center; gap:10px; padding:8px 10px; text-decoration:none;
     background:${active ? "var(--surface-inset)" : "transparent"};
     color:${active ? "var(--text-heading)" : "var(--text-secondary)"};
@@ -33,5 +36,5 @@ const { href, label, icon, active } = Astro.props;
       ),
     )}
   </svg>
-  {label}
+  <span class="nav-label">{label}</span>
 </a>

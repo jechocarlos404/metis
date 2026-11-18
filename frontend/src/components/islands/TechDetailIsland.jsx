@@ -3,6 +3,7 @@ import { PageHeader } from "../shell/PageHeader.jsx";
 import { Badge, Button, Input, Select } from "../../ds";
 import { api } from "../../lib/api.js";
 import { CARD, FIT_TONE, MICRO, MONO, STANCE_TONE } from "../../lib/ontology.js";
+import { count } from "../../lib/words.js";
 
 /**
  * `/tech/[slug]` — everything known about one technology, plus the two things
@@ -137,7 +138,7 @@ export default function TechDetailIsland({ slug, canWrite = false }) {
                 <span style={{ marginLeft: 6 }}><Badge tone="danger">one maintainer</Badge></span>
               )}
             </Fact>
-            <Fact label="used by">{detail.used_by} product(s)</Fact>
+            <Fact label="used by">{count(detail.used_by, "product")}</Fact>
           </div>
           {detail.versions.length > 0 && (
             <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-2)" }}>
@@ -151,7 +152,7 @@ export default function TechDetailIsland({ slug, canWrite = false }) {
           )}
         </Section>
 
-        <Section label="satisfies" meta={`${detail.satisfactions.length} capabilit(ies)`}>
+        <Section label="satisfies" meta={count(detail.satisfactions.length, "capability", "capabilities")}>
           {detail.satisfactions.length === 0 ? (
             <span style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>
               In the catalog, not a candidate for anything. That is a normal state.
@@ -177,7 +178,7 @@ export default function TechDetailIsland({ slug, canWrite = false }) {
         {/* Count-led. required is a break; optional is an inconvenience. */}
         <Section
           label="blast radius"
-          meta={`${breaks.length} product(s) · ${required} required slot(s) · ${offStack} off_stack`}
+          meta={`${count(breaks.length, "product")} · ${count(required, "required slot")} · ${offStack} off the approved stack`}
         >
           {breaks.length === 0 ? (
             <span style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>
@@ -206,7 +207,7 @@ export default function TechDetailIsland({ slug, canWrite = false }) {
           )}
         </Section>
 
-        <Section label="who has touched this" meta={`${encounters?.answer.length ?? 0} person(s)`}>
+        <Section label="who has touched this" meta={count(encounters?.answer.length ?? 0, "person", "people")}>
           {(encounters?.answer.length ?? 0) === 0 ? (
             <span style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>
               Nobody has recorded touching this.

@@ -3,6 +3,7 @@ import { PageHeader } from "../shell/PageHeader.jsx";
 import { Badge, Button, Select } from "../../ds";
 import { api } from "../../lib/api.js";
 import { CARD, FIT_TONE, FLAG_TONE, LAYERS, MICRO, MONO, STANCE_TONE } from "../../lib/ontology.js";
+import { count } from "../../lib/words.js";
 
 /**
  * `/stacks` — a product's stack as layers of slots, and the resolver.
@@ -26,7 +27,7 @@ function LayerCard({ layer, slots, activeId, onPick }) {
       <div style={{ display: "flex", gap: "var(--space-3)", alignItems: "baseline", padding: "8px 14px", background: "var(--surface-inset)", borderBottom: "1px solid var(--border-hairline)" }}>
         <span style={{ ...MICRO, color: "var(--text-heading)", fontWeight: "var(--weight-semibold)" }}>{layer}</span>
         <span style={MONO}>
-          {slots.length} slot(s){gaps ? ` · ${gaps} gap` : ""}{redundant ? ` · ${redundant} redundancy` : ""}
+          {count(slots.length, "slot")}{gaps ? ` · ${gaps} gap` : ""}{redundant ? ` · ${redundant} redundancy` : ""}
         </span>
       </div>
       <div style={{ overflowX: "auto" }}>
@@ -160,8 +161,8 @@ export default function StacksIsland({ initialSlot = "", canWrite = false }) {
         title="Stacks"
         meta={
           <span style={MONO}>
-            {archetypes.length} archetype(s) · {stacks.length - archetypes.length} product stack(s) ·{" "}
-            {gaps} gap(s) · {view?.drift.length ?? 0} drift
+            {count(archetypes.length, "archetype")} · {count(stacks.length - archetypes.length, "product stack")} ·{" "}
+            {count(gaps, "gap")} · {view?.drift.length ?? 0} drift
           </span>
         }
         actions={
@@ -179,7 +180,7 @@ export default function StacksIsland({ initialSlot = "", canWrite = false }) {
         <section style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
           <div style={MICRO}>archetypes — slots with capabilities, tech unbound</div>
           {archetypes.length === 0 ? (
-            <span style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>No archetypes defined.</span>
+            <span style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>No archetypes yet. An archetype is a reusable stack shape: slots, each naming the capabilities it must cover, with the technology left open. They're added through the metis API or MCP tools.</span>
           ) : (
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px,1fr))", gap: "var(--space-3)" }}>
               {archetypes.map((a) => (
@@ -192,7 +193,7 @@ export default function StacksIsland({ initialSlot = "", canWrite = false }) {
                     <div style={{ marginTop: 6, fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>{a.description}</div>
                   )}
                   <div style={{ ...MONO, marginTop: 8 }}>
-                    {a.slots} slot(s) · {a.required_slots} required · {a.instances} instance(s)
+                    {count(a.slots, "slot")} · {a.required_slots} required · {count(a.instances, "instance")}
                   </div>
                 </div>
               ))}
@@ -245,16 +246,16 @@ export default function StacksIsland({ initialSlot = "", canWrite = false }) {
 
           {/* The resolver: the one raised surface on the page. */}
           <aside style={{ flex: "1 1 300px", maxWidth: 420, position: "sticky", top: 80, ...CARD, border: "1.5px solid var(--accent)", boxShadow: "var(--shadow-raised)", padding: "var(--space-4)", display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
-            <div style={{ ...MICRO, color: "var(--text-accent)" }}>stack_recommender</div>
+            <div style={{ ...MICRO, color: "var(--text-accent)" }}>Recommended technology</div>
             {!activeSlot ? (
-              <div style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>Select a slot.</div>
+              <div style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>Pick a slot to see which technologies could fill it.</div>
             ) : (
               <>
                 <div style={{ fontSize: "var(--text-lg)", fontWeight: "var(--weight-semibold)", color: "var(--text-heading)" }}>
                   {activeSlot.capability ?? activeSlot.role}
                 </div>
                 <div style={MONO}>
-                  {activeSlot.layer} · {activeSlot.role} · {offers?.offers.length ?? 0} offer(s)
+                  {activeSlot.layer} · {activeSlot.role} · {count(offers?.offers.length ?? 0, "option")}
                 </div>
 
                 {offers === null ? (

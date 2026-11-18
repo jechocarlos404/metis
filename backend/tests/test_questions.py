@@ -165,8 +165,48 @@ async def test_supply_realizations_carry_the_build_side(db, client):
         )
     body = (await client.get("/api/capabilities/semantic-search/supply")).json()
     assert body["realizations"] == [
-        {"feature": "Spec similarity", "product": None, "status": "pending", "tickets": 0}
+        {"feature": "Spec similarity", "id": body["realizations"][0]["id"], "product": None,
+         "product_name": None, "external": False, "via": None, "status": "pending", "tickets": 0}
     ]
+
+
+@pytest.mark.asyncio
+async def test_supply_realizations_count_like_the_inventory(db, client):
+    """One rule on every screen: our features over the capability's submap,
+    sub-capabilities included; an external product's features ride along
+    marked, so the page can list them apart without changing the count."""
+    seeded = await seed(db)
+    async with db() as session:
+        from app.schemas.feature import FeatureCreate
+        from app.services import features as feature_service
+
+        child = await capability_service.create_capability(
+            session, CapabilityCreate(name="Vector recall", parent_id=seeded["capability"].id)
+        )
+        rival = Product(slug="rival", name="Rival", external=True)
+        session.add(rival)
+        await session.commit()
+        await session.refresh(rival)
+        await feature_service.create_feature(
+            session, FeatureCreate(name="Direct", capability_ids=[seeded["capability"].id])
+        )
+        await feature_service.create_feature(
+            session, FeatureCreate(name="Through the child", capability_ids=[child.id])
+        )
+        await feature_service.create_feature(
+            session,
+            FeatureCreate(name="Theirs", capability_ids=[seeded["capability"].id], product_id=rival.id),
+        )
+    body = (await client.get("/api/capabilities/semantic-search/supply")).json()
+    rows = {r["feature"]: r for r in body["realizations"]}
+    assert set(rows) == {"Direct", "Through the child", "Theirs"}
+    assert rows["Direct"]["via"] is None
+    assert rows["Through the child"]["via"] == "Vector recall"
+    assert rows["Theirs"]["external"] is True and rows["Theirs"]["product_name"] == "Rival"
+    ours = [r for r in body["realizations"] if not r["external"]]
+    inventory = (await client.get("/api/capabilities/inventory")).json()
+    entry = next(e for e in inventory if e["slug"] == "semantic-search")
+    assert len(ours) == entry["features"]
 
 
 @pytest.mark.asyncio

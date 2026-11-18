@@ -4,7 +4,7 @@ export function Switch({ label, checked, onChange, disabled, style }) {
   return (
     <label style={{ display: "inline-flex", alignItems: "center", gap: "8px", cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.5 : 1, fontFamily: "var(--font-body)", fontSize: "var(--text-sm)", color: "var(--text-body)", ...style }}>
       <span style={{ position: "relative", width: "32px", height: "18px", flex: "none" }}>
-        <input type="checkbox" role="switch" checked={!!checked} disabled={disabled}
+        <input data-ds-control type="checkbox" role="switch" checked={!!checked} disabled={disabled}
           onChange={(e) => onChange && onChange(e.target.checked)}
           style={{ position: "absolute", inset: 0, opacity: 0, cursor: "inherit" }} />
         <span style={{

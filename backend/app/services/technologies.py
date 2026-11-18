@@ -844,39 +844,67 @@ async def bindings_by_tech(session: AsyncSession) -> dict[uuid.UUID, list[str]]:
 
 async def realizations(session: AsyncSession, capability_id: uuid.UUID) -> list[dict]:
     """The build side of the same question: every feature realizing this
-    capability, with its own product — what the desktop's supply frame
-    renders opposite the buy side."""
-    stmt = (
-        select(Feature)
-        .join(FeatureCapability, FeatureCapability.feature_id == Feature.id)
-        .where(FeatureCapability.capability_id == capability_id)
-        .order_by(Feature.seq)
-    )
-    features = list((await session.scalars(stmt)).all())
-    if not features:
+    capability or anything in its submap, with its own product — what the
+    desktop's supply frame renders opposite the buy side.
+
+    Counted by the inventory's rule (submap included), so the detail page and
+    the inventory agree on how many features a capability has. External
+    products' features are listed too, marked `external`, for the page to set
+    apart; `via` names the sub-capability a feature reaches this one through."""
+    from app.services.capabilities import submap_ids  # capabilities imports nothing from here
+
+    ids = await submap_ids(session, capability_id)
+    rows = (
+        await session.execute(
+            select(Feature, FeatureCapability.capability_id)
+            .join(FeatureCapability, FeatureCapability.feature_id == Feature.id)
+            .where(FeatureCapability.capability_id.in_(ids))
+            .order_by(Feature.seq)
+        )
+    ).all()
+    if not rows:
         return []
+    # A feature reached directly wins over one reached through a child; a
+    # feature realizing several capabilities in the submap is listed once.
+    features: dict[uuid.UUID, Feature] = {}
+    via: dict[uuid.UUID, uuid.UUID | None] = {}
+    for feature, cid in rows:
+        features.setdefault(feature.id, feature)
+        if cid == capability_id:
+            via[feature.id] = None
+        else:
+            via.setdefault(feature.id, cid)
     # Feature -> Story -> Ticket; a feature with no stories has no tickets.
     counts: dict[uuid.UUID, int] = defaultdict(int)
     ticket_stmt = (
         select(Story.feature_id, func.count())
         .join(Ticket, Ticket.story_id == Story.id)
-        .where(Story.feature_id.in_([f.id for f in features]))
+        .where(Story.feature_id.in_(list(features)))
         .group_by(Story.feature_id)
     )
     for feature_id, count in await session.execute(ticket_stmt):
         counts[feature_id] = count
-    products = {
-        p.id: p.slug for p in (await session.scalars(select(Product))).all()
+    products = {p.id: p for p in (await session.scalars(select(Product))).all()}
+    names = {
+        c.id: c.name
+        for c in (await session.scalars(select(Capability).where(Capability.id.in_(ids)))).all()
     }
-    return [
-        {
-            "feature": f.name,
-            "product": products.get(f.product_id),
-            "status": f.status,
-            "tickets": counts.get(f.id, 0),
-        }
-        for f in features
-    ]
+    out = []
+    for f in features.values():
+        product = products.get(f.product_id)
+        out.append(
+            {
+                "feature": f.name,
+                "id": f.id,
+                "product": product.slug if product else None,
+                "product_name": product.name if product else None,
+                "external": bool(product and product.external),
+                "via": names.get(via[f.id]) if via[f.id] else None,
+                "status": f.status,
+                "tickets": counts.get(f.id, 0),
+            }
+        )
+    return out
 
 
 async def blocked_reason(

@@ -2,6 +2,7 @@ import React from "react";
 import { PageHeader } from "../shell/PageHeader.jsx";
 import { Badge, Button, Dialog, Icon, IconButton, Input, Select, Switch } from "../../ds";
 import { api } from "../../lib/api.js";
+import { pressable } from "../../lib/pressable.js";
 
 const ROLES = ["admin", "editor", "viewer"];
 const ROLE_TONES = { admin: "accent", editor: "ok", viewer: "neutral" };
@@ -154,7 +155,7 @@ export default function UsersIsland() {
             <span>User</span><span>Email</span><span>Role</span><span>Status</span><span />
           </div>
           {users.map((u, i) => (
-            <div key={u.id} onClick={() => openEdit(u)}
+            <div key={u.id} {...pressable(() => openEdit(u))}
               style={{ display: "grid", gridTemplateColumns: COLS, alignItems: "center", padding: "10px 16px", gap: 8,
                 borderBottom: i < users.length - 1 ? "1px solid var(--border-hairline)" : "none", cursor: "pointer", fontSize: "var(--text-sm)" }}>
               <span style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
@@ -190,7 +191,7 @@ export default function UsersIsland() {
             {dialog?.mode === "edit" && (
               <Button size="sm" variant={confirmingDelete ? "danger" : "secondary"} disabled={saving}
                 style={{ marginRight: "auto", gap: 6 }}
-                onClick={() => (confirmingDelete ? remove() : setConfirmingDelete(true))}>
+                onClick={(e) => (confirmingDelete ? (e.detail > 1 ? null : remove()) : setConfirmingDelete(true))}>
                 <Icon name="trash" size={13} />{confirmingDelete ? "Confirm delete" : "Delete"}
               </Button>
             )}

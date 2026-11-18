@@ -190,3 +190,28 @@ async def test_iteration_limit(db):
     )
     assert "iteration limit" in events[-1][1]["message"]["content"]
     assert len(provider.calls) == 6
+
+
+@pytest.mark.asyncio
+async def test_chat_status_says_whether_any_provider_answers():
+    """Any role may ask whether chat can run, so the UI can say so before a
+    message is typed; it learns nothing about which providers exist."""
+    from httpx import ASGITransport, AsyncClient
+
+    from app.config import Settings, get_settings
+    from app.main import create_app
+
+    class Registry:
+        def __init__(self, available):
+            self.available = available
+
+        async def statuses(self, force=False):
+            return [ProviderStatus(name="a", label="A", available=self.available, models=[])]
+
+    for available in (False, True):
+        app = create_app()
+        app.dependency_overrides[get_settings] = lambda: Settings(auth_enabled=False)
+        app.state.llm = Registry(available)
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as http:
+            body = (await http.get("/api/chat/status")).json()
+        assert body == {"available": available}

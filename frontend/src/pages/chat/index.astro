@@ -3,8 +3,9 @@ import AppLayout from "../../layouts/AppLayout.astro";
 import ChatIsland from "../../components/islands/ChatIsland.jsx";
 
 const canWrite = ["editor", "admin"].includes(Astro.locals.user?.role);
+const isAdmin = Astro.locals.user?.role === "admin";
 ---
 
 <AppLayout title="Chat">
-  <ChatIsland client:load canWrite={canWrite} />
+  <ChatIsland client:load canWrite={canWrite} isAdmin={isAdmin} />
 </AppLayout>

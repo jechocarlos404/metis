@@ -1,16 +1,9 @@
 import React from "react";
 import { PageHeader } from "../shell/PageHeader.jsx";
-import { Badge, Button, Select, Tag } from "../../ds";
+import { Badge, Button, Select } from "../../ds";
 import { api } from "../../lib/api.js";
+import { CoverageReport, MATURITY_TONES, ProductScore } from "../shared/coverage.jsx";
 
-const MATURITY_TONES = {
-  planned: "neutral",
-  alpha: "warn",
-  beta: "accent",
-  ga: "ok",
-  deprecated: "danger",
-  retired: "danger",
-};
 
 const CAPS = {
   fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: "var(--tracking-caps)",
@@ -56,6 +49,7 @@ function replaceNeed(text, from, to) {
 export default function InventoryIsland() {
   const [inventory, setInventory] = React.useState(null);
   const [reusedOnly, setReusedOnly] = React.useState(false);
+  const [find, setFind] = React.useState("");
   const [idea, setIdea] = React.useState("");
   const [report, setReport] = React.useState(null);
   const [checking, setChecking] = React.useState(false);
@@ -72,6 +66,7 @@ export default function InventoryIsland() {
   // An existing product's features become the idea: how much of it could we build?
   const scoreProduct = async (productId) => {
     setScored(productId);
+    if (productId) setIdea(""); // the idea box would otherwise describe something other than the score shown
     setScore(null);
     setReport(null);
     setError(null);
@@ -116,7 +111,8 @@ export default function InventoryIsland() {
   const ours = (inventory ?? []).filter((c) => c.ours);
   // Known only from someone else's product: it exists, we don't have it.
   const elsewhere = (inventory ?? []).filter((c) => !c.ours);
-  const rows = ours.filter((c) => !reusedOnly || c.products.length > 1);
+  const needle = find.trim().toLowerCase();
+  const rows = ours.filter((c) => (!reusedOnly || c.products.length > 1) && (!needle || c.name.toLowerCase().includes(needle) || c.products.some((p) => p.name.toLowerCase().includes(needle))));
   const reused = ours.filter((c) => c.products.length > 1).length;
 
   return (
@@ -130,6 +126,8 @@ export default function InventoryIsland() {
           <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 16px", borderBottom: "1px solid var(--border-hairline)" }}>
             <span style={{ fontSize: "var(--text-sm)", fontWeight: "var(--weight-semibold)", color: "var(--text-heading)" }}>What we can already do</span>
             <span style={{ flex: 1 }} />
+            <input type="search" value={find} onChange={(e) => setFind(e.target.value)} placeholder="Find a capability or product" aria-label="Find a capability or product"
+              style={{ width: 220, height: 28, padding: "0 8px", fontSize: "var(--text-xs)", fontFamily: "var(--font-body)", color: "var(--text-body)", background: "var(--surface-card)", border: "1px solid var(--border-control)", borderRadius: "var(--radius-sm)" }} />
             <label style={{ display: "inline-flex", gap: 6, alignItems: "center", fontSize: "var(--text-xs)", color: "var(--text-secondary)", cursor: "pointer" }}>
               <input type="checkbox" checked={reusedOnly} onChange={(e) => setReusedOnly(e.target.checked)} />
               reused only
@@ -144,7 +142,7 @@ export default function InventoryIsland() {
               <span><Badge tone={MATURITY_TONES[c.maturity] ?? "neutral"}>{c.maturity}</Badge></span>
               <span style={{ display: "flex", gap: 4, flexWrap: "wrap", alignItems: "center" }}>
                 {c.products.length > 0
-                  ? c.products.map((p) => <Tag key={p.id}>{p.name}</Tag>)
+                  ? c.products.map((p, j) => <a key={p.id} href={`/products?product=${p.id}`} style={{ fontSize: "var(--text-xs)", color: "var(--text-accent)" }}>{p.name}{j < c.products.length - 1 ? "," : ""}</a>)
                   : <span style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>{c.features > 0 ? "no product" : "unused"}</span>}
                 {c.external_products.length > 0 && (
                   <span style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>· also in {c.external_products.map((p) => p.name).join(", ")}</span>
@@ -153,9 +151,12 @@ export default function InventoryIsland() {
               <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-secondary)" }}>{c.features}</span>
             </div>
           ))}
+          {!inventory && (
+            <div role="status" style={{ padding: 16, fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>Loading the inventory…</div>
+          )}
           {inventory && rows.length === 0 && (
             <div style={{ padding: 16, fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>
-              {reusedOnly ? "0 capabilities are used by more than one product yet." : "0 capabilities. Seed a product to start the inventory."}
+              {needle ? `No capability or product matches "${find.trim()}".` : reusedOnly ? "No capability is used by more than one product yet." : "No capabilities yet. Seed a product to start the inventory."}
             </div>
           )}
           {elsewhere.length > 0 && (
@@ -169,7 +170,7 @@ export default function InventoryIsland() {
                   <a href={`/capabilities/${c.slug}`} style={{ color: "var(--text-body)", textDecoration: "none" }}>{c.name}</a>
                   <span style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>not ours</span>
                   <span style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-                    {c.external_products.map((p) => <Tag key={p.id}>{p.name}</Tag>)}
+                    {c.external_products.map((p, j) => <a key={p.id} href={`/products?product=${p.id}`} style={{ fontSize: "var(--text-xs)", color: "var(--text-accent)" }}>{p.name}{j < c.external_products.length - 1 ? "," : ""}</a>)}
                   </span>
                   <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-secondary)" }}>0</span>
                 </div>
@@ -202,89 +203,12 @@ export default function InventoryIsland() {
             )}
             {error && <div style={{ fontSize: "var(--text-xs)", color: "var(--danger-fg)" }}>{error}</div>}
           </div>
-          {score && <ProductScore score={score} />}
           {report && <CoverageReport report={report} onCandidate={useCandidate} />}
+          {score && <ProductScore score={score} />}
+          {score && !report && <div style={{ borderTop: "1px solid var(--border-hairline)", padding: 16, fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>No capability links known for this product yet.</div>}
         </section>
       </div>
     </>
   );
 }
 
-function ProductScore({ score }) {
-  return (
-    <div style={{ borderTop: "1px solid var(--border-hairline)", padding: "14px 16px 0", display: "flex", flexDirection: "column", gap: 6, fontSize: "var(--text-xs)" }}>
-      <div style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-sm)", color: "var(--text-heading)" }}>
-        {score.buildable.length}/{score.total_features} of {score.product.name}'s features buildable from what we have
-      </div>
-      {score.buildable.length > 0 && (
-        <div style={{ color: "var(--text-secondary)" }}>Buildable now: {score.buildable.join(", ")}</div>
-      )}
-      {score.known_covered.length > 0 && (
-        <div style={{ color: "var(--text-secondary)" }}>
-          <span style={{ fontFamily: "var(--font-mono)", color: "var(--text-heading)" }}>+{score.known_covered.length}</span> more where we have every capability anyone could name — weaker, since the unnamed ones may be missing: {score.known_covered.join(", ")}
-        </div>
-      )}
-      {score.unknown_features.length > 0 && (
-        <div style={{ color: "var(--text-secondary)" }}>
-          A lower bound — {score.unknown_features.length} feature{score.unknown_features.length === 1 ? " has" : "s have"} capabilities nobody has identified yet: {score.unknown_features.join(", ")}
-        </div>
-      )}
-      {!score.report && <div style={{ color: "var(--text-secondary)" }}>No capability links known for this product yet.</div>}
-    </div>
-  );
-}
-
-function CoverageReport({ report, onCandidate }) {
-  return (
-    <div style={{ borderTop: "1px solid var(--border-hairline)", padding: 16, display: "flex", flexDirection: "column", gap: 14 }}>
-      <div style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-sm)", color: "var(--text-heading)" }}>
-        {report.existing}/{report.needed} capabilities we have · {report.mature} proven (beta+)
-      </div>
-      {report.missing.length > 0 && (
-        <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>
-          To build: {report.missing.join(", ")}
-        </div>
-      )}
-      {report.features.map((f) => (
-        <div key={f.name} style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          <div style={{ display: "flex", gap: 8, alignItems: "baseline" }}>
-            <span style={{ fontSize: "var(--text-sm)", fontWeight: "var(--weight-medium)", color: "var(--text-heading)" }}>{f.name}</span>
-            <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-secondary)" }}>{f.existing}/{f.total}</span>
-          </div>
-          {f.capabilities.map((need) => (
-            <div key={need.name} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", paddingLeft: 10, fontSize: "var(--text-xs)" }}>
-              {need.match && !need.match.ours ? (
-                <>
-                  <Badge tone="warn">missing</Badge>
-                  <span style={{ color: "var(--text-body)" }}>{need.match.name}</span>
-                  <span style={{ color: "var(--text-secondary)" }}>known from {need.match.external_products.map((p) => p.name).join(", ")}</span>
-                </>
-              ) : need.match ? (
-                <>
-                  <Badge tone="ok">exists</Badge>
-                  <span style={{ color: "var(--text-body)" }}>{need.match.name}</span>
-                  <Badge tone={MATURITY_TONES[need.match.maturity] ?? "neutral"}>{need.match.maturity}</Badge>
-                  {need.match.products.length > 0 && (
-                    <span style={{ color: "var(--text-secondary)" }}>in {need.match.products.map((p) => p.name).join(", ")}</span>
-                  )}
-                </>
-              ) : (
-                <>
-                  <Badge tone="warn">missing</Badge>
-                  <span style={{ color: "var(--text-body)" }}>{need.name}</span>
-                  {need.candidates.length > 0 && <span style={{ color: "var(--text-secondary)" }}>did you mean</span>}
-                  {need.candidates.map((c) => (
-                    <button key={c.id} type="button" onClick={() => onCandidate(need.name, c.name)}
-                      style={{ font: "inherit", fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-accent)", background: "var(--accent-wash)", border: "none", borderRadius: "var(--radius-pill)", padding: "1px 8px", cursor: "pointer" }}>
-                      {c.name}
-                    </button>
-                  ))}
-                </>
-              )}
-            </div>
-          ))}
-        </div>
-      ))}
-    </div>
-  );
-}

@@ -6,8 +6,11 @@ import TechCatalogIsland from "../../components/islands/TechCatalogIsland.jsx";
 // the URL is what makes a resolved screen linkable.
 const view = Astro.url.searchParams.get("view") === "exposure" ? "exposure" : "catalog";
 const query = Astro.url.searchParams.get("q") ?? "";
+const kind = Astro.url.searchParams.get("kind") ?? "";
+const layer = Astro.url.searchParams.get("layer") ?? "";
+const adoption = Astro.url.searchParams.get("adoption") ?? "";
 ---
 
 <AppLayout title="Tech">
-  <TechCatalogIsland client:load initialView={view} initialQuery={query} />
+  <TechCatalogIsland client:load initialView={view} initialQuery={query} initialKind={kind} initialLayer={layer} initialAdoption={adoption} />
 </AppLayout>

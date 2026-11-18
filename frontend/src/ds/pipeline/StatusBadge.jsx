@@ -1,4 +1,5 @@
 import React from "react";
+import { statusLabel } from "../../lib/words.js";
 
 const statusTones = {
   pending: { bg: "var(--surface-inset)", fg: "var(--text-secondary)" },
@@ -20,7 +21,7 @@ export function StatusBadge({ status = "pending", style }) {
       whiteSpace: "nowrap", ...style,
     }}>
       <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "currentColor" }} />
-      {status}
+      {statusLabel(status)}
     </span>
   );
 }

@@ -15,6 +15,15 @@ from app.schemas.chat import MessageRead, MessageSend, ThreadCreate, ThreadRead
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 
 
+@router.get("/status")
+async def chat_status(request: Request):
+    """Whether any LLM provider can answer, so the UI can say chat is
+    unavailable before someone types. Readable by every role; provider names
+    and details stay behind the admin LLM config."""
+    statuses = await request.app.state.llm.statuses()
+    return {"available": any(s.available for s in statuses)}
+
+
 @router.get("/threads", response_model=list[ThreadRead])
 async def list_threads(session: AsyncSession = Depends(get_db)):
     stmt = select(ChatThread).order_by(ChatThread.updated_at.desc())

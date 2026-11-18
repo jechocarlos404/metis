@@ -1,0 +1,120 @@
+---
+import AppLayout from "../layouts/AppLayout.astro";
+
+/**
+ * `/guide` — the help a person needs to use metis, in their words. The full
+ * model (and its engineering rationale) stays at /ontology for whoever
+ * builds on it; this page links there rather than repeating it.
+ */
+---
+
+<AppLayout title="Guide">
+  <div style="flex:1; min-height:0; overflow-y:auto;">
+    <article class="guide">
+      <h1>How metis works</h1>
+      <p class="lede">
+        Metis keeps one list of what your products can already do, so a new product starts from what
+        exists instead of from zero. Four ideas carry everything else.
+      </p>
+
+      <dl class="terms">
+        <div>
+          <dt>Goal</dt>
+          <dd>
+            Why something exists. An <strong>org goal</strong> is the big aim; a <strong>product goal</strong>
+            sits under one and says what a product is for. See them on <a href="/goals">Goals</a>.
+          </dd>
+        </div>
+        <div>
+          <dt>Capability</dt>
+          <dd>
+            Something we're able to do, named as a noun: <em>User authentication</em>, <em>Route planning</em>.
+            Capabilities are shared: one capability can serve many products. They nest, so
+            <em>Multi-factor auth</em> sits inside <em>User authentication</em>.
+          </dd>
+        </div>
+        <div>
+          <dt>Feature</dt>
+          <dd>
+            What a person gets, named as an action: <em>Sign in with your company account</em>. Each feature
+            belongs to a product and does one or more capabilities. A feature's status is planned, in progress or done.
+          </dd>
+        </div>
+        <div>
+          <dt>Technology</dt>
+          <dd>
+            Something we could buy or adopt instead of building, such as a library, service or vendor. A technology
+            can cover the same capability a feature does; that's how build-or-buy is compared on a capability's page.
+          </dd>
+        </div>
+      </dl>
+
+      <h2>Where to start</h2>
+      <ul>
+        <li>
+          <a href="/inventory">Inventory</a>: everything we can already do, most-reused first. Paste a product idea
+          to see which parts we already have, or pick a product, ours or a competitor's, to see how much of it we
+          could build.
+        </li>
+        <li>
+          <a href="/products">Products</a>: one product at a time, with its features, the capabilities they rely on,
+          and its coverage. Products marked <em>external</em> belong to someone else; we record them to compare.
+        </li>
+        <li>
+          <a href="/journeys">Journeys</a>: the path a person takes through several features, possibly across
+          products. Metis shows which steps exist, which we could build, and what's missing.
+        </li>
+        <li>
+          <a href="/features">Features</a>: every feature in a searchable list, with a graph view of how they depend
+          on each other.
+        </li>
+      </ul>
+
+      <h2>Reading the numbers</h2>
+      <ul>
+        <li>
+          A capability's feature count means <strong>our features, including those of its sub-capabilities</strong>.
+          Features of external products are listed separately and never counted.
+        </li>
+        <li>
+          <strong>Buildable</strong> means every capability a feature needs is one we have.
+          <strong>Probably buildable</strong> means we have every capability named so far, but someone has marked
+          the list as incomplete.
+        </li>
+        <li>
+          Coverage is a lower bound: a capability nobody has identified yet can't count as one we have.
+        </li>
+      </ul>
+
+      <p class="more">
+        Building on metis or extending its model? The full specification, with its engineering rationale, is in
+        the <a href="/ontology">ontology reference</a>.
+      </p>
+    </article>
+  </div>
+</AppLayout>
+
+<style>
+  .guide {
+    max-width: 68ch;
+    padding: var(--space-6) var(--space-6) var(--space-12);
+    color: var(--text-body);
+    font-size: var(--text-md);
+    line-height: var(--leading-body);
+  }
+  h1 { font-size: var(--text-2xl); margin: 0 0 var(--space-3); }
+  h2 { font-size: var(--text-xl); margin: var(--space-8) 0 var(--space-3); }
+  .lede { font-size: var(--text-lg); color: var(--text-heading); margin: 0 0 var(--space-6); text-wrap: pretty; }
+  .terms { display: grid; gap: var(--space-4); margin: 0; }
+  .terms > div {
+    display: grid; grid-template-columns: 9rem minmax(0, 1fr); gap: var(--space-4);
+    padding-top: var(--space-4); border-top: 1px solid var(--border-hairline);
+  }
+  dt { font-weight: var(--weight-semibold); color: var(--text-heading); }
+  dd { margin: 0; text-wrap: pretty; }
+  ul { padding-left: var(--space-5); margin: 0; display: grid; gap: var(--space-2); }
+  .more { margin-top: var(--space-8); color: var(--text-secondary); font-size: var(--text-sm); }
+  @media (max-width: 560px) {
+    .terms > div { grid-template-columns: minmax(0, 1fr); gap: var(--space-1); }
+  }
+</style>

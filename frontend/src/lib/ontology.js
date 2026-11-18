@@ -54,7 +54,7 @@ export const STANCES = Object.keys(STANCE_TONE);
 export function formatAsOf(iso) {
   if (!iso) return "";
   const d = new Date(iso);
-  return `as_of ${d.toISOString().replace(/\.\d+Z$/, "Z")}`;
+  return `as of ${d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}`;
 }
 
 /** Mono micro-label, 11px uppercase with caps tracking. Used for every

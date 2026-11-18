@@ -2,6 +2,8 @@ import React from "react";
 import { PageHeader } from "../shell/PageHeader.jsx";
 import { Badge, Button, Dialog, Icon, IconButton, Input, Select, Tag } from "../../ds";
 import { api } from "../../lib/api.js";
+import { pressable } from "../../lib/pressable.js";
+import { useParamRestore, writeParams } from "../../lib/url-state.js";
 
 const MATURITY_TONES = {
   planned: "neutral",
@@ -52,6 +54,12 @@ export default function CapabilitiesIsland({ canWrite = true }) {
   const [loaded, setLoaded] = React.useState(false); // false until the first load finishes, so loading never reads as empty
   const [goals, setGoals] = React.useState([]);
   const [selected, setSelected] = React.useState(null);
+  // ?capability=<id>: linkable, and Back restores the previous selection.
+  useParamRestore("capability", (v) => v && setSelected(v));
+  const selectCapability = React.useCallback((id) => {
+    setSelected(id);
+    writeParams({ capability: id }, { push: true });
+  }, []);
   const [motivations, setMotivations] = React.useState([]);
   const [dialog, setDialog] = React.useState(null); // null | {mode:"new"} | {mode:"edit"}
   const [draft, setDraft] = React.useState(EMPTY_DRAFT);
@@ -61,9 +69,22 @@ export default function CapabilitiesIsland({ canWrite = true }) {
   const [error, setError] = React.useState(null);
   const [healthFindings, setHealthFindings] = React.useState([]);
   const [healthFilter, setHealthFilter] = React.useState("");
+  const [find, setFind] = React.useState("");
   const [impact, setImpact] = React.useState(null);
 
   const flat = React.useMemo(() => flatten(tree), [tree]);
+  // Search keeps a match's ancestors so the tree still reads as a tree.
+  const shown = React.useMemo(() => {
+    const q = find.trim().toLowerCase();
+    if (!q) return flat;
+    const keep = new Set();
+    const byId = new Map(flat.map((c) => [c.id, c]));
+    for (const c of flat) {
+      if (!c.name.toLowerCase().includes(q)) continue;
+      for (let cur = c; cur; cur = byId.get(cur.parent_id)) keep.add(cur.id);
+    }
+    return flat.filter((c) => keep.has(c.id));
+  }, [flat, find]);
   const detail = flat.find((c) => c.id === selected) ?? null;
 
   const filteredFindings = React.useMemo(
@@ -141,7 +162,7 @@ export default function CapabilitiesIsland({ canWrite = true }) {
       if (dialog.mode === "new") {
         const created = await api("/capabilities", { method: "POST", body });
         await load();
-        setSelected(created.id);
+        selectCapability(created.id);
       } else {
         await api(`/capabilities/${detail.id}`, { method: "PATCH", body });
         await load();
@@ -223,16 +244,18 @@ export default function CapabilitiesIsland({ canWrite = true }) {
             total={healthFindings.length}
             filter={healthFilter}
             onFilterChange={setHealthFilter}
-            onSelectCapability={setSelected}
+            onSelectCapability={selectCapability}
           />
+          <input type="search" value={find} onChange={(e) => setFind(e.target.value)} placeholder={`Find among ${flat.length || ""} capabilities`} aria-label="Find a capability"
+            style={{ height: 32, padding: "0 10px", fontSize: "var(--text-sm)", fontFamily: "var(--font-body)", color: "var(--text-body)", background: "var(--surface-card)", border: "1px solid var(--border-control)", borderRadius: "var(--radius-sm)" }} />
           <div style={{ background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", overflow: "hidden" }}>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 90px 110px", padding: "8px 16px", borderBottom: "1px solid var(--border-hairline)", ...CAPS_HEADER }}>
               <span>Capability</span><span>Scope</span><span>Maturity</span>
             </div>
-            {flat.map((c, i) => (
-              <div key={c.id} onClick={() => setSelected(c.id)}
+            {shown.map((c, i) => (
+              <div key={c.id} {...pressable(() => selectCapability(c.id))} aria-pressed={c.id === selected}
                 style={{ display: "grid", gridTemplateColumns: "1fr 90px 110px", alignItems: "center", padding: "10px 16px",
-                  borderBottom: i < flat.length - 1 ? "1px solid var(--border-hairline)" : "none", cursor: "pointer", fontSize: "var(--text-sm)",
+                  borderBottom: i < shown.length - 1 ? "1px solid var(--border-hairline)" : "none", cursor: "pointer", fontSize: "var(--text-sm)",
                   background: c.id === selected ? "var(--surface-inset)" : "transparent" }}>
                 <span style={{ display: "flex", alignItems: "center", gap: 8, paddingLeft: c.depth * 18, minWidth: 0 }}>
                   <Icon name="layers" size={13} style={{ color: c.id === selected ? "var(--text-accent)" : "var(--text-secondary)" }} />
@@ -244,6 +267,9 @@ export default function CapabilitiesIsland({ canWrite = true }) {
                 <span><Badge tone={MATURITY_TONES[c.maturity] ?? "neutral"}>{c.maturity}</Badge></span>
               </div>
             ))}
+            {loaded && flat.length > 0 && shown.length === 0 && (
+              <div style={{ padding: 16, fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>No capability matches "{find.trim()}".</div>
+            )}
             {flat.length === 0 && (
               <div style={{ padding: 16, fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>
                 {loaded ? "No capabilities yet. Create one to start the map." : error ? "Couldn't load capabilities." : "Loading capabilities…"}
@@ -276,7 +302,7 @@ export default function CapabilitiesIsland({ canWrite = true }) {
               </div>
               {detail.parent_id && flat.find((c) => c.id === detail.parent_id) && (
                 <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-secondary)" }}>
-                  PART_OF → {flat.find((c) => c.id === detail.parent_id).name}
+                  part of → {flat.find((c) => c.id === detail.parent_id).name}
                 </div>
               )}
               <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-secondary)" }}>
@@ -312,7 +338,7 @@ export default function CapabilitiesIsland({ canWrite = true }) {
                     <>
                       <div style={{ ...CAPS_HEADER, marginTop: 4 }}>Dependents</div>
                       {impact.dependents.map((c) => (
-                        <button key={c.id} type="button" onClick={() => setSelected(c.id)}
+                        <button key={c.id} type="button" onClick={() => selectCapability(c.id)}
                           style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--danger-fg)", textAlign: "left", border: "none", background: "transparent", cursor: "pointer", padding: 0 }}>
                           {c.name}
                         </button>
@@ -323,7 +349,7 @@ export default function CapabilitiesIsland({ canWrite = true }) {
                     <>
                       <div style={{ ...CAPS_HEADER, marginTop: 4 }}>Dependencies</div>
                       {impact.dependencies.map((c) => (
-                        <button key={c.id} type="button" onClick={() => setSelected(c.id)}
+                        <button key={c.id} type="button" onClick={() => selectCapability(c.id)}
                           style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-secondary)", textAlign: "left", border: "none", background: "transparent", cursor: "pointer", padding: 0 }}>
                           {c.name}
                         </button>
@@ -351,7 +377,7 @@ export default function CapabilitiesIsland({ canWrite = true }) {
             {dialog?.mode === "edit" && (
               <Button size="sm" variant={confirmingDelete ? "danger" : "secondary"} disabled={saving}
                 style={{ marginRight: "auto", gap: 6 }}
-                onClick={() => (confirmingDelete ? remove() : setConfirmingDelete(true))}>
+                onClick={(e) => (confirmingDelete ? (e.detail > 1 ? null : remove()) : setConfirmingDelete(true))}>
                 <Icon name="trash" size={13} />{confirmingDelete ? "Confirm delete" : "Delete"}
               </Button>
             )}
@@ -379,15 +405,23 @@ export default function CapabilitiesIsland({ canWrite = true }) {
 }
 
 function HealthFindingsPanel({ findings, total, filter, onFilterChange, onSelectCapability }) {
+  // Collapsed to one line by default so the map, the page's point, comes first.
+  const [open, setOpen] = React.useState(false);
   return (
-    <div style={{ background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", padding: 16, display: "flex", flexDirection: "column", gap: 10 }}>
+    <div style={{ background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", padding: open ? 16 : "10px 16px", display: "flex", flexDirection: "column", gap: 10 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-        <div style={CAPS_HEADER}>Taxonomy health · {total}</div>
-        <div style={{ marginLeft: "auto", minWidth: 180 }}>
-          <Select value={filter} onChange={(e) => onFilterChange(e.target.value)} options={FINDING_KINDS} />
-        </div>
+        <button type="button" aria-expanded={open} onClick={() => setOpen(!open)}
+          style={{ ...CAPS_HEADER, background: "none", border: "none", padding: 0, cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}>
+          <Icon name="chevron-right" size={12} style={{ transform: open ? "rotate(90deg)" : "none" }} />
+          Taxonomy health · {total === 0 ? "no findings" : `${total} finding${total === 1 ? "" : "s"} to review`}
+        </button>
+        {open && total > 0 && (
+          <div style={{ marginLeft: "auto", minWidth: 180 }}>
+            <Select aria-label="Filter findings" value={filter} onChange={(e) => onFilterChange(e.target.value)} options={FINDING_KINDS} />
+          </div>
+        )}
       </div>
-      {total === 0 ? (
+      {!open ? null : total === 0 ? (
         <div style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>no findings — taxonomy looks healthy</div>
       ) : findings.length === 0 ? (
         <div style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>no findings match this filter</div>

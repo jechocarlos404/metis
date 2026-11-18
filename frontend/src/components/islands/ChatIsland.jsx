@@ -1,7 +1,7 @@
 import React from "react";
 import { PageHeader } from "../shell/PageHeader.jsx";
 import { VizBlock } from "../chat/VizBlock.jsx";
-import { Button, Icon, IconButton, PipelineStepper, Select } from "../../ds";
+import { Button, Icon, IconButton, Select } from "../../ds";
 import { api } from "../../lib/api.js";
 import { sseStream } from "../../lib/sse.js";
 
@@ -30,7 +30,7 @@ function AgentMessage({ agent, text, viz, tools, streaming }) {
   );
 }
 
-export default function ChatIsland({ threadId: initialThreadId = null, canWrite = true }) {
+export default function ChatIsland({ threadId: initialThreadId = null, canWrite = true, isAdmin = false }) {
   const [threads, setThreads] = React.useState([]);
   const [threadId, setThreadId] = React.useState(initialThreadId);
   const [messages, setMessages] = React.useState([]);
@@ -39,11 +39,13 @@ export default function ChatIsland({ threadId: initialThreadId = null, canWrite 
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState(null);
   const [confirmingDelete, setConfirmingDelete] = React.useState(false);
+  const [available, setAvailable] = React.useState(null); // null until /chat/status answers
   const scrollRef = React.useRef(null);
   const abortRef = React.useRef(null);
 
   React.useEffect(() => {
-    api("/chat/threads").then(setThreads).catch(() => setThreads([]));
+    api("/chat/threads").then(setThreads).catch((e) => setError(`Couldn't load threads: ${e.message}`));
+    api("/chat/status").then((s) => setAvailable(!!s.available)).catch(() => setAvailable(null));
     return () => abortRef.current?.abort();
   }, []);
 
@@ -71,14 +73,22 @@ export default function ChatIsland({ threadId: initialThreadId = null, canWrite 
       setMessages([]);
       return;
     }
-    api(`/chat/threads/${threadId}/messages`).then(setMessages).catch(() => setMessages([]));
+    api(`/chat/threads/${threadId}/messages`).then(setMessages).catch((e) => {
+      setMessages([]);
+      setError(`Couldn't load this thread: ${e.message}`);
+    });
   }, [threadId]);
 
   React.useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [messages, live]);
 
-  const switchThread = (id) => {
+  const switchThread = (id, { fromSend = false } = {}) => {
+    if (!fromSend) {
+      abortRef.current?.abort();
+      setLive(null);
+      setError(null);
+    }
     setThreadId(id || null);
     setConfirmingDelete(false);
     const path = id ? `/chat/${id}` : "/chat";
@@ -106,7 +116,7 @@ export default function ChatIsland({ threadId: initialThreadId = null, canWrite 
 
   const send = async (overrideContent) => {
     const content = (overrideContent ?? draft).trim();
-    if (!content || busy) return;
+    if (!content || busy || available === false) return;
     setBusy(true);
     setError(null);
     setDraft("");
@@ -117,7 +127,7 @@ export default function ChatIsland({ threadId: initialThreadId = null, canWrite 
         const thread = await api("/chat/threads", { method: "POST", body: { title } });
         id = thread.id;
         setThreads((t) => [thread, ...t]);
-        switchThread(id);
+        switchThread(id, { fromSend: true });
       }
       setMessages((m) => [...m, { id: `local-${Date.now()}`, role: "user", content, viz: [] }]);
 
@@ -155,7 +165,9 @@ export default function ChatIsland({ threadId: initialThreadId = null, canWrite 
       }
       setLive(null);
     } catch (e) {
-      setError(String(e.message));
+      if (e?.name === "AbortError") return;
+      setError(`Not sent: ${e.message}`);
+      if (!overrideContent) setDraft(content);
       setLive(null);
     } finally {
       setBusy(false);
@@ -173,7 +185,6 @@ export default function ChatIsland({ threadId: initialThreadId = null, canWrite 
         meta={activeThread ? `thread: ${activeThread.title}` : "new thread"}
         actions={
           <>
-            <PipelineStepper active={4} compact />
             <Select
               value={threadId ?? ""}
               onChange={(e) => switchThread(e.target.value)}
@@ -186,19 +197,30 @@ export default function ChatIsland({ threadId: initialThreadId = null, canWrite 
             {canWrite && threadId && (
               <Button size="sm" variant={confirmingDelete ? "danger" : "secondary"} disabled={busy}
                 style={{ gap: 6 }}
-                onClick={() => (confirmingDelete ? deleteThread() : setConfirmingDelete(true))}>
+                onClick={(e) => (confirmingDelete ? (e.detail > 1 ? null : deleteThread()) : setConfirmingDelete(true))}>
                 <Icon name="trash" size={13} />{confirmingDelete ? "Confirm" : "Delete thread"}
               </Button>
             )}
           </>
         }
       />
-      <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", padding: "24px 0" }}>
+      <div ref={scrollRef} aria-live="polite" aria-busy={busy} style={{ flex: 1, overflowY: "auto", padding: "24px 0" }}>
         <div style={{ maxWidth: 720, margin: "0 auto", padding: "0 24px", display: "flex", flexDirection: "column", gap: 20 }}>
+          {available === false && (
+            <div role="status" style={{ border: "1px solid var(--border-default)", background: "var(--surface-inset)", borderRadius: "var(--radius-md)", padding: 16, fontSize: "var(--text-sm)", color: "var(--text-body)" }}>
+              Chat can't answer yet: no AI model is connected to this metis.{" "}
+              {isAdmin ? <>Connect one in <a href="/admin">LLM Config</a>.</> : "Ask an admin to connect one."}
+              {" "}Everything else in metis works without it.
+            </div>
+          )}
           {messages.length === 0 && !live && (
             <div style={{ border: "1px dashed var(--border-default)", borderRadius: "var(--radius-md)", padding: 20, color: "var(--text-secondary)", fontSize: "var(--text-sm)", lineHeight: "var(--leading-body)" }}>
-              Describe a goal, decompose a Spec, or ask the graph.
-              The orchestrator routes each message to `spec_decomposer`, `feature_manager`, `graph_agent`, or `strategist`.
+              Ask about the inventory in plain words. For example:
+              <ul style={{ margin: "8px 0 0", paddingLeft: 18 }}>
+                <li>Which capabilities do two or more of our products share?</li>
+                <li>Break the Petrogreen goal into features.</li>
+                <li>What would we need to build to match Strava's route planning?</li>
+              </ul>
             </div>
           )}
           {messages.map((m) =>
@@ -220,7 +242,8 @@ export default function ChatIsland({ threadId: initialThreadId = null, canWrite 
             <textarea
               rows={1}
               value={draft}
-              placeholder="Describe a goal, or ask the graph…"
+              aria-label="Message"
+              placeholder={available === false ? "Chat is unavailable until an AI model is connected" : "Ask about goals, capabilities or features…"}
               onChange={(e) => setDraft(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
@@ -230,13 +253,13 @@ export default function ChatIsland({ threadId: initialThreadId = null, canWrite 
               }}
               style={{ flex: 1, resize: "none", border: "none", outline: "none", background: "transparent", fontFamily: "var(--font-body)", fontSize: "var(--text-sm)", color: "var(--text-heading)", lineHeight: 1.5, padding: "4px 0" }}
             />
-            <Button size="sm" variant="accent" onClick={send} disabled={busy || !draft.trim()} style={{ gap: 6 }}>
+            <Button size="sm" variant="accent" onClick={() => send()} disabled={busy || !draft.trim() || available === false} style={{ gap: 6 }}>
               Send <Icon name="send" size={12} />
             </Button>
           </div>
         ) : (
           <div style={{ maxWidth: 720, margin: "0 auto", padding: "12px 16px", background: "var(--surface-inset)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-lg)", fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>
-            View-only — viewers can read threads but not send messages.
+            You can read threads here. Sending messages needs editor access.
           </div>
         )}
       </div>

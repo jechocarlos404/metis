@@ -1,10 +1,10 @@
 import React from "react";
 
-export function Checkbox({ label, checked, onChange, disabled, style }) {
+export function Checkbox({ label, checked, onChange, disabled, style, "aria-label": ariaLabel }) {
   return (
     <label style={{ display: "inline-flex", alignItems: "center", gap: "8px", cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.5 : 1, fontFamily: "var(--font-body)", fontSize: "var(--text-sm)", color: "var(--text-body)", ...style }}>
       <span style={{ position: "relative", width: "16px", height: "16px", flex: "none" }}>
-        <input type="checkbox" checked={!!checked} disabled={disabled}
+        <input data-ds-control type="checkbox" checked={!!checked} disabled={disabled} aria-label={ariaLabel}
           onChange={(e) => onChange && onChange(e.target.checked)}
           style={{ position: "absolute", inset: 0, opacity: 0, cursor: "inherit" }} />
         <span style={{

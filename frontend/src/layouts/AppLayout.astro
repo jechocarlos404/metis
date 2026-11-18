@@ -14,12 +14,12 @@ const NAV = [
   // Buy plane. /capabilities/[slug] and /tech/[slug] are detail routes reached
   // by link, and exposure is a view of /tech — six routes, three nav items.
   { href: "/tech", label: "Tech", icon: "circuit-board" },
-  { href: "/stacks", label: "Stacks", icon: "layers" },
+  { href: "/stacks", label: "Stacks", icon: "boxes" },
   { href: "/users", label: "Users", icon: "users", admin: true },
   { href: "/admin", label: "LLM Config", icon: "settings", admin: true },
   { href: "/data", label: "Data", icon: "database", admin: true },
-  // Help position: the document that teaches the vocabulary, last.
-  { href: "/ontology", label: "Ontology", icon: "book-open", foot: true },
+  // Help position, last: the user guide. The full ontology reference is linked from it.
+  { href: "/guide", label: "Guide", icon: "book-open", foot: true },
 ];
 
 const { title = "Metis" } = Astro.props;
@@ -54,8 +54,10 @@ const isActive = (href) => path === href || path.startsWith(href + "/");
     />
   </head>
   <body>
+    <a href="#main" class="skip-link">Skip to content</a>
     <div style="display:flex; height:100vh; background:var(--surface-page); overflow:hidden;">
       <aside
+        class="app-sidebar"
         style="width:216px; flex:none; border-right:1px solid var(--border-hairline); background:var(--surface-card); display:flex; flex-direction:column;"
       >
         <div style="padding:18px 20px 14px; display:flex; align-items:baseline; gap:8px;">
@@ -63,26 +65,26 @@ const isActive = (href) => path === href || path.startsWith(href + "/");
             style="font-family:var(--font-display); font-weight:var(--weight-semibold); font-size:20px; letter-spacing:var(--tracking-tight); color:var(--text-heading);"
             >metis</span
           >
-          <span style="font-family:var(--font-mono); font-size:10px; color:var(--text-secondary);"
+          <span class="rail-hide" style="font-family:var(--font-mono); font-size:10px; color:var(--text-secondary);"
             >v0.1</span
           >
         </div>
-        <nav style="display:flex; flex-direction:column; gap:2px; padding:0 10px;">
+        <nav aria-label="Main" style="display:flex; flex-direction:column; gap:2px; padding:0 10px;">
           {nav.map((item) => <NavLink {...item} active={isActive(item.href)} />)}
         </nav>
         <div style="margin-top:auto; display:flex; flex-direction:column;">
           {footNav.length > 0 && (
-            <nav style="display:flex; flex-direction:column; gap:2px; padding:0 10px 10px;">
+            <nav aria-label="Help" style="display:flex; flex-direction:column; gap:2px; padding:0 10px 10px;">
               {footNav.map((item) => <NavLink {...item} active={isActive(item.href)} />)}
             </nav>
           )}
           {
             user && (
-              <div style="padding:12px 16px; border-top:1px solid var(--border-hairline); display:flex; align-items:center; gap:10px;">
+              <div class="sidebar-user" style="padding:12px 16px; border-top:1px solid var(--border-hairline); display:flex; align-items:center; gap:10px;">
                 <div style="width:30px; height:30px; border-radius:50%; background:var(--accent-wash); color:var(--text-accent); display:flex; align-items:center; justify-content:center; font-family:var(--font-mono); font-size:12px; font-weight:600; flex:none;">
                   {initials}
                 </div>
-                <div style="min-width:0; flex:1;">
+                <div class="rail-hide" style="min-width:0; flex:1;">
                   <div style="font-size:var(--text-sm); color:var(--text-heading); font-weight:var(--weight-medium); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
                     {displayName}
                   </div>
@@ -104,7 +106,7 @@ const isActive = (href) => path === href || path.startsWith(href + "/");
               </div>
             )
           }
-          <div style="padding:16px; border-top:1px solid var(--border-hairline); display:flex; flex-direction:column; gap:6px;">
+          <div class="rail-hide" style="padding:16px; border-top:1px solid var(--border-hairline); display:flex; flex-direction:column; gap:6px;">
             <div
               style="font-family:var(--font-mono); font-size:10px; letter-spacing:var(--tracking-caps); text-transform:uppercase; color:var(--text-secondary);"
             >
@@ -114,7 +116,7 @@ const isActive = (href) => path === href || path.startsWith(href + "/");
           </div>
         </div>
       </aside>
-      <main style="flex:1; min-width:0; display:flex; flex-direction:column; overflow:hidden;">
+      <main id="main" tabindex="-1" style="flex:1; min-width:0; display:flex; flex-direction:column; overflow:hidden;">
         <slot />
       </main>
     </div>

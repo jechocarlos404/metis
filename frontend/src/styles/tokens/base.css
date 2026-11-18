@@ -20,3 +20,33 @@ a { color: var(--text-accent); text-decoration: none; }
 a:hover { color: var(--aegean-7); text-decoration: underline; }
 code, pre, .mono { font-family: var(--font-mono); }
 ::selection { background: var(--accent-wash); }
+
+/* Keyboard users: jump past the sidebar. Hidden until focused. */
+.skip-link {
+  position: absolute; left: 8px; top: -48px; z-index: 200;
+  padding: 8px 12px; border-radius: var(--radius-sm);
+  background: var(--surface-inverse); color: var(--text-inverse);
+  font-size: var(--text-sm); text-decoration: none;
+}
+.skip-link:focus { top: 8px; color: var(--text-inverse); }
+main:focus { outline: none; }
+
+/* DS Checkbox, Switch and Radio hide the native input; show its focus on the drawn control. */
+[data-ds-control]:focus-visible + span { outline: 2px solid var(--border-focus); outline-offset: 2px; }
+
+/* Narrow screens: the sidebar becomes an icon rail so content keeps its width. */
+@media (max-width: 960px) {
+  .app-sidebar { width: 56px !important; }
+  .app-sidebar .rail-hide, .app-sidebar .nav-label { display: none; }
+  .app-sidebar .nav-link { justify-content: center; padding: 10px 0 !important; }
+  .app-sidebar nav { padding-left: 6px !important; padding-right: 6px !important; }
+  .app-sidebar > div:first-child { padding: 18px 0 14px !important; justify-content: center; }
+  .app-sidebar > div:first-child span:first-child { font-size: 0 !important; }
+  .app-sidebar > div:first-child span:first-child::before { content: "m"; font-size: 20px; }
+  .sidebar-user { flex-direction: column; padding: 10px 0 !important; }
+}
+
+/* Rows and cards made operable with lib/pressable.js */
+[role="button"][tabindex="0"]:focus-visible { outline: 2px solid var(--border-focus); outline-offset: -2px; }
+.graph-node:focus { outline: none; }
+.graph-node:focus-visible > rect { stroke: var(--border-focus); stroke-width: 2.5px; }

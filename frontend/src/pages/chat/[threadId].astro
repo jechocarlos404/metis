@@ -4,8 +4,9 @@ import ChatIsland from "../../components/islands/ChatIsland.jsx";
 
 const { threadId } = Astro.params;
 const canWrite = ["editor", "admin"].includes(Astro.locals.user?.role);
+const isAdmin = Astro.locals.user?.role === "admin";
 ---
 
 <AppLayout title="Chat">
-  <ChatIsland client:load threadId={threadId} canWrite={canWrite} />
+  <ChatIsland client:load threadId={threadId} canWrite={canWrite} isAdmin={isAdmin} />
 </AppLayout>

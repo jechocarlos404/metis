@@ -14,7 +14,7 @@ const MATURITY_TONES = {
 
 const CAPS = {
   fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: "var(--tracking-caps)",
-  textTransform: "uppercase", color: "var(--text-disabled)",
+  textTransform: "uppercase", color: "var(--text-secondary)",
 };
 const PANEL = {
   background: "var(--surface-card)", border: "1px solid var(--border-hairline)",
@@ -145,7 +145,7 @@ export default function InventoryIsland() {
               <span style={{ display: "flex", gap: 4, flexWrap: "wrap", alignItems: "center" }}>
                 {c.products.length > 0
                   ? c.products.map((p) => <Tag key={p.id}>{p.name}</Tag>)
-                  : <span style={{ fontSize: "var(--text-xs)", color: "var(--text-disabled)" }}>{c.features > 0 ? "no product" : "unused"}</span>}
+                  : <span style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>{c.features > 0 ? "no product" : "unused"}</span>}
                 {c.external_products.length > 0 && (
                   <span style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>· also in {c.external_products.map((p) => p.name).join(", ")}</span>
                 )}
@@ -154,7 +154,7 @@ export default function InventoryIsland() {
             </div>
           ))}
           {inventory && rows.length === 0 && (
-            <div style={{ padding: 16, fontSize: "var(--text-sm)", color: "var(--text-disabled)" }}>
+            <div style={{ padding: 16, fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>
               {reusedOnly ? "0 capabilities are used by more than one product yet." : "0 capabilities. Seed a product to start the inventory."}
             </div>
           )}
@@ -167,11 +167,11 @@ export default function InventoryIsland() {
               {elsewhere.map((c, i) => (
                 <div key={c.id} style={{ display: "grid", gridTemplateColumns: GRID, alignItems: "center", gap: 8, padding: "10px 16px", borderBottom: i < elsewhere.length - 1 ? "1px solid var(--border-hairline)" : "none", fontSize: "var(--text-sm)" }}>
                   <a href={`/capabilities/${c.slug}`} style={{ color: "var(--text-body)", textDecoration: "none" }}>{c.name}</a>
-                  <span style={{ fontSize: "var(--text-xs)", color: "var(--text-disabled)" }}>not ours</span>
+                  <span style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>not ours</span>
                   <span style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
                     {c.external_products.map((p) => <Tag key={p.id}>{p.name}</Tag>)}
                   </span>
-                  <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-disabled)" }}>0</span>
+                  <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-secondary)" }}>0</span>
                 </div>
               ))}
             </>
@@ -187,13 +187,18 @@ export default function InventoryIsland() {
           </div>
           <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 10 }}>
             <textarea rows={6} value={idea} placeholder={PLACEHOLDER} onChange={(e) => setIdea(e.target.value)}
-              style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-xs)", color: "var(--text-body)", background: "var(--surface-input, var(--surface-card))", border: "1px solid var(--border-default)", borderRadius: "var(--radius-md)", padding: "8px 10px", resize: "vertical" }} />
+              style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-xs)", color: "var(--text-body)", background: "var(--surface-input, var(--surface-card))", border: "1px solid var(--border-control)", borderRadius: "var(--radius-md)", padding: "8px 10px", resize: "vertical" }} />
             <div><Button size="sm" variant="accent" disabled={checking || !idea.trim()} onClick={() => check()}>Check coverage</Button></div>
             {products.length > 0 && (
               <Select label="…or score an existing product" value={scored} onChange={(e) => scoreProduct(e.target.value)}
                 options={[{ value: "", label: "— pick a product —" },
                   ...[...products].sort((a, b) => Number(b.external) - Number(a.external) || a.name.localeCompare(b.name))
                     .map((p) => ({ value: p.id, label: p.external ? `${p.name} (external)` : p.name }))]} />
+            )}
+            {checking && (
+              <div role="status" style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>
+                {scored ? `Scoring ${products.find((p) => p.id === scored)?.name ?? "product"}…` : "Checking coverage…"}
+              </div>
             )}
             {error && <div style={{ fontSize: "var(--text-xs)", color: "var(--danger-fg)" }}>{error}</div>}
           </div>
@@ -224,7 +229,7 @@ function ProductScore({ score }) {
           A lower bound — {score.unknown_features.length} feature{score.unknown_features.length === 1 ? " has" : "s have"} capabilities nobody has identified yet: {score.unknown_features.join(", ")}
         </div>
       )}
-      {!score.report && <div style={{ color: "var(--text-disabled)" }}>No capability links known for this product yet.</div>}
+      {!score.report && <div style={{ color: "var(--text-secondary)" }}>No capability links known for this product yet.</div>}
     </div>
   );
 }

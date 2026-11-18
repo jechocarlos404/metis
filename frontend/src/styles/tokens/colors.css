@@ -66,9 +66,12 @@
 
   --border-hairline: var(--ink-2);
   --border-default: var(--ink-3);
+  --border-control: oklch(0.64 0.010 90); /* form control edges: 3.36:1 on white (WCAG 1.4.11) */
   --border-focus: var(--aegean-5);
 
   --accent: var(--aegean-5);
   --accent-hover: var(--aegean-6);
+  --accent-solid: var(--aegean-6);       /* filled buttons: 5.79:1 with --text-inverse */
+  --accent-solid-hover: var(--aegean-7);
   --accent-wash: var(--aegean-3);
 }

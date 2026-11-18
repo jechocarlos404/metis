@@ -57,7 +57,7 @@ function FacetRow({ label, options, value, onPick, counts }) {
               }}
             >
               {l}
-              {n !== undefined && <span style={{ color: "var(--text-disabled)" }}> {n}</span>}
+              {n !== undefined && <span style={{ color: "var(--text-secondary)" }}> {n}</span>}
             </button>
           );
         })}
@@ -200,7 +200,7 @@ export default function TechCatalogIsland({ initialView = "catalog", initialQuer
                   {loading ? (
                     <Skeleton columns={COLUMNS} />
                   ) : rows.length === 0 ? (
-                    <div style={{ margin: 16, padding: "var(--space-4)", border: "1px dashed var(--border-default)", borderRadius: "var(--radius-sm)", color: "var(--text-disabled)", fontSize: "var(--text-sm)" }}>
+                    <div style={{ margin: 16, padding: "var(--space-4)", border: "1px dashed var(--border-default)", borderRadius: "var(--radius-sm)", color: "var(--text-secondary)", fontSize: "var(--text-sm)" }}>
                       No technology matches those facets.
                     </div>
                   ) : (
@@ -217,7 +217,7 @@ export default function TechCatalogIsland({ initialView = "catalog", initialQuer
                           {r.adoption ? (
                             <Badge tone={STANCE_TONE[r.adoption]}>{r.adoption}</Badge>
                           ) : (
-                            <span style={{ ...MONO, color: "var(--text-disabled)" }}>no stance</span>
+                            <span style={{ ...MONO, color: "var(--text-secondary)" }}>no stance</span>
                           )}
                         </span>
                         <span style={{ ...MONO, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -277,7 +277,7 @@ export default function TechCatalogIsland({ initialView = "catalog", initialQuer
                 {loading ? (
                   <Skeleton columns={EXPOSURE_COLUMNS} rows={6} />
                 ) : (exposure?.answer.length ?? 0) === 0 ? (
-                  <div style={{ margin: 16, padding: "var(--space-4)", border: "1px dashed var(--border-default)", borderRadius: "var(--radius-sm)", color: "var(--text-disabled)", fontSize: "var(--text-sm)" }}>
+                  <div style={{ margin: 16, padding: "var(--space-4)", border: "1px dashed var(--border-default)", borderRadius: "var(--radius-sm)", color: "var(--text-secondary)", fontSize: "var(--text-sm)" }}>
                     Nothing is exposed inside {windowDays} days.
                   </div>
                 ) : (

@@ -12,7 +12,7 @@ export function Input({ label, hint, error, mono, style, inputStyle, ...rest }) 
           height: "34px", padding: "0 10px", fontSize: "var(--text-sm)",
           fontFamily: mono ? "var(--font-mono)" : "var(--font-body)",
           color: "var(--text-heading)", background: "var(--surface-card)",
-          border: "1px solid " + (error ? "var(--danger-fg)" : focus ? "var(--border-focus)" : "var(--border-default)"),
+          border: "1px solid " + (error ? "var(--danger-fg)" : focus ? "var(--border-focus)" : "var(--border-control)"),
           borderRadius: "var(--radius-sm)", outline: "none",
           boxShadow: focus ? "var(--ring-focus)" : "none",
           transition: "border-color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out)",

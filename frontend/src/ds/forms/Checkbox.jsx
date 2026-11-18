@@ -9,7 +9,7 @@ export function Checkbox({ label, checked, onChange, disabled, style }) {
           style={{ position: "absolute", inset: 0, opacity: 0, cursor: "inherit" }} />
         <span style={{
           position: "absolute", inset: 0, borderRadius: "var(--radius-xs)",
-          border: "1px solid " + (checked ? "var(--accent)" : "var(--border-default)"),
+          border: "1px solid " + (checked ? "var(--accent)" : "var(--border-control)"),
           background: checked ? "var(--accent)" : "var(--surface-card)",
           display: "flex", alignItems: "center", justifyContent: "center",
           transition: "background var(--dur-fast) var(--ease-out)",

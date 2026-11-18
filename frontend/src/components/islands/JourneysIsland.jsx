@@ -10,7 +10,7 @@ import { api } from "../../lib/api.js";
 
 const CAPS = {
   fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: "var(--tracking-caps)",
-  textTransform: "uppercase", color: "var(--text-disabled)",
+  textTransform: "uppercase", color: "var(--text-secondary)",
 };
 const PANEL = {
   background: "var(--surface-card)", border: "1px solid var(--border-hairline)",
@@ -22,7 +22,7 @@ const VERDICT = {
   buildable: { color: "var(--ok-fg)", label: "buildable", hint: "every capability it needs is ours" },
   known_covered: { color: "var(--warn-fg)", label: "named parts ours", hint: "what anyone named is ours, but the list is incomplete" },
   missing: { color: "var(--danger-fg)", label: "missing", hint: "needs a capability we don't have" },
-  unknown: { color: "var(--text-disabled)", label: "unknown", hint: "nobody named its capabilities" },
+  unknown: { color: "var(--text-secondary)", label: "unknown", hint: "nobody named its capabilities" },
 };
 
 const STEP_W = 176;
@@ -197,7 +197,7 @@ function JourneyList({ journeys, selected, onSelect }) {
   return (
     <div style={{ ...PANEL, overflow: "hidden" }}>
       <div style={{ ...CAPS, padding: "10px 12px", borderBottom: "1px solid var(--border-hairline)" }}>Journeys</div>
-      {!journeys && <div style={{ padding: 12, fontSize: "var(--text-xs)", color: "var(--text-disabled)" }}>loading…</div>}
+      {!journeys && <div style={{ padding: 12, fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>loading…</div>}
       {journeys?.map((j) => (
         <button key={j.id} onClick={() => onSelect(j.id)}
           style={{
@@ -336,13 +336,13 @@ function JourneyMap({ steps }) {
         <svg width={width} height={height} style={{ display: "block", fontFamily: "var(--font-body)" }}>
           <defs>
             <marker id="jarrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
-              <path d="M0,0 L10,5 L0,10 z" fill="var(--text-disabled)" />
+              <path d="M0,0 L10,5 L0,10 z" fill="var(--text-secondary)" />
             </marker>
           </defs>
           {/* path between steps */}
           {steps.slice(1).map((_, i) => (
             <line key={`a${i}`} x1={stepX(i) + STEP_W + 4} y1={STEP_H / 2} x2={stepX(i + 1) - 6} y2={STEP_H / 2}
-              stroke="var(--text-disabled)" strokeWidth="1.5" markerEnd="url(#jarrow)" />
+              stroke="var(--text-secondary)" strokeWidth="1.5" markerEnd="url(#jarrow)" />
           ))}
           {/* step → capability links */}
           {placed.flatMap((c) => c.steps.map((i) => {
@@ -423,7 +423,7 @@ function StepCard({ step, x, dim, onEnter, onLeave }) {
         stroke={f ? "var(--border-default)" : "var(--border-default)"}
         strokeDasharray={f ? undefined : "4,3"} />
       <rect width="4" height={STEP_H - 16} x="0" y="8" rx="2" fill={v.color} />
-      <text x="14" y="18" fontSize="10" fill="var(--text-disabled)" fontFamily="var(--font-mono)">{String(step.position + 1).padStart(2, "0")}</text>
+      <text x="14" y="18" fontSize="10" fill="var(--text-secondary)" fontFamily="var(--font-mono)">{String(step.position + 1).padStart(2, "0")}</text>
       {step.live && <circle cx={STEP_W - 14} cy="14" r="4" fill="var(--ok-fg)"><title>live in our product today</title></circle>}
       <foreignObject x="12" y="24" width={STEP_W - 22} height="40">
         <div xmlns="http://www.w3.org/1999/xhtml" style={{
@@ -504,7 +504,7 @@ function JourneyEditor({ draft: initial, features, productById, onCancel, onSave
           const product = f ? productById.get(f.product_id) : null;
           return (
             <div key={i} style={{ display: "grid", gridTemplateColumns: "24px minmax(0,1fr) auto", gap: 8, alignItems: "start", padding: 10, border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-sm)", borderStyle: s.feature_id ? "solid" : "dashed" }}>
-              <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-disabled)", paddingTop: 9 }}>{String(i + 1).padStart(2, "0")}</div>
+              <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-secondary)", paddingTop: 9 }}>{String(i + 1).padStart(2, "0")}</div>
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                 <Input value={s.label} onChange={(e) => setStep(i, { label: e.target.value })} placeholder={f?.name ?? "What the person does"} />
                 {s.feature_id ? (

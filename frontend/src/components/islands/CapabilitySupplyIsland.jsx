@@ -53,7 +53,7 @@ function Empty({ children }) {
         padding: "var(--space-4)",
         border: "1px dashed var(--border-default)",
         borderRadius: "var(--radius-sm)",
-        color: "var(--text-disabled)",
+        color: "var(--text-secondary)",
         fontSize: "var(--text-sm)",
       }}
     >
@@ -136,7 +136,7 @@ export default function CapabilitySupplyIsland({ slug }) {
                 border: "none",
                 background: "none",
                 cursor: "pointer",
-                color: "var(--text-disabled)",
+                color: "var(--text-secondary)",
                 ...MICRO,
               }}
             >

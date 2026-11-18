@@ -18,7 +18,7 @@ export function PipelineStepper({ active = 0, compact, onSelect, style }) {
             padding: compact ? "3px 8px" : "5px 12px",
             fontSize: compact ? "10px" : "var(--text-xs)", fontFamily: "inherit",
             fontWeight: i === active ? "var(--weight-bold)" : "var(--weight-regular)",
-            color: i === active ? "var(--text-inverse)" : i < active ? "var(--stage-" + s.key + ")" : "var(--text-disabled)",
+            color: i === active ? "var(--text-inverse)" : i < active ? "var(--stage-" + s.key + ")" : "var(--text-secondary)",
             background: i === active ? "var(--stage-" + s.key + ")" : "var(--surface-card)",
             border: "1px solid " + (i <= active ? "var(--stage-" + s.key + ")" : "var(--border-hairline)"),
             borderRadius: "var(--radius-sm)", cursor: onSelect ? "pointer" : "default",

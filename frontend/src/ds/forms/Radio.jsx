@@ -9,7 +9,7 @@ export function Radio({ label, checked, onChange, name, disabled, style }) {
           style={{ position: "absolute", inset: 0, opacity: 0, cursor: "inherit" }} />
         <span style={{
           position: "absolute", inset: 0, borderRadius: "50%",
-          border: checked ? "5px solid var(--accent)" : "1px solid var(--border-default)",
+          border: checked ? "5px solid var(--accent)" : "1px solid var(--border-control)",
           background: "var(--surface-card)", transition: "border var(--dur-fast) var(--ease-out)",
         }} />
       </span>

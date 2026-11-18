@@ -6,11 +6,11 @@ import { ENTITIES, REF_SOURCES, shortId } from "../../lib/data-entities.js";
 
 const TH = {
   fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: "var(--tracking-caps)",
-  textTransform: "uppercase", color: "var(--text-disabled)",
+  textTransform: "uppercase", color: "var(--text-secondary)",
 };
 const CELL = { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--text-body)" };
 const CELL_MONO = { ...CELL, fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-secondary)" };
-const MUTED = { fontSize: "var(--text-sm)", color: "var(--text-disabled)" };
+const MUTED = { fontSize: "var(--text-sm)", color: "var(--text-secondary)" };
 const EMPTY_REFS = Object.fromEntries(
   Object.keys(REF_SOURCES).map((k) => [k, { list: [], byId: new Map() }]),
 );

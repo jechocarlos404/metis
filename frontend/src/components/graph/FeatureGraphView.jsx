@@ -172,7 +172,7 @@ export function FeatureGraphView({ layout, selectedId, onSelect, impactIds, cutS
 
       <div style={{
         position: "absolute", bottom: 10, left: 12, pointerEvents: "none",
-        fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-disabled)",
+        fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-secondary)",
       }}>
         drag to move · double-click to release · scroll to zoom
       </div>
@@ -180,7 +180,7 @@ export function FeatureGraphView({ layout, selectedId, onSelect, impactIds, cutS
       {graphData.nodes.length === 0 && (
         <div style={{
           position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center",
-          fontSize: "var(--text-sm)", color: "var(--text-disabled)", pointerEvents: "none",
+          fontSize: "var(--text-sm)", color: "var(--text-secondary)", pointerEvents: "none",
         }}>
           No features yet.
         </div>
@@ -230,7 +230,7 @@ function FeatureNode({ node, isSelected, isHovered, isDimmed, isFaded, isImpacte
       {isPinned && (
         <g transform={`translate(${NODE_W / 2 - 22},${NODE_H / 2 - 22})`}>
           <circle cx="9" cy="9" r="9" fill="var(--surface-card)" stroke="var(--border-hairline)" />
-          <g transform="translate(2,2)" color="var(--text-disabled)">
+          <g transform="translate(2,2)" color="var(--text-secondary)">
             <Icon name="pin" size={14} />
           </g>
         </g>

@@ -21,7 +21,7 @@ const { href, label, icon, active } = Astro.props;
     stroke-width="2"
     stroke-linecap="round"
     stroke-linejoin="round"
-    style={`flex:none; color:${active ? "var(--text-accent)" : "var(--text-disabled)"};`}
+    style={`flex:none; color:${active ? "var(--text-accent)" : "var(--text-secondary)"};`}
   >
     {(ICONS[icon] || []).map((n) =>
       n[0] === "path" ? (

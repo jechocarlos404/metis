@@ -21,7 +21,7 @@ export function Tag({ type, onRemove, children, style }) {
       {dot && <span style={{ width: "7px", height: "7px", borderRadius: "50%", background: dot, flex: "none" }} />}
       {children}
       {onRemove && (
-        <button aria-label="Remove" onClick={onRemove} style={{ background: "none", border: "none", padding: 0, cursor: "pointer", color: "var(--text-disabled)", display: "flex" }}>
+        <button aria-label="Remove" onClick={onRemove} style={{ background: "none", border: "none", padding: 0, cursor: "pointer", color: "var(--text-secondary)", display: "flex" }}>
           <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><path d="M18 6L6 18M6 6l12 12" /></svg>
         </button>
       )}

@@ -115,7 +115,7 @@ export default function TechDetailIsland({ slug, canWrite = false }) {
           detail.adoption ? (
             <Badge tone={STANCE_TONE[detail.adoption]}>{detail.adoption}</Badge>
           ) : (
-            <span style={{ ...MONO, color: "var(--text-disabled)" }}>no stance taken</span>
+            <span style={{ ...MONO, color: "var(--text-secondary)" }}>no stance taken</span>
           )
         }
       />
@@ -144,7 +144,7 @@ export default function TechDetailIsland({ slug, canWrite = false }) {
               {detail.versions.map((v) => (
                 <span key={v.id} style={{ ...MONO, border: "1px solid var(--border-default)", borderRadius: "var(--radius-xs)", padding: "2px 8px" }}>
                   {v.label}
-                  {v.eol_on && <span style={{ color: "var(--text-disabled)" }}> · eol {v.eol_on}</span>}
+                  {v.eol_on && <span style={{ color: "var(--text-secondary)" }}> · eol {v.eol_on}</span>}
                 </span>
               ))}
             </div>
@@ -153,7 +153,7 @@ export default function TechDetailIsland({ slug, canWrite = false }) {
 
         <Section label="satisfies" meta={`${detail.satisfactions.length} capabilit(ies)`}>
           {detail.satisfactions.length === 0 ? (
-            <span style={{ fontSize: "var(--text-sm)", color: "var(--text-disabled)" }}>
+            <span style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>
               In the catalog, not a candidate for anything. That is a normal state.
             </span>
           ) : (
@@ -180,7 +180,7 @@ export default function TechDetailIsland({ slug, canWrite = false }) {
           meta={`${breaks.length} product(s) · ${required} required slot(s) · ${offStack} off_stack`}
         >
           {breaks.length === 0 ? (
-            <span style={{ fontSize: "var(--text-sm)", color: "var(--text-disabled)" }}>
+            <span style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>
               {radius?.unresolved?.[0]?.reason ?? "No product records using this."}
             </span>
           ) : (
@@ -208,7 +208,7 @@ export default function TechDetailIsland({ slug, canWrite = false }) {
 
         <Section label="who has touched this" meta={`${encounters?.answer.length ?? 0} person(s)`}>
           {(encounters?.answer.length ?? 0) === 0 ? (
-            <span style={{ fontSize: "var(--text-sm)", color: "var(--text-disabled)" }}>
+            <span style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>
               Nobody has recorded touching this.
             </span>
           ) : (
@@ -217,8 +217,8 @@ export default function TechDetailIsland({ slug, canWrite = false }) {
                 <span key={i} style={{ display: "inline-flex", alignItems: "center", gap: 8, border: "1px solid var(--border-default)", borderRadius: "var(--radius-xs)", padding: "4px 10px" }}>
                   <span style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-sm)", color: "var(--text-heading)" }}>{e.person}</span>
                   <span style={MONO}>{e.depth}</span>
-                  <span style={{ ...MONO, color: "var(--text-disabled)" }}>{e.last_at}</span>
-                  {e.on_product && <span style={{ ...MONO, color: "var(--text-disabled)" }}>{e.on_product}</span>}
+                  <span style={{ ...MONO, color: "var(--text-secondary)" }}>{e.last_at}</span>
+                  {e.on_product && <span style={{ ...MONO, color: "var(--text-secondary)" }}>{e.on_product}</span>}
                 </span>
               ))}
             </div>
@@ -238,7 +238,7 @@ export default function TechDetailIsland({ slug, canWrite = false }) {
               <Button type="submit" size="sm" disabled={saving || !draft.person.trim()}>
                 {saving ? "recording" : "record"}
               </Button>
-              <span style={{ ...MONO, color: "var(--text-disabled)" }}>
+              <span style={{ ...MONO, color: "var(--text-secondary)" }}>
                 a handle and a depth — no levels, no endorsements
               </span>
             </form>

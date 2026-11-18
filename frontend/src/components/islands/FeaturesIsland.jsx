@@ -5,7 +5,7 @@ import { api, ApiError } from "../../lib/api.js";
 import { FeatureGraphView } from "../graph/FeatureGraphView.jsx";
 
 export default function FeaturesIsland({ canWrite = true }) {
-  const [tab, setTab] = React.useState("graph");
+  const [tab, setTab] = React.useState("directory");
   const [layout, setLayout] = React.useState({ nodes: [], edges: [] });
   const [selected, setSelected] = React.useState(null);
   const [detail, setDetail] = React.useState(null);
@@ -312,16 +312,135 @@ export default function FeaturesIsland({ canWrite = true }) {
         }
       />
       <div style={{ padding: "12px 24px 0", flex: "none" }}>
-        <Tabs tabs={[{ value: "graph", label: "Graph" }, { value: "directory", label: "Directory", count: directory.length }]} value={tab} onChange={setTab} />
+        <Tabs tabs={[{ value: "directory", label: "Directory", count: directory.length }, { value: "graph", label: "Graph" }]} value={tab} onChange={setTab} />
       </div>
       {error && !dialog && <div style={{ padding: "8px 24px", fontSize: "var(--text-sm)", color: "var(--danger-fg)" }}>{error}</div>}
 
-      {tab === "graph" ? (
-        <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
+      <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
+        {tab === "graph" ? (
           <div style={{ flex: 1, position: "relative", margin: 20, background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", overflow: "hidden", minWidth: 0 }}>
             <FeatureGraphView layout={layout} selectedId={selected} onSelect={setSelected} impactIds={impactIds} cutStates={cutStates} fadedIds={fadedIds} />
           </div>
+        ) : (
+        <div style={{ flex: 1, minWidth: 0, overflowY: "auto", padding: 20 }}>
+          <div style={{ background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", overflow: "hidden" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 160px 110px 110px 120px", padding: "8px 16px", borderBottom: "1px solid var(--border-hairline)", fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: "var(--tracking-caps)", textTransform: "uppercase", color: "var(--text-secondary)" }}>
+              <span>Feature</span><span>Capability</span><span>Layer</span><span>Priority</span><span>Status</span>
+            </div>
+            {directory.map((n, i) => (
+              <div key={n.id} onClick={() => setSelected(n.id)} style={{ display: "grid", gridTemplateColumns: "1fr 160px 110px 110px 120px", alignItems: "center", padding: "10px 16px", borderBottom: i < directory.length - 1 ? "1px solid var(--border-hairline)" : "none", cursor: "pointer", fontSize: "var(--text-sm)", background: selected === n.id ? "var(--surface-hover)" : undefined }}>
+                <span style={{ color: "var(--text-heading)", fontWeight: "var(--weight-medium)" }}>{n.name}</span>
+                <span title={(n.capability_ids ?? []).map((c) => capabilityById.get(c)?.name).join(", ")} style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", ...ELLIPSIS }}>{capabilityNames(n.capability_ids, capabilityById)}</span>
+                <span>{n.facets?.layer ? <Tag type={n.facets.layer}>{n.facets.layer}</Tag> : <span style={{ color: "var(--text-secondary)" }}>—</span>}</span>
+                <span>{n.priority != null ? <PriorityBadge priority={n.priority} /> : <span style={{ color: "var(--text-secondary)" }}>—</span>}</span>
+                <span><StatusBadge status={n.status} /></span>
+              </div>
+            ))}
+            {directory.length === 0 && (
+              <div style={{ padding: "16px", fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>
+                0 features match{query ? ` "${query}"` : ""}.
+              </div>
+            )}
+          </div>
+        </div>
+        )}
           <aside style={{ width: 280, flex: "none", margin: "20px 20px 20px 0", background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", padding: 16, display: "flex", flexDirection: "column", gap: 12, overflowY: "auto" }}>
+            {detail ? (
+              <>
+                <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
+                  <div style={{ flex: 1, fontSize: "var(--text-md)", fontWeight: "var(--weight-semibold)", color: "var(--text-heading)" }}>{detail.name}</div>
+                  {canWrite && (
+                    <IconButton size="sm" label="Edit feature" onClick={openEdit}><Icon name="pencil" size={13} /></IconButton>
+                  )}
+                </div>
+                {detail.description && <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", lineHeight: "var(--leading-snug)" }}>{detail.description}</div>}
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  {detail.facets?.layer && <Tag type={detail.facets.layer}>{detail.facets.layer}</Tag>}
+                  <StatusBadge status={detail.status} />
+                </div>
+                {detail.capability_ids.map((cid) => (
+                  <div key={cid} style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-secondary)" }}>
+                    REALIZES → {capabilityById.get(cid)?.name ?? "unknown capability"}
+                  </div>
+                ))}
+                {detail.unknown_capabilities && (
+                  <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-secondary)" }}>
+                    REALIZES → {detail.capability_ids.length ? "+ " : ""}capabilities not yet identified
+                  </div>
+                )}
+                {products.length > 0 && (
+                  (nodeById.get(detail.id)?.product_ids ?? []).length > 0 ? (
+                    nodeById.get(detail.id).product_ids.map((pid) => (
+                      <div key={pid} style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-secondary)" }}>
+                        PRODUCT → {productById.get(pid)?.name ?? "unknown product"}{productById.get(pid)?.external ? " · external, not our work" : ""}
+                      </div>
+                    ))
+                  ) : (
+                    <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-secondary)" }}>
+                      no product
+                    </div>
+                  )
+                )}
+                {inJourneys.map((j) => (
+                  <a key={j.id} href={`/journeys?id=${j.id}`} style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-accent)", textDecoration: "none" }}>
+                    IN JOURNEY → {j.name}
+                  </a>
+                ))}
+                {detail.priority != null && <PriorityBadge priority={detail.priority} rationale={detail.priority_rationale} />}
+                <WhyChainPanel chain={why?.chain} />
+                <div style={{ borderTop: "1px solid var(--border-hairline)", paddingTop: 12, display: "flex", flexDirection: "column", gap: 6 }}>
+                  <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: "var(--tracking-caps)", textTransform: "uppercase", color: "var(--text-secondary)" }}>Relationships</div>
+                  {detail.outgoing.map((r, i) => (
+                    <div key={`o${i}`} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-body)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.kind} → {r.feature.name}</span>
+                      {canWrite && (
+                        <IconButton size="sm" label="Remove edge" onClick={() => removeEdge(detail.id, r.feature.id, r.kind)}><Icon name="x" size={12} /></IconButton>
+                      )}
+                    </div>
+                  ))}
+                  {detail.incoming.map((r, i) => (
+                    <div key={`i${i}`} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-body)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.feature.name} → {r.kind}</span>
+                      {canWrite && (
+                        <IconButton size="sm" label="Remove edge" onClick={() => removeEdge(r.feature.id, detail.id, r.kind)}><Icon name="x" size={12} /></IconButton>
+                      )}
+                    </div>
+                  ))}
+                  {detail.outgoing.length + detail.incoming.length === 0 && (
+                    <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-secondary)" }}>no edges</div>
+                  )}
+                  {canWrite && (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 4 }}>
+                      <Select value={edgeDraft.kind} onChange={(e) => setEdgeDraft({ ...edgeDraft, kind: e.target.value })}
+                        options={["DEPENDS_ON", "BLOCKS", "RELATES_TO"]} />
+                      <Select value={edgeDraft.targetId} onChange={(e) => setEdgeDraft({ ...edgeDraft, targetId: e.target.value })}
+                        options={[{ value: "", label: "Target feature…" },
+                          ...layout.nodes.filter((n) => n.id !== detail.id).map((n) => ({ value: n.id, label: n.name }))]} />
+                      <Button size="sm" variant="secondary" disabled={!edgeDraft.targetId} onClick={addEdge} style={{ gap: 6 }}>
+                        <Icon name="plus" size={13} />Add edge
+                      </Button>
+                    </div>
+                  )}
+                </div>
+                {impact && (
+                  <div style={{ borderTop: "1px solid var(--border-hairline)", paddingTop: 12, display: "flex", flexDirection: "column", gap: 6 }}>
+                    <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: "var(--tracking-caps)", textTransform: "uppercase", color: "var(--text-secondary)" }}>Impact</div>
+                    <div style={{ fontSize: "var(--text-xs)", color: "var(--text-body)" }}>
+                      {impact.dependents.length} dependent{impact.dependents.length === 1 ? "" : "s"} break if this changes; needs {impact.dependencies.length}.
+                    </div>
+                    {impact.dependents.map((d) => (
+                      <div key={d.id} style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--danger-fg)" }}>{d.name}</div>
+                    ))}
+                  </div>
+                )}
+                <Button size="sm" variant="secondary" style={{ gap: 6 }} onClick={runImpact}>
+                  <Icon name="git-branch" size={13} />Impact query
+                </Button>
+              </>
+            ) : (
+              <div style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>Select a feature.</div>
+            )}
+            <div style={{ borderTop: "1px solid var(--border-hairline)" }} />
             <ReadyFrontierPanel ready={ready} selectedId={selected} onSelect={setSelected} />
             <GraphDiagnosticsPanel
               cycles={cycles}
@@ -346,127 +465,8 @@ export default function FeaturesIsland({ canWrite = true }) {
                 cutting={cutting}
               />
             )}
-            {canWrite && <div style={{ borderTop: "1px solid var(--border-hairline)" }} />}
-            {detail ? (
-              <>
-                <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
-                  <div style={{ flex: 1, fontSize: "var(--text-md)", fontWeight: "var(--weight-semibold)", color: "var(--text-heading)" }}>{detail.name}</div>
-                  {canWrite && (
-                    <IconButton size="sm" label="Edit feature" onClick={openEdit}><Icon name="pencil" size={13} /></IconButton>
-                  )}
-                </div>
-                {detail.description && <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", lineHeight: "var(--leading-snug)" }}>{detail.description}</div>}
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  {detail.facets?.layer && <Tag type={detail.facets.layer}>{detail.facets.layer}</Tag>}
-                  <StatusBadge status={detail.status} />
-                </div>
-                {detail.capability_ids.map((cid) => (
-                  <div key={cid} style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-secondary)" }}>
-                    REALIZES → {capabilityById.get(cid)?.name ?? "unknown capability"}
-                  </div>
-                ))}
-                {detail.unknown_capabilities && (
-                  <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-disabled)" }}>
-                    REALIZES → {detail.capability_ids.length ? "+ " : ""}capabilities not yet identified
-                  </div>
-                )}
-                {products.length > 0 && (
-                  (nodeById.get(detail.id)?.product_ids ?? []).length > 0 ? (
-                    nodeById.get(detail.id).product_ids.map((pid) => (
-                      <div key={pid} style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-secondary)" }}>
-                        PRODUCT → {productById.get(pid)?.name ?? "unknown product"}{productById.get(pid)?.external ? " · external, not our work" : ""}
-                      </div>
-                    ))
-                  ) : (
-                    <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-disabled)" }}>
-                      no product
-                    </div>
-                  )
-                )}
-                {inJourneys.map((j) => (
-                  <a key={j.id} href={`/journeys?id=${j.id}`} style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-accent)", textDecoration: "none" }}>
-                    IN JOURNEY → {j.name}
-                  </a>
-                ))}
-                {detail.priority != null && <PriorityBadge priority={detail.priority} rationale={detail.priority_rationale} />}
-                <WhyChainPanel chain={why?.chain} />
-                <div style={{ borderTop: "1px solid var(--border-hairline)", paddingTop: 12, display: "flex", flexDirection: "column", gap: 6 }}>
-                  <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: "var(--tracking-caps)", textTransform: "uppercase", color: "var(--text-disabled)" }}>Relationships</div>
-                  {detail.outgoing.map((r, i) => (
-                    <div key={`o${i}`} style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                      <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-body)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.kind} → {r.feature.name}</span>
-                      {canWrite && (
-                        <IconButton size="sm" label="Remove edge" onClick={() => removeEdge(detail.id, r.feature.id, r.kind)}><Icon name="x" size={12} /></IconButton>
-                      )}
-                    </div>
-                  ))}
-                  {detail.incoming.map((r, i) => (
-                    <div key={`i${i}`} style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                      <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-body)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.feature.name} → {r.kind}</span>
-                      {canWrite && (
-                        <IconButton size="sm" label="Remove edge" onClick={() => removeEdge(r.feature.id, detail.id, r.kind)}><Icon name="x" size={12} /></IconButton>
-                      )}
-                    </div>
-                  ))}
-                  {detail.outgoing.length + detail.incoming.length === 0 && (
-                    <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-disabled)" }}>no edges</div>
-                  )}
-                  {canWrite && (
-                    <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 4 }}>
-                      <Select value={edgeDraft.kind} onChange={(e) => setEdgeDraft({ ...edgeDraft, kind: e.target.value })}
-                        options={["DEPENDS_ON", "BLOCKS", "RELATES_TO"]} />
-                      <Select value={edgeDraft.targetId} onChange={(e) => setEdgeDraft({ ...edgeDraft, targetId: e.target.value })}
-                        options={[{ value: "", label: "Target feature…" },
-                          ...layout.nodes.filter((n) => n.id !== detail.id).map((n) => ({ value: n.id, label: n.name }))]} />
-                      <Button size="sm" variant="secondary" disabled={!edgeDraft.targetId} onClick={addEdge} style={{ gap: 6 }}>
-                        <Icon name="plus" size={13} />Add edge
-                      </Button>
-                    </div>
-                  )}
-                </div>
-                {impact && (
-                  <div style={{ borderTop: "1px solid var(--border-hairline)", paddingTop: 12, display: "flex", flexDirection: "column", gap: 6 }}>
-                    <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: "var(--tracking-caps)", textTransform: "uppercase", color: "var(--text-disabled)" }}>Impact</div>
-                    <div style={{ fontSize: "var(--text-xs)", color: "var(--text-body)" }}>
-                      {impact.dependents.length} dependent{impact.dependents.length === 1 ? "" : "s"} break if this changes; needs {impact.dependencies.length}.
-                    </div>
-                    {impact.dependents.map((d) => (
-                      <div key={d.id} style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--danger-fg)" }}>{d.name}</div>
-                    ))}
-                  </div>
-                )}
-                <Button size="sm" variant="secondary" style={{ marginTop: "auto", gap: 6 }} onClick={runImpact}>
-                  <Icon name="git-branch" size={13} />Impact query
-                </Button>
-              </>
-            ) : (
-              <div style={{ fontSize: "var(--text-sm)", color: "var(--text-disabled)" }}>Select a feature.</div>
-            )}
           </aside>
-        </div>
-      ) : (
-        <div style={{ flex: 1, overflowY: "auto", padding: 20 }}>
-          <div style={{ background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", overflow: "hidden" }}>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 160px 110px 110px 120px", padding: "8px 16px", borderBottom: "1px solid var(--border-hairline)", fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: "var(--tracking-caps)", textTransform: "uppercase", color: "var(--text-disabled)" }}>
-              <span>Feature</span><span>Capability</span><span>Layer</span><span>Priority</span><span>Status</span>
-            </div>
-            {directory.map((n, i) => (
-              <div key={n.id} onClick={() => { setSelected(n.id); setTab("graph"); }} style={{ display: "grid", gridTemplateColumns: "1fr 160px 110px 110px 120px", alignItems: "center", padding: "10px 16px", borderBottom: i < directory.length - 1 ? "1px solid var(--border-hairline)" : "none", cursor: "pointer", fontSize: "var(--text-sm)" }}>
-                <span style={{ color: "var(--text-heading)", fontWeight: "var(--weight-medium)" }}>{n.name}</span>
-                <span title={(n.capability_ids ?? []).map((c) => capabilityById.get(c)?.name).join(", ")} style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", ...ELLIPSIS }}>{capabilityNames(n.capability_ids, capabilityById)}</span>
-                <span>{n.facets?.layer ? <Tag type={n.facets.layer}>{n.facets.layer}</Tag> : <span style={{ color: "var(--text-disabled)" }}>—</span>}</span>
-                <span>{n.priority != null ? <PriorityBadge priority={n.priority} /> : <span style={{ color: "var(--text-disabled)" }}>—</span>}</span>
-                <span><StatusBadge status={n.status} /></span>
-              </div>
-            ))}
-            {directory.length === 0 && (
-              <div style={{ padding: "16px", fontSize: "var(--text-sm)", color: "var(--text-disabled)" }}>
-                0 features match{query ? ` "${query}"` : ""}.
-              </div>
-            )}
-          </div>
-        </div>
-      )}
+      </div>
 
       <Dialog
         open={dialog != null}
@@ -535,7 +535,7 @@ function CapabilityPicker({ capabilities, selected, query, onQuery, onChange }) 
         {shown.map((c) => (
           <Checkbox key={c.id} label={c.name} checked={chosen.has(c.id)} onChange={(on) => toggle(c.id, on)} />
         ))}
-        {shown.length === 0 && <span style={{ fontSize: "var(--text-xs)", color: "var(--text-disabled)" }}>0 capabilities match.</span>}
+        {shown.length === 0 && <span style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>0 capabilities match.</span>}
       </div>
     </div>
   );
@@ -543,7 +543,7 @@ function CapabilityPicker({ capabilities, selected, query, onQuery, onChange }) 
 
 const CAPS_HEADER = {
   fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: "var(--tracking-caps)",
-  textTransform: "uppercase", color: "var(--text-disabled)",
+  textTransform: "uppercase", color: "var(--text-secondary)",
 };
 const MONO_ROW = { fontFamily: "var(--font-mono)", fontSize: 11 };
 const ELLIPSIS = { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
@@ -553,7 +553,7 @@ function ReadyFrontierPanel({ ready, selectedId, onSelect }) {
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
       <div style={CAPS_HEADER}>Ready now · {ready.length}</div>
       {ready.length === 0 ? (
-        <div style={{ ...MONO_ROW, color: "var(--text-disabled)" }}>
+        <div style={{ ...MONO_ROW, color: "var(--text-secondary)" }}>
           Nothing ready — pending work is blocked or already done.
         </div>
       ) : (
@@ -586,7 +586,7 @@ function GraphDiagnosticsPanel({ cycles, topoOrder, topoError, selectedId, onSel
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
       <div style={CAPS_HEADER}>Cycles · {cycles.length}</div>
       {cycles.length === 0 ? (
-        <div style={{ ...MONO_ROW, color: "var(--text-disabled)" }}>no dependency cycles</div>
+        <div style={{ ...MONO_ROW, color: "var(--text-secondary)" }}>no dependency cycles</div>
       ) : (
         cycles.map((cycle, i) => (
           <div key={i} style={{ ...MONO_ROW, color: "var(--danger-fg)", ...ELLIPSIS }}>
@@ -598,7 +598,7 @@ function GraphDiagnosticsPanel({ cycles, topoOrder, topoError, selectedId, onSel
       {topoError ? (
         <div style={{ ...MONO_ROW, color: "var(--danger-fg)" }}>{topoError}</div>
       ) : topoOrder?.length === 0 ? (
-        <div style={{ ...MONO_ROW, color: "var(--text-disabled)" }}>no features in graph</div>
+        <div style={{ ...MONO_ROW, color: "var(--text-secondary)" }}>no features in graph</div>
       ) : (
         topoOrder?.slice(0, 12).map((f, i) => {
           const active = f.id === selectedId;
@@ -614,14 +614,14 @@ function GraphDiagnosticsPanel({ cycles, topoOrder, topoError, selectedId, onSel
                 color: active ? "var(--text-heading)" : "var(--text-secondary)", ...MONO_ROW,
               }}
             >
-              <span style={{ color: "var(--text-disabled)", flex: "none", width: 16 }}>{i + 1}.</span>
+              <span style={{ color: "var(--text-secondary)", flex: "none", width: 16 }}>{i + 1}.</span>
               <span style={{ flex: 1, ...ELLIPSIS }}>{f.name}</span>
             </button>
           );
         })
       )}
       {topoOrder && topoOrder.length > 12 && (
-        <div style={{ ...MONO_ROW, color: "var(--text-disabled)" }}>+{topoOrder.length - 12} more</div>
+        <div style={{ ...MONO_ROW, color: "var(--text-secondary)" }}>+{topoOrder.length - 12} more</div>
       )}
     </div>
   );
@@ -657,10 +657,10 @@ function WhyChainPanel({ chain }) {
         );
       })}
       {caps.length === 0 && (
-        <div style={{ ...MONO_ROW, color: "var(--text-disabled)" }}>no capability linked</div>
+        <div style={{ ...MONO_ROW, color: "var(--text-secondary)" }}>no capability linked</div>
       )}
       {caps.length > 0 && goals.length === 0 && (
-        <div style={{ ...MONO_ROW, color: "var(--text-disabled)" }}>no motivating goals</div>
+        <div style={{ ...MONO_ROW, color: "var(--text-secondary)" }}>no motivating goals</div>
       )}
     </div>
   );
@@ -704,7 +704,7 @@ function MVPCutPanel({ capabilities, nodeById, capabilityById, selectedId, targe
           {cut.capabilities.map((c) => (
             <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 6, ...MONO_ROW }}>
               <span style={{ color: "var(--text-body)", flex: 1, ...ELLIPSIS }}>{c.name}</span>
-              <span style={{ color: c.essential ? "var(--ok-fg)" : "var(--text-disabled)", flex: "none" }}>
+              <span style={{ color: c.essential ? "var(--ok-fg)" : "var(--text-secondary)", flex: "none" }}>
                 {c.required}/{c.total}
               </span>
             </div>
@@ -723,10 +723,10 @@ function MVPCutPanel({ capabilities, nodeById, capabilityById, selectedId, targe
             </div>
           ))}
           {cut.deferrable.length > 8 && (
-            <div style={{ ...MONO_ROW, color: "var(--text-disabled)" }}>+{cut.deferrable.length - 8} more</div>
+            <div style={{ ...MONO_ROW, color: "var(--text-secondary)" }}>+{cut.deferrable.length - 8} more</div>
           )}
           {cut.deferrable.length === 0 && (
-            <div style={{ ...MONO_ROW, color: "var(--text-disabled)" }}>nothing deferrable — targets need the whole graph</div>
+            <div style={{ ...MONO_ROW, color: "var(--text-secondary)" }}>nothing deferrable — targets need the whole graph</div>
           )}
         </div>
       )}

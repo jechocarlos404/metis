@@ -16,7 +16,7 @@ export function Button({ variant = "primary", size = "md", disabled, children, s
   };
   const variants = {
     primary: { background: hover && !disabled ? "var(--ink-7)" : "var(--surface-inverse)", color: "var(--text-inverse)" },
-    accent: { background: hover && !disabled ? "var(--accent-hover)" : "var(--accent)", color: "var(--text-inverse)" },
+    accent: { background: hover && !disabled ? "var(--accent-solid-hover)" : "var(--accent-solid)", color: "var(--text-inverse)" },
     secondary: { background: hover && !disabled ? "var(--surface-hover)" : "var(--surface-card)", color: "var(--text-heading)", borderColor: "var(--border-default)" },
     ghost: { background: hover && !disabled ? "var(--surface-hover)" : "transparent", color: "var(--text-body)" },
     danger: { background: hover && !disabled ? "oklch(0.48 0.17 25)" : "var(--danger-solid)", color: "var(--text-inverse)" },

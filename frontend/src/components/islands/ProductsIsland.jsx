@@ -393,7 +393,7 @@ export default function ProductsIsland({ canWrite = true }) {
               footer={
                 <>
                   <StatusBadge status={product.status} />
-                  {prd && <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-disabled)" }}>{prd.display_id} v{prd.version} · {prd.created_by}</span>}
+                  {prd && <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-secondary)" }}>{prd.display_id} v{prd.version} · {prd.created_by}</span>}
                   <span style={{ flex: 1 }} />
                   {canWrite && (
                     <Button size="sm" variant="secondary" style={{ gap: 6 }} onClick={openEditProduct}>
@@ -410,7 +410,7 @@ export default function ProductsIsland({ canWrite = true }) {
                 {product.summary}
               </span>
               <div style={{ marginTop: 14, display: "flex", flexDirection: "column", gap: 8 }}>
-                <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-disabled)", letterSpacing: "var(--tracking-caps)", textTransform: "uppercase" }}>
+                <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-secondary)", letterSpacing: "var(--tracking-caps)", textTransform: "uppercase" }}>
                   Bundled capabilities
                 </div>
                 {bundles.length > 0 ? (
@@ -425,7 +425,7 @@ export default function ProductsIsland({ canWrite = true }) {
                     ))}
                   </div>
                 ) : (
-                  <div style={{ fontSize: "var(--text-xs)", color: "var(--text-disabled)" }}>
+                  <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>
                     No explicit bundles yet. Add capabilities this product offers.
                   </div>
                 )}
@@ -495,19 +495,19 @@ export default function ProductsIsland({ canWrite = true }) {
                         {(() => {
                           const cap = capabilities.find((c) => c.id === e.capability_id);
                           return cap ? (
-                            <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-disabled)", marginTop: 2 }}>
+                            <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-secondary)", marginTop: 2 }}>
                               snapshots {cap.name}
                             </div>
                           ) : null;
                         })()}
                       </div>
                       <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-secondary)" }}>{counts.done}/{counts.total}</span>
-                      <Icon name="chevron-right" size={14} style={{ color: "var(--text-disabled)" }} />
+                      <Icon name="chevron-right" size={14} style={{ color: "var(--text-secondary)" }} />
                     </div>
                   );
                 })}
                 {epics.length === 0 && (
-                  <div style={{ border: "1px dashed var(--border-default)", borderRadius: "var(--radius-md)", padding: 16, color: "var(--text-disabled)", fontSize: "var(--text-sm)" }}>
+                  <div style={{ border: "1px dashed var(--border-default)", borderRadius: "var(--radius-md)", padding: 16, color: "var(--text-secondary)", fontSize: "var(--text-sm)" }}>
                     No PRD yet. Ask `spec_decomposer` in Chat to decompose this Spec.
                   </div>
                 )}
@@ -523,7 +523,7 @@ export default function ProductsIsland({ canWrite = true }) {
                 ))}
                 {canWrite && (
                   <div onClick={() => setTicketDialog({ mode: "new", title: "", description: "", budget: "M", files: "" })}
-                    style={{ border: "1px dashed var(--border-default)", borderRadius: "var(--radius-md)", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, color: "var(--text-disabled)", fontSize: "var(--text-sm)", minHeight: 90, cursor: "pointer" }}>
+                    style={{ border: "1px dashed var(--border-default)", borderRadius: "var(--radius-md)", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, color: "var(--text-secondary)", fontSize: "var(--text-sm)", minHeight: 90, cursor: "pointer" }}>
                     <Icon name="plus" size={14} /> New ticket
                   </div>
                 )}
@@ -540,7 +540,7 @@ export default function ProductsIsland({ canWrite = true }) {
                 )}
                 {(strategy?.phases ?? []).map((p, i) => (
                   <div key={i} style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                    <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-disabled)", width: 16 }}>{i + 1}</span>
+                    <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-secondary)", width: 16 }}>{i + 1}</span>
                     <div style={{ display: "flex", flex: "0 0 420px" }}>
                       <div style={{ width: `${((p.start || 0) / maxPhaseEnd) * 100}%` }} />
                       <div style={{ height: 10, borderRadius: 5, background: i === 0 ? "var(--stage-prd)" : "var(--ink-2)", width: `${((p.length || 0) / maxPhaseEnd) * 100}%` }} />
@@ -549,11 +549,11 @@ export default function ProductsIsland({ canWrite = true }) {
                   </div>
                 ))}
                 {strategy ? (
-                  <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-disabled)", marginTop: 4 }}>
+                  <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-secondary)", marginTop: 4 }}>
                     {strategy.created_by} · v{strategy.version} · gantt
                   </div>
                 ) : (
-                  <div style={{ color: "var(--text-disabled)", fontSize: "var(--text-sm)" }}>
+                  <div style={{ color: "var(--text-secondary)", fontSize: "var(--text-sm)" }}>
                     No delivery strategy yet. Ask `strategist` in Chat to create one.
                   </div>
                 )}
@@ -561,7 +561,7 @@ export default function ProductsIsland({ canWrite = true }) {
             )}
           </div>
         ) : (
-          <div style={{ maxWidth: 860, border: "1px dashed var(--border-default)", borderRadius: "var(--radius-md)", padding: 24, color: "var(--text-disabled)", fontSize: "var(--text-sm)" }}>
+          <div style={{ maxWidth: 860, border: "1px dashed var(--border-default)", borderRadius: "var(--radius-md)", padding: 24, color: "var(--text-secondary)", fontSize: "var(--text-sm)" }}>
             No products yet. Ask `spec_decomposer` in Chat to create a Spec from a product goal.
           </div>
         )}
@@ -648,7 +648,7 @@ export default function ProductsIsland({ canWrite = true }) {
               </div>
               {(seedResult.notes || []).length > 0 && (
                 <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                  <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-disabled)" }}>Notes</div>
+                  <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-secondary)" }}>Notes</div>
                   {seedResult.notes.map((note, i) => (
                     <div key={i} style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>{note}</div>
                   ))}
@@ -748,7 +748,7 @@ export default function ProductsIsland({ canWrite = true }) {
               </div>
               {(unseedResult.notes || []).length > 0 && (
                 <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                  <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-disabled)" }}>Notes</div>
+                  <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-secondary)" }}>Notes</div>
                   {unseedResult.notes.map((note, i) => (
                     <div key={i} style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>{note}</div>
                   ))}

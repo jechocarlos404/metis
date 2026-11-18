@@ -60,7 +60,7 @@ function LayerCard({ layer, slots, activeId, onPick }) {
                     {s.tech}
                   </span>
                 ) : (
-                  <span style={{ ...MONO, fontSize: "var(--text-xs)", border: "1px dashed var(--ink-4)", borderRadius: "var(--radius-xs)", padding: "2px 8px", color: "var(--text-disabled)" }}>
+                  <span style={{ ...MONO, fontSize: "var(--text-xs)", border: "1px dashed var(--ink-4)", borderRadius: "var(--radius-xs)", padding: "2px 8px", color: "var(--text-secondary)" }}>
                     unfilled
                   </span>
                 )}
@@ -179,14 +179,14 @@ export default function StacksIsland({ initialSlot = "", canWrite = false }) {
         <section style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
           <div style={MICRO}>archetypes — slots with capabilities, tech unbound</div>
           {archetypes.length === 0 ? (
-            <span style={{ fontSize: "var(--text-sm)", color: "var(--text-disabled)" }}>No archetypes defined.</span>
+            <span style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>No archetypes defined.</span>
           ) : (
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px,1fr))", gap: "var(--space-3)" }}>
               {archetypes.map((a) => (
                 <div key={a.id} style={{ ...CARD, padding: 14 }}>
                   <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
                     <span style={{ flex: 1, fontSize: 15, fontWeight: "var(--weight-semibold)", color: "var(--text-heading)" }}>{a.name}</span>
-                    <span style={{ ...MONO, color: "var(--text-disabled)" }}>{a.display_id}</span>
+                    <span style={{ ...MONO, color: "var(--text-secondary)" }}>{a.display_id}</span>
                   </div>
                   {a.description && (
                     <div style={{ marginTop: 6, fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>{a.description}</div>
@@ -207,11 +207,11 @@ export default function StacksIsland({ initialSlot = "", canWrite = false }) {
                 product stack{productStack ? ` · ${productStack.name}` : ""}
               </span>
               <span style={{ flex: 1 }} />
-              <span style={{ ...MONO, color: "var(--text-disabled)" }}>click a slot to resolve it</span>
+              <span style={{ ...MONO, color: "var(--text-secondary)" }}>click a slot to resolve it</span>
             </div>
 
             {!productStack ? (
-              <div style={{ ...CARD, padding: "var(--space-4)", color: "var(--text-disabled)", fontSize: "var(--text-sm)" }}>
+              <div style={{ ...CARD, padding: "var(--space-4)", color: "var(--text-secondary)", fontSize: "var(--text-sm)" }}>
                 This product has no stack yet.
               </div>
             ) : (
@@ -247,7 +247,7 @@ export default function StacksIsland({ initialSlot = "", canWrite = false }) {
           <aside style={{ flex: "1 1 300px", maxWidth: 420, position: "sticky", top: 80, ...CARD, border: "1.5px solid var(--accent)", boxShadow: "var(--shadow-raised)", padding: "var(--space-4)", display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
             <div style={{ ...MICRO, color: "var(--text-accent)" }}>stack_recommender</div>
             {!activeSlot ? (
-              <div style={{ fontSize: "var(--text-sm)", color: "var(--text-disabled)" }}>Select a slot.</div>
+              <div style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>Select a slot.</div>
             ) : (
               <>
                 <div style={{ fontSize: "var(--text-lg)", fontWeight: "var(--weight-semibold)", color: "var(--text-heading)" }}>
@@ -260,7 +260,7 @@ export default function StacksIsland({ initialSlot = "", canWrite = false }) {
                 {offers === null ? (
                   <div style={MICRO}>loading</div>
                 ) : offers.offers.length === 0 ? (
-                  <div style={{ padding: "var(--space-4)", border: "1px dashed var(--border-default)", borderRadius: "var(--radius-sm)", color: "var(--text-disabled)", fontSize: "var(--text-sm)" }}>
+                  <div style={{ padding: "var(--space-4)", border: "1px dashed var(--border-default)", borderRadius: "var(--radius-sm)", color: "var(--text-secondary)", fontSize: "var(--text-sm)" }}>
                     No offer survives the constraints on this product.
                     {offers.blocked_by.length > 0 && (
                       <div style={{ ...MONO, marginTop: 6 }}>blocked_by {offers.blocked_by.join(", ")}</div>

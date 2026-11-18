@@ -28,7 +28,7 @@ const FINDING_TONES = {
 
 const CAPS_HEADER = {
   fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: "var(--tracking-caps)",
-  textTransform: "uppercase", color: "var(--text-disabled)",
+  textTransform: "uppercase", color: "var(--text-secondary)",
 };
 
 function flatten(nodes, depth = 0, out = []) {
@@ -49,6 +49,7 @@ const EMPTY_DRAFT = { name: "", description: "", parentId: "", maturity: "planne
 
 export default function CapabilitiesIsland({ canWrite = true }) {
   const [tree, setTree] = React.useState([]);
+  const [loaded, setLoaded] = React.useState(false); // false until the first load finishes, so loading never reads as empty
   const [goals, setGoals] = React.useState([]);
   const [selected, setSelected] = React.useState(null);
   const [motivations, setMotivations] = React.useState([]);
@@ -77,6 +78,7 @@ export default function CapabilitiesIsland({ canWrite = true }) {
       api("/capabilities/health"),
     ]);
     setTree(map);
+    setLoaded(true);
     setGoals(goalList);
     setHealthFindings(findings);
     const ids = new Set(flatten(map).map((c) => c.id));
@@ -204,7 +206,7 @@ export default function CapabilitiesIsland({ canWrite = true }) {
     <>
       <PageHeader
         title="Capabilities"
-        meta={`${flat.length} capabilities · ${healthFindings.length} health finding${healthFindings.length === 1 ? "" : "s"}`}
+        meta={loaded ? `${flat.length} capabilities · ${healthFindings.length} health finding${healthFindings.length === 1 ? "" : "s"}` : "loading"}
         actions={
           canWrite && (
             <Button size="sm" variant="accent" style={{ gap: 6 }} onClick={openNew}>
@@ -233,7 +235,7 @@ export default function CapabilitiesIsland({ canWrite = true }) {
                   borderBottom: i < flat.length - 1 ? "1px solid var(--border-hairline)" : "none", cursor: "pointer", fontSize: "var(--text-sm)",
                   background: c.id === selected ? "var(--surface-inset)" : "transparent" }}>
                 <span style={{ display: "flex", alignItems: "center", gap: 8, paddingLeft: c.depth * 18, minWidth: 0 }}>
-                  <Icon name="layers" size={13} style={{ color: c.id === selected ? "var(--text-accent)" : "var(--text-disabled)" }} />
+                  <Icon name="layers" size={13} style={{ color: c.id === selected ? "var(--text-accent)" : "var(--text-secondary)" }} />
                   <span style={{ color: "var(--text-heading)", fontWeight: "var(--weight-medium)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.name}</span>
                 </span>
                 <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-secondary)" }}>
@@ -243,8 +245,8 @@ export default function CapabilitiesIsland({ canWrite = true }) {
               </div>
             ))}
             {flat.length === 0 && (
-              <div style={{ padding: 16, fontSize: "var(--text-sm)", color: "var(--text-disabled)" }}>
-                No capabilities yet. Create one to start the map.
+              <div style={{ padding: 16, fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>
+                {loaded ? "No capabilities yet. Create one to start the map." : error ? "Couldn't load capabilities." : "Loading capabilities…"}
               </div>
             )}
           </div>
@@ -292,7 +294,7 @@ export default function CapabilitiesIsland({ canWrite = true }) {
                   </div>
                 ))}
                 {motivations.length === 0 && (
-                  <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-disabled)" }}>no motivating goals</div>
+                  <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-secondary)" }}>no motivating goals</div>
                 )}
                 {canWrite && addableGoals.length > 0 && (
                   <Select value="" onChange={(e) => e.target.value && addMotivation(e.target.value)}
@@ -335,7 +337,7 @@ export default function CapabilitiesIsland({ canWrite = true }) {
               </Button>
             </>
           ) : (
-            <div style={{ fontSize: "var(--text-sm)", color: "var(--text-disabled)" }}>Select a capability.</div>
+            <div style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>Select a capability.</div>
           )}
         </aside>
       </div>
@@ -386,9 +388,9 @@ function HealthFindingsPanel({ findings, total, filter, onFilterChange, onSelect
         </div>
       </div>
       {total === 0 ? (
-        <div style={{ fontSize: "var(--text-sm)", color: "var(--text-disabled)" }}>no findings — taxonomy looks healthy</div>
+        <div style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>no findings — taxonomy looks healthy</div>
       ) : findings.length === 0 ? (
-        <div style={{ fontSize: "var(--text-sm)", color: "var(--text-disabled)" }}>no findings match this filter</div>
+        <div style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>no findings match this filter</div>
       ) : (
         findings.map((f) => {
           const isCapability = f.kind !== "empty_intent";

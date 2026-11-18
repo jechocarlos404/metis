@@ -22,7 +22,7 @@ export function Toast({ tone = "neutral", title, detail, onDismiss, style }) {
         {detail && <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", marginTop: "2px" }}>{detail}</div>}
       </div>
       {onDismiss && (
-        <button aria-label="Dismiss" onClick={onDismiss} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-disabled)", padding: 0, display: "flex" }}>
+        <button aria-label="Dismiss" onClick={onDismiss} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-secondary)", padding: 0, display: "flex" }}>
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M18 6L6 18M6 6l12 12" /></svg>
         </button>
       )}

@@ -196,7 +196,7 @@ export default function ChatIsland({ threadId: initialThreadId = null, canWrite 
       <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", padding: "24px 0" }}>
         <div style={{ maxWidth: 720, margin: "0 auto", padding: "0 24px", display: "flex", flexDirection: "column", gap: 20 }}>
           {messages.length === 0 && !live && (
-            <div style={{ border: "1px dashed var(--border-default)", borderRadius: "var(--radius-md)", padding: 20, color: "var(--text-disabled)", fontSize: "var(--text-sm)", lineHeight: "var(--leading-body)" }}>
+            <div style={{ border: "1px dashed var(--border-default)", borderRadius: "var(--radius-md)", padding: 20, color: "var(--text-secondary)", fontSize: "var(--text-sm)", lineHeight: "var(--leading-body)" }}>
               Describe a goal, decompose a Spec, or ask the graph.
               The orchestrator routes each message to `spec_decomposer`, `feature_manager`, `graph_agent`, or `strategist`.
             </div>

@@ -14,7 +14,7 @@ export function Select({ label, options, children, style, ...rest }) {
             height: "34px", padding: "0 28px 0 10px", fontSize: "var(--text-sm)",
             fontFamily: "var(--font-body)", color: "var(--text-heading)",
             background: "var(--surface-card)",
-            border: "1px solid " + (focus ? "var(--border-focus)" : "var(--border-default)"),
+            border: "1px solid " + (focus ? "var(--border-focus)" : "var(--border-control)"),
             borderRadius: "var(--radius-sm)", outline: "none", cursor: "pointer",
             boxShadow: focus ? "var(--ring-focus)" : "none",
           }}>

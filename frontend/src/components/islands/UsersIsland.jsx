@@ -8,7 +8,7 @@ const ROLE_TONES = { admin: "accent", editor: "ok", viewer: "neutral" };
 
 const TH = {
   fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: "var(--tracking-caps)",
-  textTransform: "uppercase", color: "var(--text-disabled)",
+  textTransform: "uppercase", color: "var(--text-secondary)",
 };
 const COLS = "1fr 1fr 90px 90px 40px";
 const EMPTY = { username: "", email: "", firstName: "", lastName: "", role: "viewer", password: "", temporary: true };
@@ -167,7 +167,7 @@ export default function UsersIsland() {
               </span>
               <span style={{ color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{u.email || "—"}</span>
               <span>{u.role ? <Badge tone={ROLE_TONES[u.role]}>{u.role}</Badge> : <Badge tone="warn">none</Badge>}</span>
-              <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: u.enabled ? "var(--ok-fg)" : "var(--text-disabled)" }}>
+              <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: u.enabled ? "var(--ok-fg)" : "var(--text-secondary)" }}>
                 {u.enabled ? "enabled" : "disabled"}
               </span>
               <IconButton size="sm" label="Edit user" onClick={(e) => { e.stopPropagation(); openEdit(u); }}>
@@ -176,7 +176,7 @@ export default function UsersIsland() {
             </div>
           ))}
           {users.length === 0 && !error && (
-            <div style={{ padding: 16, fontSize: "var(--text-sm)", color: "var(--text-disabled)" }}>No users yet.</div>
+            <div style={{ padding: 16, fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>No users yet.</div>
           )}
         </div>
       </div>

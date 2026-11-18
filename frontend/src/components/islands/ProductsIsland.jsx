@@ -1,7 +1,8 @@
 import React from "react";
 import { PageHeader } from "../shell/PageHeader.jsx";
-import { Badge, Button, Card, Checkbox, Dialog, Icon, Input, Select, StatusBadge, Tabs, Tag, TicketCard, Toast } from "../../ds";
+import { Badge, Button, Card, Checkbox, Dialog, Icon, Input, Select, StatusBadge, Tabs, Tag, TicketCard, Toast, DeleteConfirm } from "../../ds";
 import { api } from "../../lib/api.js";
+import { productOptions } from "../../lib/words.js";
 import { openChatWithPrompt } from "../../lib/chat-launch.js";
 import { pressable } from "../../lib/pressable.js";
 import { useParamRestore, writeParams } from "../../lib/url-state.js";
@@ -351,8 +352,7 @@ export default function ProductsIsland({ canWrite = true }) {
           <>
             {products.length > 1 && (
               <Select aria-label="Product" value={productId ?? ""} onChange={(e) => selectProduct(e.target.value)} style={{ width: 240 }}
-                options={[...products].sort((a, b) => Number(a.external) - Number(b.external) || a.name.localeCompare(b.name))
-                  .map((p) => ({ value: p.id, label: p.external ? `${p.name} (external)` : p.name }))} />
+                options={productOptions(products)} />
             )}
             {canWrite && (
               <Button size="sm" variant="accent" style={{ gap: 6 }} onClick={openNewProduct}>
@@ -769,11 +769,8 @@ export default function ProductsIsland({ canWrite = true }) {
         footer={
           <>
             {ticketDialog?.mode === "edit" && (
-              <Button size="sm" variant={confirmingTicketDelete ? "danger" : "secondary"} disabled={saving}
-                style={{ marginRight: "auto", gap: 6 }}
-                onClick={(e) => (confirmingTicketDelete ? (e.detail > 1 ? null : deleteTicket()) : setConfirmingTicketDelete(true))}>
-                <Icon name="trash" size={13} />{confirmingTicketDelete ? "Confirm delete" : "Delete"}
-              </Button>
+              <DeleteConfirm armed={confirmingTicketDelete} onArm={() => setConfirmingTicketDelete(true)} onCancel={() => setConfirmingTicketDelete(false)} onConfirm={deleteTicket} disabled={saving}
+                label="Delete" confirmLabel={"Delete ticket"} style={{ marginRight: "auto" }} />
             )}
             <Button size="sm" variant="secondary" onClick={() => { setTicketDialog(null); setConfirmingTicketDelete(false); }}>Cancel</Button>
             <Button size="sm" variant="accent" disabled={saving || !ticketDialog?.title?.trim()} onClick={saveTicket}>
@@ -804,11 +801,8 @@ export default function ProductsIsland({ canWrite = true }) {
         footer={
           <>
             {productDialog?.mode === "edit" && (
-              <Button size="sm" variant={confirmingDelete ? "danger" : "secondary"} disabled={saving}
-                style={{ marginRight: "auto", gap: 6 }}
-                onClick={(e) => (confirmingDelete ? (e.detail > 1 ? null : deleteProduct()) : setConfirmingDelete(true))}>
-                <Icon name="trash" size={13} />{confirmingDelete ? "Confirm delete" : "Delete"}
-              </Button>
+              <DeleteConfirm armed={confirmingDelete} onArm={() => setConfirmingDelete(true)} onCancel={() => setConfirmingDelete(false)} onConfirm={deleteProduct} disabled={saving}
+                label="Delete" confirmLabel={"Delete product"} style={{ marginRight: "auto" }} />
             )}
             <Button size="sm" variant="secondary" onClick={() => setProductDialog(null)}>Cancel</Button>
             <Button size="sm" variant="accent" disabled={saving || !productDialog?.name?.trim()} onClick={saveProduct}>

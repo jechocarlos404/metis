@@ -17,3 +17,9 @@ export function statusLabel(status) {
 export function count(n, one, many = `${one}s`) {
   return `${n} ${n === 1 ? one : many}`;
 }
+
+// One product order for every picker: ours first, then external, each A–Z.
+export const productOptions = (products) =>
+  [...products]
+    .sort((a, b) => Number(a.external) - Number(b.external) || a.name.localeCompare(b.name))
+    .map((p) => ({ value: p.id, label: p.external ? `${p.name} (external)` : p.name }));

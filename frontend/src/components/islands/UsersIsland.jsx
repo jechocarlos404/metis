@@ -1,6 +1,6 @@
 import React from "react";
 import { PageHeader } from "../shell/PageHeader.jsx";
-import { Badge, Button, Dialog, Icon, IconButton, Input, Select, Switch } from "../../ds";
+import { Badge, Button, Dialog, Icon, IconButton, Input, Select, Switch, DeleteConfirm } from "../../ds";
 import { api } from "../../lib/api.js";
 import { pressable } from "../../lib/pressable.js";
 
@@ -162,9 +162,11 @@ export default function UsersIsland() {
                 <span style={{ color: "var(--text-heading)", fontWeight: "var(--weight-medium)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                   {[u.first_name, u.last_name].filter(Boolean).join(" ") || u.username}
                 </span>
-                <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {u.username}
-                </span>
+                {u.username !== u.email && (
+                  <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {u.username}
+                  </span>
+                )}
               </span>
               <span style={{ color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{u.email || "—"}</span>
               <span>{u.role ? <Badge tone={ROLE_TONES[u.role]}>{u.role}</Badge> : <Badge tone="warn">none</Badge>}</span>
@@ -189,11 +191,8 @@ export default function UsersIsland() {
         footer={
           <>
             {dialog?.mode === "edit" && (
-              <Button size="sm" variant={confirmingDelete ? "danger" : "secondary"} disabled={saving}
-                style={{ marginRight: "auto", gap: 6 }}
-                onClick={(e) => (confirmingDelete ? (e.detail > 1 ? null : remove()) : setConfirmingDelete(true))}>
-                <Icon name="trash" size={13} />{confirmingDelete ? "Confirm delete" : "Delete"}
-              </Button>
+              <DeleteConfirm armed={confirmingDelete} onArm={() => setConfirmingDelete(true)} onCancel={() => setConfirmingDelete(false)} onConfirm={remove} disabled={saving}
+                label="Delete" confirmLabel={"Delete user"} style={{ marginRight: "auto" }} />
             )}
             <Button size="sm" variant="secondary" onClick={() => setDialog(null)}>Cancel</Button>
             <Button size="sm" variant="accent" disabled={saving} onClick={save}>

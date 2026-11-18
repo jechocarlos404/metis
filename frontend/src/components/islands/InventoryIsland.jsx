@@ -1,6 +1,7 @@
 import React from "react";
 import { PageHeader } from "../shell/PageHeader.jsx";
 import { Badge, Button, Select } from "../../ds";
+import { productOptions } from "../../lib/words.js";
 import { api } from "../../lib/api.js";
 import { CoverageReport, MATURITY_TONES, ProductScore } from "../shared/coverage.jsx";
 
@@ -133,14 +134,15 @@ export default function InventoryIsland() {
               reused only
             </label>
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: GRID, padding: "8px 16px", borderBottom: "1px solid var(--border-hairline)", ...CAPS }}>
-            <span>Capability</span><span>Maturity</span><span>Products</span><span>Features</span>
+          <div role="table" aria-label="Capabilities we have">
+          <div role="row" style={{ display: "grid", gridTemplateColumns: GRID, padding: "8px 16px", borderBottom: "1px solid var(--border-hairline)", ...CAPS }}>
+            <span role="columnheader">Capability</span><span role="columnheader">Maturity</span><span role="columnheader">Products</span><span role="columnheader">Features</span>
           </div>
           {rows.map((c, i) => (
-            <div key={c.id} style={{ display: "grid", gridTemplateColumns: GRID, alignItems: "center", gap: 8, padding: "10px 16px", borderBottom: i < rows.length - 1 ? "1px solid var(--border-hairline)" : "none", fontSize: "var(--text-sm)" }}>
-              <a href={`/capabilities/${c.slug}`} style={{ color: "var(--text-heading)", fontWeight: "var(--weight-medium)", textDecoration: "none" }}>{c.name}</a>
-              <span><Badge tone={MATURITY_TONES[c.maturity] ?? "neutral"}>{c.maturity}</Badge></span>
-              <span style={{ display: "flex", gap: 4, flexWrap: "wrap", alignItems: "center" }}>
+            <div role="row" key={c.id} style={{ display: "grid", gridTemplateColumns: GRID, alignItems: "center", gap: 8, padding: "10px 16px", borderBottom: i < rows.length - 1 ? "1px solid var(--border-hairline)" : "none", fontSize: "var(--text-sm)" }}>
+              <span role="cell"><a href={`/capabilities/${c.slug}`} style={{ color: "var(--text-heading)", fontWeight: "var(--weight-medium)", textDecoration: "none" }}>{c.name}</a></span>
+              <span role="cell"><Badge tone={MATURITY_TONES[c.maturity] ?? "neutral"}>{c.maturity}</Badge></span>
+              <span role="cell" style={{ display: "flex", gap: 4, flexWrap: "wrap", alignItems: "center" }}>
                 {c.products.length > 0
                   ? c.products.map((p, j) => <a key={p.id} href={`/products?product=${p.id}`} style={{ fontSize: "var(--text-xs)", color: "var(--text-accent)" }}>{p.name}{j < c.products.length - 1 ? "," : ""}</a>)
                   : <span style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>{c.features > 0 ? "no product" : "unused"}</span>}
@@ -148,9 +150,10 @@ export default function InventoryIsland() {
                   <span style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>· also in {c.external_products.map((p) => p.name).join(", ")}</span>
                 )}
               </span>
-              <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-secondary)" }}>{c.features}</span>
+              <span role="cell" style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-secondary)" }}>{c.features}</span>
             </div>
           ))}
+          </div>
           {!inventory && (
             <div role="status" style={{ padding: 16, fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>Loading the inventory…</div>
           )}
@@ -193,8 +196,7 @@ export default function InventoryIsland() {
             {products.length > 0 && (
               <Select label="…or score an existing product" value={scored} onChange={(e) => scoreProduct(e.target.value)}
                 options={[{ value: "", label: "— pick a product —" },
-                  ...[...products].sort((a, b) => Number(b.external) - Number(a.external) || a.name.localeCompare(b.name))
-                    .map((p) => ({ value: p.id, label: p.external ? `${p.name} (external)` : p.name }))]} />
+                  ...productOptions(products)]} />
             )}
             {checking && (
               <div role="status" style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>

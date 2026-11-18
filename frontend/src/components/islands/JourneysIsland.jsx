@@ -300,8 +300,8 @@ function capTone(need) {
   const m = need.match;
   if (!m) return { stroke: "var(--danger-fg)", fill: "transparent", text: "var(--danger-fg)", dash: "3,3", why: "nobody has this capability" };
   if (!m.ours) return { stroke: "var(--danger-fg)", fill: "transparent", text: "var(--danger-fg)", dash: null, why: `only ${m.external_products.map((p) => p.name).join(", ")} (external) has it` };
-  if (m.products.length > 1) return { stroke: "var(--text-accent)", fill: "var(--accent-wash)", text: "var(--text-accent)", dash: null, why: `ours — reused across ${m.products.map((p) => p.name).join(", ")}` };
-  return { stroke: "var(--ok-fg)", fill: "var(--ok-bg)", text: "var(--ok-fg)", dash: null, why: `ours — in ${m.products.map((p) => p.name).join(", ")}` };
+  if (m.products.length > 1) return { stroke: "var(--text-accent)", fill: "var(--accent-wash)", text: "var(--text-accent)", dash: null, why: `ours, reused across ${m.products.map((p) => p.name).join(", ")}` };
+  return { stroke: "var(--ok-fg)", fill: "var(--ok-bg)", text: "var(--ok-fg)", dash: null, why: `ours, in ${m.products.map((p) => p.name).join(", ")}` };
 }
 
 function JourneyMap({ steps }) {

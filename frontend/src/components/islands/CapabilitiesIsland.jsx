@@ -1,6 +1,6 @@
 import React from "react";
 import { PageHeader } from "../shell/PageHeader.jsx";
-import { Badge, Button, Dialog, Icon, IconButton, Input, Select, Tag } from "../../ds";
+import { Badge, Button, Dialog, Icon, IconButton, Input, Select, Tag, DeleteConfirm } from "../../ds";
 import { api } from "../../lib/api.js";
 import { pressable } from "../../lib/pressable.js";
 import { useParamRestore, writeParams } from "../../lib/url-state.js";
@@ -375,11 +375,8 @@ export default function CapabilitiesIsland({ canWrite = true }) {
         footer={
           <>
             {dialog?.mode === "edit" && (
-              <Button size="sm" variant={confirmingDelete ? "danger" : "secondary"} disabled={saving}
-                style={{ marginRight: "auto", gap: 6 }}
-                onClick={(e) => (confirmingDelete ? (e.detail > 1 ? null : remove()) : setConfirmingDelete(true))}>
-                <Icon name="trash" size={13} />{confirmingDelete ? "Confirm delete" : "Delete"}
-              </Button>
+              <DeleteConfirm armed={confirmingDelete} onArm={() => setConfirmingDelete(true)} onCancel={() => setConfirmingDelete(false)} onConfirm={remove} disabled={saving}
+                label="Delete" confirmLabel={"Delete capability"} style={{ marginRight: "auto" }} />
             )}
             <Button size="sm" variant="secondary" onClick={() => setDialog(null)}>Cancel</Button>
             <Button size="sm" variant="accent" disabled={saving || !draft.name.trim()} onClick={save}>

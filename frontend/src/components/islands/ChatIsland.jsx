@@ -1,7 +1,7 @@
 import React from "react";
 import { PageHeader } from "../shell/PageHeader.jsx";
 import { VizBlock } from "../chat/VizBlock.jsx";
-import { Button, Icon, IconButton, Select } from "../../ds";
+import { Button, Icon, IconButton, Select, DeleteConfirm } from "../../ds";
 import { api } from "../../lib/api.js";
 import { sseStream } from "../../lib/sse.js";
 import { renderChatMarkdown } from "../../lib/chat-markdown.js";
@@ -198,11 +198,8 @@ export default function ChatIsland({ threadId: initialThreadId = null, canWrite 
               ]}
             />
             {canWrite && threadId && (
-              <Button size="sm" variant={confirmingDelete ? "danger" : "secondary"} disabled={busy}
-                style={{ gap: 6 }}
-                onClick={(e) => (confirmingDelete ? (e.detail > 1 ? null : deleteThread()) : setConfirmingDelete(true))}>
-                <Icon name="trash" size={13} />{confirmingDelete ? "Confirm" : "Delete thread"}
-              </Button>
+              <DeleteConfirm armed={confirmingDelete} onArm={() => setConfirmingDelete(true)} onCancel={() => setConfirmingDelete(false)} onConfirm={deleteThread} disabled={busy}
+                label="Delete thread" confirmLabel={"Delete thread"} />
             )}
           </>
         }

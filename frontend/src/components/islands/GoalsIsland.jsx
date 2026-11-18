@@ -1,6 +1,6 @@
 import React from "react";
 import { PageHeader } from "../shell/PageHeader.jsx";
-import { Button, Dialog, Icon, IconButton, Input, PriorityBadge, Select, StatusBadge } from "../../ds";
+import { Button, Dialog, Icon, IconButton, Input, PriorityBadge, Select, StatusBadge, DeleteConfirm } from "../../ds";
 import { api } from "../../lib/api.js";
 
 const EMPTY_DRAFT = { goal_type: "product", parent_goal_id: "", title: "", description: "", success_criteria: "", priority: "3", status: "pending" };
@@ -191,11 +191,8 @@ export default function GoalsIsland({ canWrite = true }) {
         footer={
           <>
             {dialog?.mode === "edit" && (
-              <Button size="sm" variant={confirmingDelete ? "danger" : "secondary"} disabled={saving}
-                style={{ marginRight: "auto", gap: 6 }}
-                onClick={(e) => (confirmingDelete ? (e.detail > 1 ? null : remove()) : setConfirmingDelete(true))}>
-                <Icon name="trash" size={13} />{confirmingDelete ? "Confirm delete" : "Delete"}
-              </Button>
+              <DeleteConfirm armed={confirmingDelete} onArm={() => setConfirmingDelete(true)} onCancel={() => setConfirmingDelete(false)} onConfirm={remove} disabled={saving}
+                label="Delete" confirmLabel={"Delete goal"} style={{ marginRight: "auto" }} />
             )}
             <Button size="sm" variant="secondary" onClick={() => setDialog(null)}>Cancel</Button>
             <Button size="sm" variant="accent" disabled={saving || !draft.title.trim() || needsParent} onClick={save}>

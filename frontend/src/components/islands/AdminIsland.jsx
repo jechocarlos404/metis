@@ -39,6 +39,12 @@ export default function AdminIsland() {
     <>
       <PageHeader title="LLM Config" meta="per-agent model selection" />
       <div style={{ flex: 1, overflowY: "auto", padding: 24, display: "flex", flexDirection: "column", gap: 20 }}>
+        {providers.length > 0 && !providers.some((p) => p.available) && (
+          <div role="status" style={{ maxWidth: 560, padding: "12px 16px", background: "var(--warn-bg)", border: "1px solid var(--border-default)", borderRadius: "var(--radius-md)", fontSize: "var(--text-sm)", color: "var(--text-body)" }}>
+            No provider is connected, so Chat can't answer. Set <code>ANTHROPIC_API_KEY</code> or <code>OPENAI_API_KEY</code> in
+            the server's <code>.env</code> and restart the backend, or start Ollama on this machine. This page picks it up within 10 seconds.
+          </div>
+        )}
         <div style={{ maxWidth: 560 }}>
           <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: "var(--tracking-caps)", textTransform: "uppercase", color: "var(--text-secondary)", marginBottom: 8 }}>
             Providers
@@ -92,7 +98,7 @@ export default function AdminIsland() {
           </div>
           <div style={{ marginTop: 8, fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>
             Providers are re-checked every 10 seconds. Model lists are read live from each provider once it's
-            configured — Ollama models appear as soon as the local server is reachable. Unavailable providers
+            configured; Ollama models appear as soon as the local server is reachable. Unavailable providers
             can't be assigned to agents.
           </div>
         </div>

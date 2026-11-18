@@ -18,3 +18,4 @@ export { Card } from "./surfaces/Card.jsx";
 export { Dialog } from "./surfaces/Dialog.jsx";
 export { Tabs } from "./surfaces/Tabs.jsx";
 export { Icon } from "./Icons.jsx";
+export { DeleteConfirm } from "./forms/DeleteConfirm.jsx";

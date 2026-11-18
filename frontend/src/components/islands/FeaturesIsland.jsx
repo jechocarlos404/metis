@@ -1,6 +1,7 @@
 import React from "react";
 import { PageHeader } from "../shell/PageHeader.jsx";
-import { Button, Checkbox, Dialog, Icon, IconButton, Input, PriorityBadge, Select, StatusBadge, Tabs, Tag } from "../../ds";
+import { Button, Checkbox, Dialog, Icon, IconButton, Input, PriorityBadge, Select, StatusBadge, Tabs, Tag, DeleteConfirm } from "../../ds";
+import { productOptions } from "../../lib/words.js";
 import { api, ApiError } from "../../lib/api.js";
 import { FeatureGraphView } from "../graph/FeatureGraphView.jsx";
 import { pressable } from "../../lib/pressable.js";
@@ -332,7 +333,7 @@ export default function FeaturesIsland({ canWrite = true }) {
             {products.length > 0 && (
               <Select value={productFilter} onChange={(e) => changeProduct(e.target.value)} style={{ width: 200 }}
                 options={[{ value: "", label: "All products" },
-                  ...products.map((p) => ({ value: p.id, label: p.name })),
+                  ...productOptions(products),
                   { value: "unattributed", label: "No product" }]} />
             )}
             <Input placeholder="Find features like…" style={{ width: 220 }} inputStyle={{ height: 30 }}
@@ -510,11 +511,8 @@ export default function FeaturesIsland({ canWrite = true }) {
         footer={
           <>
             {dialog?.mode === "edit" && (
-              <Button size="sm" variant={confirmingDelete ? "danger" : "secondary"} disabled={saving}
-                style={{ marginRight: "auto", gap: 6 }}
-                onClick={(e) => (confirmingDelete ? (e.detail > 1 ? null : removeFeature()) : setConfirmingDelete(true))}>
-                <Icon name="trash" size={13} />{confirmingDelete ? "Confirm delete" : "Delete"}
-              </Button>
+              <DeleteConfirm armed={confirmingDelete} onArm={() => setConfirmingDelete(true)} onCancel={() => setConfirmingDelete(false)} onConfirm={removeFeature} disabled={saving}
+                label="Delete" confirmLabel={"Delete feature"} style={{ marginRight: "auto" }} />
             )}
             <Button size="sm" variant="secondary" onClick={() => setDialog(null)}>Cancel</Button>
             <Button size="sm" variant="accent" disabled={saving || !canSave} onClick={save}>
@@ -528,7 +526,7 @@ export default function FeaturesIsland({ canWrite = true }) {
           <Input label="Name (what the user gets, verb phrase)" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="Export tickets to Notion" />
           <Input label="Description" value={draft.description} onChange={(e) => setDraft({ ...draft, description: e.target.value })} />
           <Select label="Product" value={draft.productId} onChange={(e) => setDraft({ ...draft, productId: e.target.value })}
-            options={[{ value: "", label: "— none —" }, ...products.map((p) => ({ value: p.id, label: p.external ? `${p.name} (external)` : p.name }))]} />
+            options={[{ value: "", label: "— none —" }, ...productOptions(products)]} />
           <CapabilityPicker capabilities={capabilities} selected={draft.capabilityIds} query={capQuery} onQuery={setCapQuery}
             onChange={(ids) => setDraft({ ...draft, capabilityIds: ids })} />
           <Checkbox label="Some capabilities are unknown — link only the ones you can name"

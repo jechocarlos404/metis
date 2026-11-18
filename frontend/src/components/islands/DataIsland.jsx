@@ -1,6 +1,6 @@
 import React from "react";
 import { PageHeader } from "../shell/PageHeader.jsx";
-import { Badge, Button, Checkbox, Dialog, Icon, IconButton, Input, Select, Tabs, Tag, Toast } from "../../ds";
+import { Badge, Button, Checkbox, Dialog, Icon, IconButton, Input, Select, Tabs, Tag, Toast, DeleteConfirm } from "../../ds";
 import { api } from "../../lib/api.js";
 import { ENTITIES, REF_SOURCES, shortId } from "../../lib/data-entities.js";
 
@@ -319,11 +319,8 @@ export default function DataIsland() {
         footer={
           <>
             {dialog?.mode === "edit" && (
-              <Button size="sm" variant={confirming ? "danger" : "secondary"} disabled={saving}
-                style={{ marginRight: "auto", gap: 6 }}
-                onClick={(e) => (confirming ? (e.detail > 1 ? null : removeOne()) : setConfirming(true))}>
-                <Icon name="trash" size={13} />{confirming ? "Confirm delete" : "Delete"}
-              </Button>
+              <DeleteConfirm armed={confirming} onArm={() => setConfirming(true)} onCancel={() => setConfirming(false)} onConfirm={removeOne} disabled={saving}
+                label="Delete" confirmLabel={"Delete row"} style={{ marginRight: "auto" }} />
             )}
             <Button size="sm" variant="secondary" onClick={() => setDialog(null)}>Cancel</Button>
             <Button size="sm" variant="accent" disabled={saving} onClick={save}>
@@ -351,13 +348,9 @@ export default function DataIsland() {
         onClose={() => setPreview(null)}
         footer={
           <>
-            <Button size="sm" variant={confirming ? "danger" : "secondary"}
-              disabled={saving || !previewData}
-              style={{ marginRight: "auto", gap: 6 }}
-              onClick={(e) => (confirming ? (e.detail > 1 ? null : runBulkDelete()) : setConfirming(true))}>
-              <Icon name="trash" size={13} />
-              {confirming ? `Confirm — delete ${previewData?.total_rows ?? 0} rows` : "Delete"}
-            </Button>
+            <DeleteConfirm armed={confirming} onArm={() => setConfirming(true)} onCancel={() => setConfirming(false)} onConfirm={runBulkDelete}
+              disabled={saving || !previewData} label="Delete"
+              confirmLabel={`Delete ${previewData?.total_rows ?? 0} rows`} style={{ marginRight: "auto" }} />
             <Button size="sm" variant="secondary" onClick={() => setPreview(null)}>Cancel</Button>
           </>
         }

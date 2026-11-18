@@ -25,6 +25,7 @@ class MessageRead(ORMModel):
     agent_name: str | None
     content: str
     viz: list[dict[str, Any]]
+    tool_calls: list[dict[str, Any]] | None = None
     created_at: datetime
 
 

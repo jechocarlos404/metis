@@ -2,7 +2,8 @@
 
 import pytest
 
-from app.agents.runner import run_turn
+from app.agents.runner import changes_data, run_turn, summarize_result
+from app.schemas.chat import MessageRead
 from app.llm.base import NoProviderError
 from app.llm.types import ProviderStatus, StreamDone, TextDelta, ToolCallEvent
 from app.models import AgentLLMConfig, ChatMessage, ChatThread, Product
@@ -120,6 +121,26 @@ async def test_tool_call_turn_creates_ticket_and_viz(db):
     final = events[-1][1]["message"]
     assert final["viz"][0]["type"] == "ticket_card"
     assert "1 ticket created." in final["content"]
+
+    # What the agent did is visible live and after a reload, and says it changed data.
+    started, finished = tool_events
+    assert started["arguments"]["title"] == "Wire the exporter" and started["changes"] is True
+    assert finished["summary"].endswith(": Wire the exporter") and finished["changes"] is True
+    assert final["tool_calls"] == [finished]
+    async with db() as session:
+        stored = (await session.scalars(select(ChatMessage).where(ChatMessage.role == "agent"))).one()
+        assert MessageRead.model_validate(stored).tool_calls == [finished]
+
+
+def test_step_summaries_read_like_a_log():
+    assert changes_data("create_feature") and changes_data("link_features")
+    assert not changes_data("capability_inventory") and not changes_data("list_products")
+    assert summarize_result('[{"a": 1}, {"a": 2}]') == "2 results"
+    assert summarize_result('{"error": "no such product"}') == "error: no such product"
+    assert summarize_result('{"id": "x", "name": "Route Planning"}') == "Route Planning"
+    assert summarize_result('{"product": "Strava", "total_features": 25, "buildable": [], "report": {}}') == (
+        "product: Strava · total features: 25 · buildable: 0"
+    )
 
 
 @pytest.mark.asyncio

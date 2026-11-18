@@ -62,3 +62,5 @@ main:focus { outline: none; }
 .chat-md table { border-collapse: collapse; display: block; overflow-x: auto; }
 .chat-md th, .chat-md td { border: 1px solid var(--border-hairline); padding: 4px 8px; text-align: left; }
 .chat-md h1, .chat-md h2, .chat-md h3 { font-size: var(--text-md); margin: var(--space-3) 0 var(--space-2); }
+/* Prose stays at a readable measure; tables may use the full column. */
+.chat-md p, .chat-md ul, .chat-md ol, .chat-md blockquote, .chat-md h1, .chat-md h2, .chat-md h3 { max-width: 75ch; }

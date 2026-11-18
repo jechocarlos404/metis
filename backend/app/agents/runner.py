@@ -55,6 +55,40 @@ async def _history(session: AsyncSession, thread_id: uuid.UUID) -> list[dict[str
     return messages
 
 
+# Tools that change data. Everything else only reads.
+_WRITE_PREFIXES = ("create_", "update_", "link_", "motivate_", "set_")
+
+
+def changes_data(tool_name: str) -> bool:
+    return tool_name.startswith(_WRITE_PREFIXES)
+
+
+def summarize_result(output: str) -> str:
+    """One line a person can read: what a tool call found, made, or why it failed."""
+    try:
+        data = json.loads(output)
+    except (TypeError, ValueError):
+        return (output or "")[:200]
+    if isinstance(data, dict) and "error" in data:
+        return f"error: {data['error']}"[:200]
+    if isinstance(data, list):
+        return f"{len(data)} result{'' if len(data) == 1 else 's'}"
+    if isinstance(data, dict):
+        label = next((data[k] for k in ("display_id", "name", "title") if data.get(k)), None)
+        if label is not None:
+            extra = data.get("title") if data.get("display_id") else None
+            return f"{label}: {extra}"[:200] if extra else str(label)[:200]
+        parts = []
+        for key, value in data.items():
+            label = key.replace("_", " ")
+            if isinstance(value, list):
+                parts.append(f"{label}: {len(value)}")
+            elif isinstance(value, (int, float, bool)) or (isinstance(value, str) and len(value) <= 40):
+                parts.append(f"{label}: {value}")
+        return " · ".join(parts)[:200]
+    return str(data)[:200]
+
+
 def _serialize_message(message: ChatMessage) -> dict[str, Any]:
     return {
         "id": str(message.id),
@@ -63,6 +97,7 @@ def _serialize_message(message: ChatMessage) -> dict[str, Any]:
         "agent_name": message.agent_name,
         "content": message.content,
         "viz": message.viz,
+        "tool_calls": message.tool_calls,
         "created_at": message.created_at.isoformat(),
     }
 
@@ -168,7 +203,11 @@ async def run_turn(
                     }
                 )
                 for tc in tool_calls:
-                    yield ("tool_call", {"name": tc.name, "status": "started"})
+                    writes = changes_data(tc.name)
+                    yield (
+                        "tool_call",
+                        {"name": tc.name, "status": "started", "arguments": tc.arguments, "changes": writes},
+                    )
                     try:
                         result = await execute_tool(agent_name, tc.name, tc.arguments, ctx)
                         output = result.result
@@ -184,10 +223,15 @@ async def run_turn(
                         await session.rollback()
                         output = json.dumps({"error": f"{type(e).__name__}: {e}"})
                         status = "failed"
-                    tool_trace.append(
-                        {"name": tc.name, "arguments": tc.arguments, "status": status}
-                    )
-                    yield ("tool_call", {"name": tc.name, "status": status})
+                    step = {
+                        "name": tc.name,
+                        "arguments": tc.arguments,
+                        "status": status,
+                        "changes": writes,
+                        "summary": summarize_result(output),
+                    }
+                    tool_trace.append(step)
+                    yield ("tool_call", step)
                     messages.append(
                         {
                             "role": "tool",

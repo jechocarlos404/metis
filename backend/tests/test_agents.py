@@ -236,3 +236,23 @@ async def test_chat_status_says_whether_any_provider_answers():
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as http:
             body = (await http.get("/api/chat/status")).json()
         assert body == {"available": available}
+
+
+@pytest.mark.asyncio
+async def test_unexpected_tool_error_stays_out_of_the_thread(db, monkeypatch):
+    import app.agents.runner as runner
+
+    async def boom(*args, **kwargs):
+        raise RuntimeError("password=hunter2 at db-internal:5432")
+
+    monkeypatch.setattr(runner, "execute_tool", boom)
+    thread_id = await make_thread(db)
+    provider = FakeProvider([
+        [ToolCallEvent(id="tc1", name="list_goals", arguments={}), StreamDone("tool_use")],
+        [TextDelta("Something went wrong."), StreamDone("end_turn")],
+    ])
+    events = await collect(run_turn(db, FeatureGraph(sessionmaker=None), FakeRegistry(provider), thread_id, "which features exist"))
+    failed = [p for n, p in events if n == "tool_call"][-1]
+    assert failed["status"] == "failed"
+    assert "hunter2" not in failed["summary"] and "internal error" in failed["summary"]
+    assert "hunter2" not in provider.calls[1]["messages"][-1]["content"]

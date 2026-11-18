@@ -219,9 +219,12 @@ async def run_turn(
                         await session.rollback()
                         output = json.dumps({"error": str(e)})
                         status = "failed"
-                    except Exception as e:
+                    except Exception:
+                        # Unexpected: the detail stays in the server log. What is
+                        # saved and shown in the thread (and fed to the model) is generic.
+                        log.exception("Tool %s failed in thread %s", tc.name, thread_id)
                         await session.rollback()
-                        output = json.dumps({"error": f"{type(e).__name__}: {e}"})
+                        output = json.dumps({"error": "internal error while running this tool"})
                         status = "failed"
                     step = {
                         "name": tc.name,

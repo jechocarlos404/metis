@@ -1,6 +1,7 @@
 import React from "react";
 import { PageHeader } from "../shell/PageHeader.jsx";
 import { VizBlock } from "../chat/VizBlock.jsx";
+import { ProposalDraft } from "../chat/ProposalDraft.jsx";
 import { Badge, Button, Icon, IconButton, Select, DeleteConfirm } from "../../ds";
 import { count } from "../../lib/words.js";
 import { api } from "../../lib/api.js";
@@ -48,7 +49,7 @@ function AgentSteps({ agent, tools, open }) {
 }
 
 const RUN_NOTE = {
-  interrupted: "Stopped: the server restarted before this finished. Send the message again to retry.",
+  interrupted: "Stopped: the server restarted before this finished.",
   failed: "This agent couldn't finish.",
 };
 
@@ -138,7 +139,9 @@ function Proposals({ message, canWrite, onDecided }) {
                 <span style={{ color: "var(--text-secondary)" }}>after the one above</span>
               )}
             </div>
-            <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-secondary)", overflowWrap: "anywhere" }}>{stepArgs(p.arguments)}</div>
+            <div style={{ margin: "6px 0 2px", padding: 8, background: "var(--surface-inset)", borderRadius: "var(--radius-sm)" }}>
+              <ProposalDraft tool={p.tool_name} args={p.arguments} />
+            </div>
             {p.result && <div style={{ color: p.status === "failed" ? "var(--danger-fg)" : "var(--text-body)" }}>→ {p.result}</div>}
           </li>
         ))}
@@ -174,7 +177,20 @@ function SpecialistCard({ message, canWrite, onDecided }) {
 
 // One request: the orchestrator's run, the specialists it delegated to (in
 // parallel), and, when there were several, its combined answer.
-function Turn({ run, children, canWrite, onDecided }) {
+function Turn({ run, children, canWrite, onDecided, onRetry }) {
+  const stopped = ["interrupted", "failed"].includes(run.status) || children.some((c) => c.status === "interrupted");
+  const retry = canWrite && onRetry && stopped && (
+    <div><Button size="sm" variant="secondary" onClick={onRetry}>Retry this message</Button></div>
+  );
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      <TurnBody run={run} children={children} canWrite={canWrite} onDecided={onDecided} />
+      {retry}
+    </div>
+  );
+}
+
+function TurnBody({ run, children, canWrite, onDecided }) {
   if (children.length === 0) {
     return run.status === "running"
       ? <AgentMessage agent="orchestrator" status="running" />
@@ -325,6 +341,16 @@ export default function ChatIsland({ threadId: initialThreadId = null, canWrite 
   };
 
   const activeThread = threads.find((t) => t.id === threadId);
+  // Each orchestrator run answers the user message just before it.
+  const askedFor = React.useMemo(() => {
+    const map = new Map();
+    let last = null;
+    for (const m of messages) {
+      if (m.role === "user") last = m.content;
+      else if (!m.parent_id && m.agent_name === "orchestrator") map.set(m.id, last);
+    }
+    return map;
+  }, [messages]);
   const children = React.useMemo(() => {
     const map = new Map();
     for (const m of messages) if (m.parent_id) map.set(m.parent_id, [...(map.get(m.parent_id) ?? []), m]);
@@ -383,7 +409,8 @@ export default function ChatIsland({ threadId: initialThreadId = null, canWrite 
                 {m.content}
               </div>
             ) : m.agent_name === "orchestrator" ? (
-              <Turn key={m.id} run={m} children={children.get(m.id) ?? []} canWrite={canWrite} onDecided={() => load()} />
+              <Turn key={m.id} run={m} children={children.get(m.id) ?? []} canWrite={canWrite} onDecided={() => load()}
+                onRetry={running || busy || !askedFor.get(m.id) ? null : () => send(askedFor.get(m.id))} />
             ) : (
               // Replies from before agents ran in the background.
               <div key={m.id} style={{ display: "flex", flexDirection: "column", gap: 8 }}>

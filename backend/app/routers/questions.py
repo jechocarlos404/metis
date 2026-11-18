@@ -9,6 +9,8 @@ A gap is an answer. An empty `answer` with a populated `unresolved` returns 200
 and says why; 404 is reserved for a subject that does not exist.
 """
 
+import json
+import re
 import uuid
 from pathlib import Path
 
@@ -432,22 +434,34 @@ async def seed_format():
     return _serve(SEED_FORMAT, "Seed format document")
 
 
-def _inventory_lines(entries) -> str:
+_CONTROL = re.compile(r"[\x00-\x1f\x7f]+")
+
+
+def _clean(text: str | None, limit: int) -> str:
+    text = " ".join(_CONTROL.sub(" ", text or "").split())
+    return text if len(text) <= limit else text[:limit] + "…"
+
+
+def _inventory_block(entries) -> str:
+    """The inventory as data, never prose: editors write these names and
+    descriptions, and the prompt runs in a coding agent with shell access. A
+    fenced JSON list keeps every value quoted and on its own line."""
     by_id = {e.id: e for e in entries}
-    lines = []
-    for e in sorted(entries, key=lambda e: e.name.lower()):
-        parent = by_id.get(e.parent_id)
-        where = (
-            f"ours, used by {len(e.products)} product{'' if len(e.products) == 1 else 's'}, {e.maturity}"
-            if e.ours
-            else "known only from external products"
-        )
-        line = f"- {e.name} ({where}{f'; part of {parent.name}' if parent else ''})"
-        if e.description:
-            text = " ".join(e.description.split())
-            line += f": {text[:140]}{'…' if len(text) > 140 else ''}"
-        lines.append(line)
-    return "\n".join(lines) or "(The inventory is empty. Every capability you write is new.)"
+    rows = [
+        {
+            "name": _clean(e.name, 120),
+            "ours": e.ours,
+            "maturity": str(e.maturity) if e.ours else None,
+            "our_products": len(e.products),
+            "part_of": _clean(by_id[e.parent_id].name, 120) if e.parent_id in by_id else None,
+            "description": _clean(e.description, 140) or None,
+        }
+        for e in sorted(entries, key=lambda e: e.name.lower())
+    ]
+    return "```json\n" + json.dumps(rows, ensure_ascii=False, indent=0) + "\n```"
+
+
+_PLACEHOLDER = re.compile(r"\{\{(INVENTORY|FORMAT_SPEC)\}\}")
 
 
 @router.get("/ontology/agent-export-prompt")
@@ -459,9 +473,10 @@ async def agent_export_prompt(session: AsyncSession = Depends(get_db)):
         if not doc.is_file():
             raise HTTPException(404, f"{label} is not on disk")
     entries = await capability_service.inventory(session)
-    prompt = (
-        AGENT_EXPORT_PROMPT.read_text(encoding="utf-8")
-        .replace("{{INVENTORY}}", _inventory_lines(entries))
-        .replace("{{FORMAT_SPEC}}", SEED_FORMAT.read_text(encoding="utf-8").strip())
-    )
+    values = {
+        "INVENTORY": _inventory_block(entries),
+        "FORMAT_SPEC": SEED_FORMAT.read_text(encoding="utf-8").strip(),
+    }
+    # One pass, so a placeholder written inside the data is never expanded.
+    prompt = _PLACEHOLDER.sub(lambda m: values[m.group(1)], AGENT_EXPORT_PROMPT.read_text(encoding="utf-8"))
     return JSONResponse({"prompt": prompt, "capabilities": len(entries)}, headers={"Cache-Control": "no-store"})

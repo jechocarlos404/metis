@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.throttle import throttle_people
 from app.db import get_db
-from app.models import Capability, Product, StackSlot, TechFit, Technology, TechStack
+from app.models import Capability, Feature, Goal, Product, StackSlot, TechFit, Technology, TechStack
 from app.schemas.envelope import (
     Answer,
     Question,
@@ -462,7 +462,26 @@ def _inventory_block(entries) -> str:
     return "```json\n[\n" + lines + "\n]\n```"
 
 
-_PLACEHOLDER = re.compile(r"\{\{(INVENTORY|FORMAT_SPEC)\}\}")
+async def _products_block(session: AsyncSession) -> str:
+    """Existing products and their feature names, so an agent describing a
+    repo that is already in metis reuses the same names instead of adding
+    duplicates. Data only, like the inventory block."""
+    products = (await session.scalars(select(Product).order_by(Product.name))).all()
+    features = (await session.execute(select(Feature.product_id, Feature.name).order_by(Feature.name))).all()
+    names: dict = {}
+    for product_id, name in features:
+        names.setdefault(product_id, []).append(_clean(name, 160))
+    rows = [
+        {"name": _clean(p.name, 120), "external": p.external, "features": names.get(p.id, [])}
+        for p in products
+    ]
+    goals = (await session.scalars(select(Goal).order_by(Goal.seq))).all()
+    goal_rows = [{"goal_type": str(g.goal_type), "title": _clean(g.title, 160)} for g in goals]
+    block = lambda items: "```json\n[\n" + ",\n".join(json.dumps(i, ensure_ascii=False) for i in items) + "\n]\n```"
+    return block(rows) + "\n\n" + block(goal_rows)
+
+
+_PLACEHOLDER = re.compile(r"\{\{(INVENTORY|PRODUCTS|FORMAT_SPEC)\}\}")
 
 
 @router.get("/ontology/agent-export-prompt")
@@ -476,6 +495,7 @@ async def agent_export_prompt(session: AsyncSession = Depends(get_db)):
     entries = await capability_service.inventory(session)
     values = {
         "INVENTORY": _inventory_block(entries),
+        "PRODUCTS": await _products_block(session),
         "FORMAT_SPEC": SEED_FORMAT.read_text(encoding="utf-8").strip(),
     }
     # One pass, so a placeholder written inside the data is never expanded.

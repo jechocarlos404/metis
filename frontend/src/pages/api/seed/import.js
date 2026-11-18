@@ -620,6 +620,17 @@ class Loader {
     await this.loadFeatures();
     await this.loadEdges();
     await this.loadProducts();
+    // Names are identity, so a re-described repo with reworded features adds
+    // near-duplicates. Say so before anyone presses Import.
+    const products = this.count("products");
+    const features = this.count("features");
+    const added = (features["would create"] ?? 0) + (features.created ?? 0);
+    if ((products.reused ?? 0) > 0 && added > 0) {
+      this.warnings.push(
+        `This file names a product metis already has and adds ${added} feature${added === 1 ? "" : "s"} whose names don't match its existing ones. ` +
+          "If they describe features it already has under new wording, importing creates duplicates: compare with the product's feature list first.",
+      );
+    }
     return {
       dryRun: this.dryRun,
       counts: {

@@ -547,6 +547,7 @@ async def test_agent_export_prompt_carries_the_spec_and_live_names(db, client):
     assert SEED_FORMAT.read_text(encoding="utf-8").strip() in prompt
     assert all(json.dumps(c["name"]) in prompt for c in inventory)
     assert "{{" not in prompt
+    assert '{"name": "metis", "external": false, "features": []}' in prompt  # products block
     # It must stand alone: no paths or tools that only exist on this machine.
     assert "localhost" not in prompt.split("## The metis-seed/v1 format")[0]
     assert "validate_seed.py" not in prompt

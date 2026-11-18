@@ -18,6 +18,17 @@ class ThreadRead(ORMModel):
     updated_at: datetime
 
 
+class ProposalRead(ORMModel):
+    id: uuid.UUID
+    message_id: uuid.UUID
+    tool_name: str
+    arguments: dict[str, Any]
+    status: str
+    result: str | None
+    decided_at: datetime | None
+    created_at: datetime
+
+
 class MessageRead(ORMModel):
     id: uuid.UUID
     thread_id: uuid.UUID
@@ -26,6 +37,10 @@ class MessageRead(ORMModel):
     content: str
     viz: list[dict[str, Any]]
     tool_calls: list[dict[str, Any]] | None = None
+    status: str = "done"
+    parent_id: uuid.UUID | None = None
+    task: str | None = None
+    proposals: list[ProposalRead] = []
     created_at: datetime
 
 

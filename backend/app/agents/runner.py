@@ -1,66 +1,47 @@
-"""The agent turn loop.
+"""The agent turn, run in the background.
 
-Yields (event_name, payload) tuples that the chat router serializes as SSE:
-    routing      {agent}
-    message_start{agent}
-    text_delta   {text}
-    tool_call    {name, status: started|finished|failed, summary?}
-    viz_block    {type, data}
-    message_end  {message}
-    error        {message}
+`start_turn` saves the user's message and an orchestrator reply marked
+`running`, then starts `run_turn` as a task and returns at once: the turn no
+longer depends on the browser that asked. The orchestrator plans one to three
+tasks, the specialists run them at the same time (each with its own database
+session and its own reply row under the orchestrator's), and when there was
+more than one, the orchestrator writes the combined answer.
 
-The agent reply is persisted whichever way the turn ends, so a client
-disconnect mid-stream never loses the message. That persist — and the
-session's own teardown — run inside `anyio.CancelScope(shield=True)`: a
-disconnect cancels this generator, and under a cancelled scope every await
-raises at once, including the connection pool's graceful close.
+Every reply is saved as it is written, so a client polling the thread sees
+text and steps arrive, can leave and come back, and a reload loses nothing.
+Tools that change data never run here: each call becomes a ChatProposal the
+user approves (app.agents.proposals). A restart marks unfinished replies
+`interrupted` (`mark_interrupted`, called at startup).
 """
 
+import asyncio
 import json
 import logging
+import time
 import uuid
-from collections.abc import AsyncIterator
 from typing import Any
 
 import anyio
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.agents import orchestrator
-from app.agents.prompts import AGENT_PROMPTS
-from app.agents.tools import ToolContext, ToolError, execute_tool, tools_for
+from app.agents.prompts import AGENT_PROMPTS, PROPOSALS_NOTE, SYNTHESIS_PROMPT
+from app.agents.tools import WRITE_TOOLS, ToolContext, ToolError, execute_tool, tools_for
 from app.llm.base import NoProviderError
-from app.llm.types import StreamDone, StreamError, TextDelta, ToolCallEvent
-from app.models import ChatMessage, ChatThread
+from app.llm.types import StreamError, TextDelta, ToolCallEvent
+from app.models import ChatMessage, ChatProposal, ChatThread
 
 MAX_ITERATIONS = 6
 HISTORY_LIMIT = 30
+#: How often a running reply is written back while text streams in.
+SAVE_EVERY_SECONDS = 0.75
 
 log = logging.getLogger("metis.chat")
 
 
-async def _history(session: AsyncSession, thread_id: uuid.UUID) -> list[dict[str, Any]]:
-    stmt = (
-        select(ChatMessage)
-        .where(ChatMessage.thread_id == thread_id)
-        .order_by(ChatMessage.created_at.desc(), ChatMessage.seq.desc())
-        .limit(HISTORY_LIMIT)
-    )
-    rows = list((await session.scalars(stmt)).all())[::-1]
-    messages: list[dict[str, Any]] = []
-    for row in rows:
-        role = "assistant" if row.role == "agent" else "user"
-        if row.content:
-            messages.append({"role": role, "content": row.content})
-    return messages
-
-
-# Tools that change data. Everything else only reads.
-_WRITE_PREFIXES = ("create_", "update_", "link_", "motivate_", "set_")
-
-
 def changes_data(tool_name: str) -> bool:
-    return tool_name.startswith(_WRITE_PREFIXES)
+    return tool_name in WRITE_TOOLS
 
 
 def summarize_result(output: str) -> str:
@@ -89,183 +70,244 @@ def summarize_result(output: str) -> str:
     return str(data)[:200]
 
 
-def _serialize_message(message: ChatMessage) -> dict[str, Any]:
-    return {
-        "id": str(message.id),
-        "thread_id": str(message.thread_id),
-        "role": message.role,
-        "agent_name": message.agent_name,
-        "content": message.content,
-        "viz": message.viz,
-        "tool_calls": message.tool_calls,
-        "created_at": message.created_at.isoformat(),
-    }
+async def _history(session: AsyncSession, thread_id: uuid.UUID) -> list[dict[str, Any]]:
+    """The conversation as the model sees it. A delegated reply is skipped when
+    its orchestrator wrote a combined answer, which already covers it."""
+    stmt = (
+        select(ChatMessage)
+        .where(ChatMessage.thread_id == thread_id, ChatMessage.status != "running")
+        .order_by(ChatMessage.seq.desc())
+        .limit(HISTORY_LIMIT)
+    )
+    rows = list((await session.scalars(stmt)).all())[::-1]
+    combined = {r.id for r in rows if r.parent_id is None and r.role == "agent" and r.content}
+    messages: list[dict[str, Any]] = []
+    for row in rows:
+        if row.parent_id in combined or not row.content:
+            continue
+        messages.append({"role": "assistant" if row.role == "agent" else "user", "content": row.content})
+    return messages
 
 
-async def run_turn(
-    sessionmaker: async_sessionmaker[AsyncSession],
-    graph,
-    registry,
-    thread_id: uuid.UUID,
-    content: str,
-) -> AsyncIterator[tuple[str, dict[str, Any]]]:
+async def _save(sessionmaker, message_id: uuid.UUID, **values) -> None:
+    """Write fields of one reply in a short session of its own, so a reply's
+    progress never shares a transaction with the tools it runs."""
+    with anyio.CancelScope(shield=True):
+        async with sessionmaker() as session:
+            await session.execute(update(ChatMessage).where(ChatMessage.id == message_id).values(**values))
+            await session.commit()
+
+
+async def start_turn(sessionmaker, graph, registry, thread_id: uuid.UUID, content: str, runs: set) -> dict:
+    async with sessionmaker() as session:
+        if await session.get(ChatThread, thread_id) is None:
+            raise LookupError("Thread not found")
+        user = ChatMessage(thread_id=thread_id, role="user", content=content)
+        session.add(user)
+        await session.flush()
+        run = ChatMessage(thread_id=thread_id, role="agent", agent_name="orchestrator", status="running")
+        session.add(run)
+        await session.commit()
+        ids = {"user_message_id": str(user.id), "run_id": str(run.id)}
+    task = asyncio.create_task(run_turn(sessionmaker, graph, registry, thread_id, run.id, content))
+    runs.add(task)  # a strong reference, or the loop may collect it mid-run
+    task.add_done_callback(runs.discard)
+    return ids
+
+
+async def run_turn(sessionmaker, graph, registry, thread_id: uuid.UUID, run_id: uuid.UUID, content: str) -> None:
+    try:
+        async with sessionmaker() as session:
+            history = await _history(session, thread_id)
+            # The user's message is already saved; the specialist adds it itself.
+            if history and history[-1] == {"role": "user", "content": content}:
+                history.pop()
+            tasks = await orchestrator.plan(content, registry, session)
+            children = []
+            for agent, task in tasks:
+                child = ChatMessage(
+                    thread_id=thread_id, role="agent", agent_name=agent, status="running",
+                    parent_id=run_id, task=task if len(tasks) > 1 else None,
+                )
+                session.add(child)
+                children.append(child)
+            await session.commit()
+            plan = [(c.id, c.agent_name, c.task) for c in children]
+
+        results = await asyncio.gather(
+            *(run_specialist(sessionmaker, graph, registry, cid, agent, history, content, task)
+              for cid, agent, task in plan),
+            return_exceptions=True,
+        )
+        replies = [
+            (agent, task, r) for (_, agent, task), r in zip(plan, results) if isinstance(r, str) and r
+        ]
+        if len(plan) > 1 and replies:
+            await _synthesize(sessionmaker, registry, run_id, content, replies)
+        failed = all(isinstance(r, BaseException) for r in results)
+        await _save(sessionmaker, run_id, status="failed" if failed else "done")
+    except asyncio.CancelledError:
+        await _save(sessionmaker, run_id, status="interrupted")
+        raise
+    except Exception:
+        log.exception("Turn %s in thread %s failed", run_id, thread_id)
+        await _save(sessionmaker, run_id, status="failed", content="This request stopped because of an internal error.")
+
+
+async def _synthesize(sessionmaker, registry, run_id, content, replies) -> None:
+    parts = "\n\n".join(
+        f"## {agent}\nTask: {task}\n\n{text}" for agent, task, text in replies
+    )
+    async with sessionmaker() as session:
+        try:
+            provider, model = await registry.resolve_for_agent(session, "orchestrator")
+        except NoProviderError:
+            return
+    text, last = "", time.monotonic()
+    messages = [{"role": "user", "content": f"The request:\n{content}\n\nWhat the specialists found:\n\n{parts}"}]
+    async for event in provider.stream(model, SYNTHESIS_PROMPT, messages):
+        if isinstance(event, TextDelta):
+            text += event.text
+            if time.monotonic() - last > SAVE_EVERY_SECONDS:
+                await _save(sessionmaker, run_id, content=text)
+                last = time.monotonic()
+        elif isinstance(event, StreamError):
+            log.warning("Synthesis for %s failed: %s", run_id, event.message)
+            break
+    await _save(sessionmaker, run_id, content=text.strip())
+
+
+async def run_specialist(
+    sessionmaker, graph, registry, message_id: uuid.UUID, agent_name: str,
+    history: list[dict[str, Any]], content: str, task: str | None,
+) -> str:
+    """One specialist's tool loop. Returns its final text. Read tools run;
+    write tools become proposals."""
+    text_parts: list[str] = []
+    partial = ""
+    viz_blocks: list[dict[str, Any]] = []
+    steps: list[dict[str, Any]] = []
+    last_save = time.monotonic()
+
+    def text() -> str:
+        return "\n\n".join(p for p in [*text_parts, partial] if p).strip()
+
+    async def save(**extra) -> None:
+        nonlocal last_save
+        await _save(sessionmaker, message_id, content=text(), viz=list(viz_blocks), tool_calls=list(steps) or None, **extra)
+        last_save = time.monotonic()
+
+    messages = list(history)
+    if task:
+        messages.append({"role": "user", "content": f"{content}\n\nYour part of this request, from the orchestrator: {task}"})
+    else:
+        messages.append({"role": "user", "content": content})
+
     session = sessionmaker()
     try:
-        thread = await session.get(ChatThread, thread_id)
-        if thread is None:
-            yield ("error", {"message": "Thread not found"})
-            return
-
-        user_message = ChatMessage(thread_id=thread_id, role="user", content=content)
-        session.add(user_message)
-        await session.commit()
-
-        history = await _history(session, thread_id)
-
-        agent_name = await orchestrator.route(content, registry, session)
-        yield ("routing", {"agent": agent_name})
-        yield ("message_start", {"agent": agent_name})
-
-        text_parts: list[str] = []
-        # The iteration being streamed right now. Held out here so a disconnect
-        # mid-stream keeps the deltas the client already saw.
-        partial = ""
-        viz_blocks: list[dict[str, Any]] = []
-        tool_trace: list[dict[str, Any]] = []
-
-        def _content() -> str:
-            return "\n\n".join(part for part in [*text_parts, partial] if part).strip()
-
-        async def persist() -> ChatMessage:
-            message = ChatMessage(
-                thread_id=thread_id,
-                role="agent",
-                agent_name=agent_name,
-                content=_content(),
-                viz=viz_blocks,
-                tool_calls=tool_trace or None,
-            )
-            session.add(message)
-            await session.commit()
-            await session.refresh(message)
-            return message
-
         try:
-            try:
-                provider, model = await registry.resolve_for_agent(session, agent_name)
-            except NoProviderError as e:
-                notice = str(e)
-                text_parts.append(notice)
-                yield ("text_delta", {"text": notice})
-                provider = None
-
-            system = AGENT_PROMPTS[agent_name]
-            tools = tools_for(agent_name)
-            messages = history  # already ends with the just-persisted user message
-            ctx = ToolContext(session=session, graph=graph)
-
-            hit_iteration_limit = provider is not None
-            for _iteration in range(MAX_ITERATIONS if provider else 0):
-                partial = ""
-                tool_calls: list[ToolCallEvent] = []
-                failed = False
-
-                async for event in provider.stream(model, system, messages, tools):
-                    if isinstance(event, TextDelta):
-                        partial += event.text
-                        yield ("text_delta", {"text": event.text})
-                    elif isinstance(event, ToolCallEvent):
-                        tool_calls.append(event)
-                    elif isinstance(event, StreamError):
-                        message = f"LLM call failed: {event.message}"
-                        text_parts.append(message)
-                        yield ("error", {"message": message})
-                        failed = True
-                    elif isinstance(event, StreamDone):
-                        pass
-
-                iteration_text = partial  # kept for the assistant turn below
-                if partial:
-                    text_parts.append(partial)
-                partial = ""  # folded above; _content() must not count it twice
-                if failed or not tool_calls:
-                    hit_iteration_limit = False
-                    break
-
-                messages.append(
-                    {
-                        "role": "assistant",
-                        "content": iteration_text,
-                        "tool_calls": [
-                            {"id": tc.id, "name": tc.name, "arguments": tc.arguments}
-                            for tc in tool_calls
-                        ],
-                    }
-                )
-                for tc in tool_calls:
-                    writes = changes_data(tc.name)
-                    yield (
-                        "tool_call",
-                        {"name": tc.name, "status": "started", "arguments": tc.arguments, "changes": writes},
-                    )
-                    try:
-                        result = await execute_tool(agent_name, tc.name, tc.arguments, ctx)
-                        output = result.result
-                        status = "finished"
-                        for viz in result.viz:
-                            viz_blocks.append(viz)
-                            yield ("viz_block", viz)
-                    except (ToolError, TypeError) as e:
-                        await session.rollback()
-                        output = json.dumps({"error": str(e)})
-                        status = "failed"
-                    except Exception:
-                        # Unexpected: the detail stays in the server log. What is
-                        # saved and shown in the thread (and fed to the model) is generic.
-                        log.exception("Tool %s failed in thread %s", tc.name, thread_id)
-                        await session.rollback()
-                        output = json.dumps({"error": "internal error while running this tool"})
-                        status = "failed"
-                    step = {
-                        "name": tc.name,
-                        "arguments": tc.arguments,
-                        "status": status,
-                        "changes": writes,
-                        "summary": summarize_result(output),
-                    }
-                    tool_trace.append(step)
-                    yield ("tool_call", step)
-                    messages.append(
-                        {
-                            "role": "tool",
-                            "tool_call_id": tc.id,
-                            "name": tc.name,
-                            "content": output,
-                        }
-                    )
-            if hit_iteration_limit:
-                note = "Stopped after reaching the tool-iteration limit."
-                text_parts.append(note)
-                yield ("text_delta", {"text": "\n" + note})
-
-        except BaseException:
-            # Cancelled by a client disconnect, or the turn blew up. Keep what
-            # was generated, but never let a failure here mask the exception on
-            # its way out — nothing downstream is waiting for the reply now.
-            with anyio.CancelScope(shield=True):
-                try:
-                    # Nothing reached the client yet: no reply to keep, and a
-                    # blank row would render as an empty bubble.
-                    if _content() or viz_blocks or tool_trace:
-                        await persist()
-                except Exception:
-                    log.exception("Could not persist the agent reply for %s", thread_id)
-            raise
-
-        agent_message = await persist()
-        yield ("message_end", {"message": _serialize_message(agent_message)})
+            provider, model = await registry.resolve_for_agent(session, agent_name)
+        except NoProviderError as e:
+            text_parts.append(str(e))
+            await save(status="failed")
+            return ""
+        system = AGENT_PROMPTS[agent_name] + PROPOSALS_NOTE
+        tools = tools_for(agent_name)
+        ctx = ToolContext(session=session, graph=graph)
+        hit_limit = True
+        for _ in range(MAX_ITERATIONS):
+            partial = ""
+            calls: list[ToolCallEvent] = []
+            failed = False
+            async for event in provider.stream(model, system, messages, tools):
+                if isinstance(event, TextDelta):
+                    partial += event.text
+                    if time.monotonic() - last_save > SAVE_EVERY_SECONDS:
+                        await save()
+                elif isinstance(event, ToolCallEvent):
+                    calls.append(event)
+                elif isinstance(event, StreamError):
+                    text_parts.append(f"LLM call failed: {event.message}")
+                    failed = True
+            said = partial
+            if partial:
+                text_parts.append(partial)
+            partial = ""
+            if failed or not calls:
+                hit_limit = False
+                break
+            messages.append({
+                "role": "assistant",
+                "content": said,
+                "tool_calls": [{"id": c.id, "name": c.name, "arguments": c.arguments} for c in calls],
+            })
+            for call in calls:
+                step = {"name": call.name, "arguments": call.arguments, "changes": changes_data(call.name), "status": "started"}
+                steps.append(step)
+                await save()
+                if step["changes"]:
+                    output = await _propose(sessionmaker, message_id, call)
+                    step.update(status="proposed", summary="waiting for your approval")
+                else:
+                    output, status, new_viz = await _read(ctx, agent_name, call, message_id)
+                    viz_blocks.extend(new_viz)
+                    step.update(status=status, summary=summarize_result(output))
+                messages.append({"role": "tool", "tool_call_id": call.id, "name": call.name, "content": output})
+            await save()
+        if hit_limit:
+            text_parts.append("Stopped after reaching the tool-iteration limit.")
+        await save(status="done")
+        return text()
+    except asyncio.CancelledError:
+        await save(status="interrupted")
+        raise
+    except Exception:
+        log.exception("Agent %s failed on reply %s", agent_name, message_id)
+        text_parts.append("This agent stopped because of an internal error.")
+        await save(status="failed")
+        raise
     finally:
-        # Under a cancelled scope the pool's graceful close is cancelled too,
-        # which terminates the connection instead of returning it.
         with anyio.CancelScope(shield=True):
             await session.close()
+
+
+async def _read(ctx: ToolContext, agent_name: str, call: ToolCallEvent, message_id) -> tuple[str, str, list]:
+    try:
+        result = await execute_tool(agent_name, call.name, call.arguments, ctx)
+        return result.result, "finished", list(result.viz)
+    except (ToolError, TypeError) as e:
+        return json.dumps({"error": str(e)}), "failed", []
+    except Exception:
+        # Unexpected: the detail stays in the server log. What is saved and
+        # shown in the thread (and fed to the model) is generic.
+        log.exception("Tool %s failed on reply %s", call.name, message_id)
+        return json.dumps({"error": "internal error while running this tool"}), "failed", []
+    finally:
+        # Reads only: end the transaction so it isn't held open across model calls.
+        await ctx.session.rollback()
+
+
+async def _propose(sessionmaker, message_id, call: ToolCallEvent) -> str:
+    with anyio.CancelScope(shield=True):
+        async with sessionmaker() as session:
+            session.add(ChatProposal(message_id=message_id, tool_name=call.name, arguments=call.arguments))
+            await session.commit()
+    return json.dumps({
+        "proposed": True,
+        "status": "awaiting the user's approval",
+        "note": "Not applied yet. The user approves or rejects it after you finish.",
+    })
+
+
+async def mark_interrupted(sessionmaker) -> None:
+    """At startup: no run survives a restart, so none may look like it is running."""
+    async with sessionmaker() as session:
+        await session.execute(
+            update(ChatMessage).where(ChatMessage.status == "running").values(status="interrupted")
+        )
+        await session.execute(
+            update(ChatProposal)
+            .where(ChatProposal.status == "applying")
+            .values(status="failed", result="The server restarted while applying this; check whether it took effect.")
+        )
+        await session.commit()

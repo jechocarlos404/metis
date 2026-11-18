@@ -1,3 +1,4 @@
+import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI
@@ -27,6 +28,7 @@ from app.routers import (
     work,
 )
 from app.services.graph_service import FeatureGraph
+from app.agents.runner import mark_interrupted
 from app.services.seed import ensure_agent_configs
 
 
@@ -41,8 +43,14 @@ async def lifespan(app: FastAPI):
     app.state.graph = FeatureGraph(sessionmaker)
     await app.state.graph.load()
     app.state.llm = ProviderRegistry(settings)
+    # Background chat turns. Nothing survives a restart, so none may look running.
+    app.state.runs = set()
+    await mark_interrupted(sessionmaker)
     app.state.verifier = TokenVerifier(settings) if settings.auth_enabled else None
     yield
+    for task in list(app.state.runs):
+        task.cancel()
+    await asyncio.gather(*app.state.runs, return_exceptions=True)
     await engine.dispose()
 
 

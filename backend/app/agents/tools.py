@@ -704,6 +704,23 @@ AGENT_TOOLS: dict[str, list[tuple[ToolDef, Any]]] = {
 }
 
 
+#: Every tool, classified by hand. Write tools never run during an agent turn:
+#: they become proposals a person approves (see app.agents.proposals). A test
+#: fails if a tool is added to AGENT_TOOLS without being listed in exactly one.
+WRITE_TOOLS = frozenset({
+    "create_product_spec", "create_prd_draft", "create_ticket", "update_ticket",
+    "create_capability", "update_capability", "motivate_capability",
+    "create_feature", "update_feature", "link_features",
+    "set_feature_priority", "create_delivery_strategy",
+})
+READ_TOOLS = frozenset({
+    "list_goals", "list_products", "list_features", "list_capabilities",
+    "capability_inventory", "product_coverage", "existing_product_coverage",
+    "search_features", "impact_query", "topo_order", "find_cycles", "ready_set",
+    "capability_rollup", "why_feature", "mvp_cut", "taxonomy_health",
+})
+
+
 def tools_for(agent_name: str) -> list[ToolDef]:
     return [t for t, _ in AGENT_TOOLS.get(agent_name, [])]
 

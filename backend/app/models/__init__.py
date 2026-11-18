@@ -1,6 +1,6 @@
 from app.models.adoption import Adoption, Encounter
 from app.models.capability import Capability, Motivation
-from app.models.chat import ChatMessage, ChatThread
+from app.models.chat import ChatMessage, ChatProposal, ChatThread
 from app.models.enums import (
     AdoptionStatus,
     CapabilityMaturity,
@@ -39,6 +39,7 @@ __all__ = [
     "Capability",
     "CapabilityMaturity",
     "ChatMessage",
+    "ChatProposal",
     "ChatThread",
     "Concern",
     "Constraint",

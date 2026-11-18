@@ -46,6 +46,10 @@ _SLUG_BACKFILL = (
 _FLAG_COLUMNS = (
     "alter table products add column if not exists external boolean not null default false",
     "alter table features add column if not exists unknown_capabilities boolean not null default false",
+    # Background agent runs (2026-11-18): every existing reply is finished.
+    "alter table chat_messages add column if not exists status text not null default 'done'",
+    "alter table chat_messages add column if not exists parent_id uuid references chat_messages(id) on delete cascade",
+    "alter table chat_messages add column if not exists task text",
 )
 
 

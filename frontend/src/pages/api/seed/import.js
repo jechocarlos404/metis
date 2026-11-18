@@ -627,7 +627,7 @@ class Loader {
     const added = (features["would create"] ?? 0) + (features.created ?? 0);
     if ((products.reused ?? 0) > 0 && added > 0) {
       this.warnings.push(
-        `This file names a product metis already has and adds ${added} feature${added === 1 ? "" : "s"} whose names don't match its existing ones. ` +
+        `This file names a product metis already has and adds ${added === 1 ? "1 feature whose name doesn't" : `${added} features whose names don't`} match its existing ones. ` +
           "If they describe features it already has under new wording, importing creates duplicates: compare with the product's feature list first.",
       );
     }

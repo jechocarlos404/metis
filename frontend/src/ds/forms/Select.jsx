@@ -1,6 +1,6 @@
 import React from "react";
 
-export function Select({ label, options = [], style, ...rest }) {
+export function Select({ label, options, children, style, ...rest }) {
   const [focus, setFocus] = React.useState(false);
   return (
     <label style={{ display: "flex", flexDirection: "column", gap: "6px", fontFamily: "var(--font-body)", ...style }}>
@@ -18,10 +18,12 @@ export function Select({ label, options = [], style, ...rest }) {
             borderRadius: "var(--radius-sm)", outline: "none", cursor: "pointer",
             boxShadow: focus ? "var(--ring-focus)" : "none",
           }}>
-          {options.map((o) => {
-            const opt = typeof o === "string" ? { value: o, label: o } : o;
-            return <option key={opt.value} value={opt.value} disabled={opt.disabled}>{opt.label}</option>;
-          })}
+          {options
+            ? options.map((o) => {
+                const opt = typeof o === "string" ? { value: o, label: o } : o;
+                return <option key={opt.value} value={opt.value} disabled={opt.disabled}>{opt.label}</option>;
+              })
+            : children}
         </select>
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
           style={{ position: "absolute", right: "10px", top: "50%", transform: "translateY(-50%)", pointerEvents: "none", color: "var(--text-secondary)" }}>

@@ -155,7 +155,7 @@ export default function StacksIsland({ initialSlot = "", canWrite = false }) {
   const gaps = (view?.slots ?? []).filter((s) => s.flags.includes("gap")).length;
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", minHeight: 0 }}>
+    <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0, overflowY: "auto" }}>
       <PageHeader
         title="Stacks"
         meta={

@@ -99,7 +99,7 @@ export default function CapabilitySupplyIsland({ slug }) {
   const unresolved = envelope.unresolved ?? [];
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", minHeight: 0 }}>
+    <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0, overflowY: "auto" }}>
       <PageHeader
         title={capability?.name ?? slug}
         meta={

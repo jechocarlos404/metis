@@ -103,7 +103,7 @@ export default function TechDetailIsland({ slug, canWrite = false }) {
   const capName = (id) => capabilities.find((c) => c.id === id);
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", minHeight: 0 }}>
+    <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0, overflowY: "auto" }}>
       <PageHeader
         title={detail.name}
         meta={

@@ -138,7 +138,7 @@ export default function TechCatalogIsland({ initialView = "catalog", initialQuer
   const facets = page?.facet_counts ?? {};
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", minHeight: 0 }}>
+    <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0, overflowY: "auto" }}>
       <PageHeader
         title="Tech"
         meta={

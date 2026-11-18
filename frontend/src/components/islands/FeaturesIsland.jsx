@@ -177,8 +177,11 @@ export default function FeaturesIsland({ canWrite = true }) {
   }, [cut]);
 
   const openNew = () => {
+    // Start blank: openEdit leaves the last feature in the draft. Keep only the product, as a create does.
+    setDraft((d) => ({ ...EMPTY_DRAFT, productId: d.productId }));
     setCapQuery("");
     setConfirmingDelete(false);
+    setError(null);
     setDialog({ mode: "new" });
   };
 
@@ -196,6 +199,7 @@ export default function FeaturesIsland({ canWrite = true }) {
     });
     setCapQuery("");
     setConfirmingDelete(false);
+    setError(null);
     setDialog({ mode: "edit" });
   };
 
@@ -310,7 +314,7 @@ export default function FeaturesIsland({ canWrite = true }) {
       <div style={{ padding: "12px 24px 0", flex: "none" }}>
         <Tabs tabs={[{ value: "graph", label: "Graph" }, { value: "directory", label: "Directory", count: directory.length }]} value={tab} onChange={setTab} />
       </div>
-      {error && <div style={{ padding: "8px 24px", fontSize: "var(--text-sm)", color: "var(--danger-fg)" }}>{error}</div>}
+      {error && !dialog && <div style={{ padding: "8px 24px", fontSize: "var(--text-sm)", color: "var(--danger-fg)" }}>{error}</div>}
 
       {tab === "graph" ? (
         <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
@@ -485,6 +489,7 @@ export default function FeaturesIsland({ canWrite = true }) {
         }
       >
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          {error && <div role="alert" style={{ fontSize: "var(--text-sm)", color: "var(--danger-fg)" }}>{error}</div>}
           <Input label="Name (what the user gets, verb phrase)" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="Export tickets to Notion" />
           <Input label="Description" value={draft.description} onChange={(e) => setDraft({ ...draft, description: e.target.value })} />
           <Select label="Product" value={draft.productId} onChange={(e) => setDraft({ ...draft, productId: e.target.value })}

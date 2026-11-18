@@ -458,7 +458,8 @@ def _inventory_block(entries) -> str:
         }
         for e in sorted(entries, key=lambda e: e.name.lower())
     ]
-    return "```json\n" + json.dumps(rows, ensure_ascii=False, indent=0) + "\n```"
+    lines = ",\n".join(json.dumps(row, ensure_ascii=False) for row in rows)
+    return "```json\n[\n" + lines + "\n]\n```"
 
 
 _PLACEHOLDER = re.compile(r"\{\{(INVENTORY|FORMAT_SPEC)\}\}")

@@ -11,21 +11,18 @@ const canWrite = ["editor", "admin"].includes(user?.role);
 // Technology and Stacks stay out of the nav until they hold data. On any
 // failure (timeout, 401, backend down) the item stays hidden.
 const backend = (process.env.API_INTERNAL_URL || "http://localhost:8000").replace(/\/$/, "");
-const hasData = async (route, count) => {
-  try {
-    const res = await fetch(`${backend}${route}`, {
-      headers: { authorization: `Bearer ${Astro.locals.accessToken}` },
-      signal: AbortSignal.timeout(1500),
-    });
-    return res.ok && count(await res.json()) > 0;
-  } catch {
-    return false;
-  }
-};
-const [hasTech, hasStacks] = await Promise.all([
-  hasData("/api/tech?limit=1", (b) => b?.total ?? 0),
-  hasData("/api/stacks", (b) => (Array.isArray(b) ? b.length : 0)),
-]);
+let presence = {};
+try {
+  const res = await fetch(`${backend}/api/tech/presence`, {
+    headers: { authorization: `Bearer ${Astro.locals.accessToken}` },
+    signal: AbortSignal.timeout(1500),
+  });
+  if (res.ok) presence = await res.json();
+} catch {
+  // stay hidden
+}
+const hasTech = presence?.technologies === true;
+const hasStacks = presence?.stacks === true;
 
 const path = Astro.url.pathname;
 const under = (href) => path === href || path.startsWith(href + "/");

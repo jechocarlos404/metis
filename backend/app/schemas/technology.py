@@ -84,6 +84,11 @@ class TechnologyRow(TechnologyRead):
     used_by: int
 
 
+class Presence(BaseModel):
+    technologies: bool
+    stacks: bool
+
+
 class TechnologyPage(BaseModel):
     rows: list[TechnologyRow]
     total: int

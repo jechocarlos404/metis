@@ -11,6 +11,7 @@ from app.schemas.technology import (
     EncounterRead,
     Exposure,
     Offer,
+    Presence,
     SatisfactionCreate,
     SatisfactionRead,
     SatisfactionUpdate,
@@ -75,6 +76,12 @@ async def create_technology(data: TechnologyCreate, session: AsyncSession = Depe
 # NB: static routes must be registered before /{slug}. A technology is
 # addressed by its slug everywhere a human or an agent quotes it; the UUID
 # stays the key, but it is not the name.
+@router.get("/presence", response_model=Presence)
+async def presence(session: AsyncSession = Depends(get_db)):
+    """Whether any technology or stack exists, so the nav can show or hide them."""
+    return await tech_service.presence(session)
+
+
 @router.get("/vendors", response_model=list[VendorRead])
 async def list_vendors(session: AsyncSession = Depends(get_db)):
     return await tech_service.list_vendors(session)

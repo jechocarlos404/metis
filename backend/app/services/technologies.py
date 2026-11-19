@@ -251,6 +251,17 @@ def _catalog_filters(
     return filters
 
 
+async def presence(session: AsyncSession) -> dict:
+    """Whether any technology or any stack exists. The nav asks on every page
+    render, so it is two EXISTS in one round trip, not a count or a list."""
+    row = (
+        await session.execute(
+            select(select(Technology.id).exists(), select(TechStack.id).exists())
+        )
+    ).one()
+    return {"technologies": row[0], "stacks": row[1]}
+
+
 async def catalog(
     session: AsyncSession,
     q: str | None = None,

@@ -175,8 +175,12 @@ function Proposals({ message, canWrite, onDecided }) {
 function SpecialistCard({ message, canWrite, onDecided }) {
   const running = message.status === "running";
   const waiting = (message.proposals ?? []).filter((p) => p.status === "pending").length;
+  // Open once a change waits for approval, and stay open after, so neither
+  // the buttons nor the outcome start out hidden in a collapsed card.
+  const held = React.useRef(false);
+  if (waiting > 0) held.current = true;
   return (
-    <details style={{ border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", background: "var(--surface-inset)" }}>
+    <details open={held.current || undefined} style={{ border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", background: "var(--surface-inset)" }}>
       <summary style={{ cursor: "pointer", padding: "8px 12px", fontSize: "var(--text-xs)", color: "var(--text-secondary)", lineHeight: 1.8 }}>
         <span title={message.agent_name} style={{ fontWeight: "var(--weight-medium)", color: "var(--text-heading)", marginRight: 8 }}>{agentLabel(message.agent_name)}</span>
         <Badge tone={running ? "accent" : message.status === "done" ? "ok" : "danger"}><Term dict={SPECIALIST_STATUS} value={message.status} /></Badge>
@@ -224,7 +228,7 @@ function TurnBody({ run, children, canWrite, onDecided }) {
     const only = children[0];
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        <AgentMessage agent={only.agent_name} text={only.content} viz={only.viz} tools={only.tool_calls} status={only.status} />
+        <AgentMessage agent="orchestrator" text={only.content} viz={only.viz} tools={only.tool_calls} status={only.status} />
         <Proposals message={only} canWrite={canWrite} onDecided={onDecided} />
       </div>
     );

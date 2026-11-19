@@ -38,7 +38,7 @@ function treeOptions(all, excluded) {
   const walk = (parentId, depth) => {
     for (const c of all.filter((x) => (x.parent_id ?? null) === parentId).sort((a, b) => a.seq - b.seq)) {
       if (excluded.has(c.id)) continue;
-      out.push({ value: c.id, label: `${"— ".repeat(depth)}${c.name}` });
+      out.push({ value: c.id, label: `${"   ".repeat(depth)}${c.name}` });
       walk(c.id, depth + 1);
     }
   };
@@ -322,8 +322,9 @@ export default function CapabilityIsland({ slug, canWrite = false }) {
           </section>
         )}
 
-        <details style={SECTION} onToggle={(e) => loadImpact(e.currentTarget.open)}>
+        <details style={{ ...SECTION, display: "block" }} onToggle={(e) => loadImpact(e.currentTarget.open)}>
           <summary style={{ ...H2, cursor: "pointer" }}>What depends on it</summary>
+          <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 10 }}>
           {impact === "loading" || impact == null ? (
             <div style={NOTE}>Loading…</div>
           ) : impact === "error" ? (
@@ -336,6 +337,7 @@ export default function CapabilityIsland({ slug, canWrite = false }) {
               <ImpactList title={`It needs ${count(impact.dependencies.length, "capability", "capabilities")}`} items={impact.dependencies} />
             </>
           )}
+          </div>
         </details>
       </div>
 

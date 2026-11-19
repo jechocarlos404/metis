@@ -212,6 +212,7 @@ export default function GoalsIsland({ canWrite = true }) {
                   capsByGoal={capsByGoal}
                   highlightStyle={highlightStyle}
                   editButton={editButton}
+                  canWrite={canWrite}
                   emptyText="No product goals under this org goal yet."
                 />
               </div>
@@ -221,7 +222,7 @@ export default function GoalsIsland({ canWrite = true }) {
                 <div style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>
                   These product goals aren't under an org goal. Edit one to choose its parent.
                 </div>
-                <GoalList goals={unparented} productCounts={productCounts} capsByGoal={capsByGoal} highlightStyle={highlightStyle} editButton={editButton} />
+                <GoalList goals={unparented} productCounts={productCounts} capsByGoal={capsByGoal} highlightStyle={highlightStyle} editButton={editButton} canWrite={canWrite} />
               </div>
             )}
           </div>
@@ -310,7 +311,7 @@ export default function GoalsIsland({ canWrite = true }) {
   );
 }
 
-function GoalList({ goals, productCounts, capsByGoal, highlightStyle, editButton, emptyText }) {
+function GoalList({ goals, productCounts, capsByGoal, highlightStyle, editButton, emptyText, canWrite }) {
   return (
     <>
       <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "16px 0 10px", fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: "var(--tracking-caps)", textTransform: "uppercase", color: "var(--text-secondary)" }}>
@@ -330,7 +331,7 @@ function GoalList({ goals, productCounts, capsByGoal, highlightStyle, editButton
                 )}
                 <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", marginTop: 4, display: "flex", gap: 6, flexWrap: "wrap" }}>
                   {caps.length === 0 ? (
-                    <span>No capabilities linked. Link one from a capability's page.</span>
+                    <span>{canWrite ? "No capabilities linked. Link one from a capability's page." : "No capabilities linked."}</span>
                   ) : (
                     <>
                       <span>{count(caps.length, "capability", "capabilities")}:</span>

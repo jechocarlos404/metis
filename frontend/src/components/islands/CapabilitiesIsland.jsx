@@ -127,7 +127,7 @@ export default function CapabilitiesIsland({ canWrite = true }) {
 
   const parentOptions = [
     { value: "", label: "None (top level)" },
-    ...rows.map((c) => ({ value: c.id, label: `${"— ".repeat(c.depth)}${c.name}` })),
+    ...rows.map((c) => ({ value: c.id, label: `${"   ".repeat(c.depth)}${c.name}` })),
   ];
 
   return (

@@ -1,12 +1,13 @@
 """Metis MCP server — read-only, over the same HTTP API the desktop uses.
 
-Two audiences, one server: coding agents mid-build ("does this package already
-have a stance, and what does the group run?"), and the Metis agents themselves,
-which reach the catalog through this contract rather than a private path so a
-chat transcript and an API log line up.
+Two planes, one server. The inventory tools answer the primary question —
+"what could we build next, given what already exists?" — for an agent working
+for the portfolio owner. The technology tools serve coding agents mid-build
+("does this package already have a stance, and what does the group run?").
 
-Tool names **are** the envelope's `question` keys. One vocabulary across
-desktop, API and MCP, or the three stop being comparable.
+The technology tools' names **are** the envelope's `question` keys. One
+vocabulary across desktop, API and MCP, or the three stop being comparable.
+The inventory tools are named for the job and print the API's raw values.
 
 **No mutation tools exist.** `propose_binding` returns a proposal and a link and
 persists nothing. That is not a limitation of this file — the token it carries
@@ -179,6 +180,125 @@ TOOLS = [
             "required": ["slot", "tech", "rationale"],
         },
     ),
+    # ---- inventory: what exists, and what we could build from it ----
+    Tool(
+        name="products",
+        description=(
+            "List products, ours and external, with id, slug and name. The "
+            "inventory's navigation tool — the other tools take an id or slug "
+            "it returns, so agents never guess."
+        ),
+        inputSchema={"type": "object", "properties": {}},
+    ),
+    Tool(
+        name="capability_inventory",
+        description=(
+            "What we can already do, most reused first: each capability with "
+            "its maturity, our products, our feature count, and external "
+            "products that have it. Ours first, then known only from outside."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "q": {"type": "string", "description": "Substring of name or slug, optional"},
+                "limit": {"type": "integer", "default": 50},
+            },
+        },
+    ),
+    Tool(
+        name="check_idea",
+        description=(
+            "How much of a product idea we already have. Give features, each "
+            "with the capability names it needs. Each need comes back ours, "
+            "external only, or no match with near names as candidates. Exact "
+            "names only: a candidate is never counted as a match."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "features": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": {"type": "string"},
+                            "capabilities": {
+                                "type": "array",
+                                "minItems": 1,
+                                "items": {"type": "string"},
+                            },
+                        },
+                        "required": ["name", "capabilities"],
+                    },
+                }
+            },
+            "required": ["features"],
+        },
+    ),
+    Tool(
+        name="product_score",
+        description=(
+            "How much of a product (ours or external) we could build from what "
+            "we have: buildable, partly known, not described, missing a "
+            "capability. A lower bound."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {"product": {"type": "string", "description": "Product id or slug"}},
+            "required": ["product"],
+        },
+    ),
+    Tool(
+        name="capability",
+        description=(
+            "One capability by slug: our products and features that realize "
+            "it, external products apart, the goals that motivate it, and its "
+            "progress rollup."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {"slug": {"type": "string", "description": "Capability slug"}},
+            "required": ["slug"],
+        },
+    ),
+    Tool(
+        name="feature_why",
+        description=(
+            "Why a feature exists: the capabilities it realizes, their parents, "
+            "and the goals that motivate them, up to org intent."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {"feature": {"type": "string", "description": "Feature id"}},
+            "required": ["feature"],
+        },
+    ),
+    Tool(
+        name="journeys",
+        description=(
+            "List journeys, or with an id, one journey's analysis: each step's "
+            "verdict (buildable, known_covered, missing, unknown) and whether "
+            "a user can do it today."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {"journey": {"type": "string", "description": "Journey id, optional"}},
+        },
+    ),
+    Tool(
+        name="ready_features",
+        description=(
+            "Our pending features whose dependencies are all done — what can "
+            "start now. Optionally one product."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "product": {"type": "string", "description": "Product id or slug, optional"}
+            },
+        },
+    ),
 ]
 
 
@@ -253,7 +373,96 @@ async def _dispatch(name: str, args: dict) -> str:
     if name == "propose_binding":
         return await _propose(args)
 
+    if name == "products":
+        return render.products(await client.get("/api/products"))
+
+    if name == "capability_inventory":
+        return render.capability_inventory(
+            await client.get("/api/capabilities/inventory"),
+            args.get("q"),
+            args.get("limit", 50),
+        )
+
+    if name == "check_idea":
+        # A POST that only reads: the idea travels in the body, and the write
+        # boundary exempts this exact path (app.auth.deps._READS_BY_POST).
+        body = {
+            "features": [
+                {"name": f["name"], "capabilities": list(f["capabilities"])}
+                for f in args["features"]
+            ]
+        }
+        return render.check_idea(await client.post("/api/capabilities/coverage", body))
+
+    if name == "product_score":
+        product = await _product(args["product"])
+        if product is None:
+            return render.no_product(args["product"])
+        return render.product_score(
+            await client.get(f"/api/products/{_safe_id(product['id'])}/coverage")
+        )
+
+    if name == "capability":
+        return await _capability(_safe_slug(args["slug"]))
+
+    if name == "feature_why":
+        return render.feature_why(
+            await client.get(f"/api/features/{_safe_id(args['feature'])}/why")
+        )
+
+    if name == "journeys":
+        if args.get("journey"):
+            journey = _safe_id(args["journey"])
+            return render.journey_analysis(
+                await client.get(f"/api/journeys/{journey}/analysis")
+            )
+        return render.journeys(await client.get("/api/journeys"))
+
+    if name == "ready_features":
+        products = await client.get("/api/products")
+        only = None
+        if args.get("product"):
+            only = _match_product(products, args["product"])
+            if only is None:
+                return render.no_product(args["product"])
+        ready = (await client.get("/api/graph/ready"))["ready"]
+        return render.ready_features(ready, products, only)
+
     raise ValueError(f"Unknown tool: {name}")
+
+
+def _match_product(products: list[dict], value: str) -> dict | None:
+    """By id or by exact slug. Never by name: a near name is not a product."""
+    return next((p for p in products if value in (p["id"], p["slug"])), None)
+
+
+async def _product(value: str) -> dict | None:
+    return _match_product(await client.get("/api/products"), value)
+
+
+async def _capability(slug: str) -> str:
+    """Capability routes take an id; agents hold slugs. The inventory resolves
+    one to the other and already carries who uses it, so it is read once."""
+    entry = next(
+        (e for e in await client.get("/api/capabilities/inventory") if e["slug"] == slug),
+        None,
+    )
+    if entry is None:
+        # The coverage endpoint's own near-name search, so the candidates are
+        # the same ones a human would see — and they stay candidates.
+        report = await client.post(
+            "/api/capabilities/coverage",
+            {"features": [{"name": slug, "capabilities": [slug]}]},
+        )
+        return render.no_capability(slug, report["features"][0]["capabilities"][0]["candidates"])
+    cid = _safe_id(entry["id"])
+    return render.capability(
+        entry,
+        await client.get(f"/api/capabilities/{cid}/scope"),
+        await client.get(f"/api/capabilities/{cid}/motivations"),
+        await client.get(f"/api/capabilities/{cid}/rollup"),
+        await client.get("/api/products"),
+    )
 
 
 def _hard_stop(envelope: dict) -> str | None:

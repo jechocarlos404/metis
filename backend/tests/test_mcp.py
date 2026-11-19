@@ -6,10 +6,27 @@ this is the only place the shared rows get turned into something else.
 """
 
 import pytest
+import pytest_asyncio
+from fastapi import HTTPException
+from httpx import ASGITransport, AsyncClient
 
-from app.mcp import render
+from app.auth import Principal, authorize
+from app.config import Settings, get_settings
+from app.db import get_db
+from app.main import create_app
+from app.mcp import render, server
+from app.mcp.client import MetisClient
 from app.mcp.server import PROMPTS, RESOURCE_TEMPLATES, RESOURCES, TOOLS, _hard_stop
+from app.models import CapabilityMaturity, Goal, GoalType, Product, WorkStatus
+from app.models.enums import Surface
+from app.schemas.capability import CapabilityCreate
 from app.schemas.envelope import Question
+from app.schemas.feature import EdgeCreate, FeatureCreate
+from app.schemas.journey import JourneyCreate, JourneyStepIn
+from app.services import capabilities as capability_service
+from app.services import features as feature_service
+from app.services import journeys as journey_service
+from app.services.graph_service import FeatureGraph
 
 
 def envelope(question, rows, href, **extra):
@@ -42,13 +59,29 @@ SUPPLY = envelope(
 )
 
 
+INVENTORY_TOOLS = {
+    "products",
+    "capability_inventory",
+    "check_idea",
+    "product_score",
+    "capability",
+    "feature_why",
+    "journeys",
+    "ready_features",
+}
+
+
 def test_tool_names_are_the_question_keys():
     """One vocabulary across desktop, API and MCP, or the transcripts stop
-    lining up."""
+    lining up. The inventory tools are named for the job instead."""
     names = {t.name for t in TOOLS}
     assert {str(q) for q in Question} <= names
-    assert names - {str(q) for q in Question} == {"tech_search", "propose_binding"}
-    assert len(TOOLS) == 8
+    assert names - {str(q) for q in Question} == {
+        "tech_search",
+        "propose_binding",
+        *INVENTORY_TOOLS,
+    }
+    assert len(TOOLS) == 16
     assert len(RESOURCES) + len(RESOURCE_TEMPLATES) == 4
     assert len(PROMPTS) == 3
 
@@ -259,3 +292,253 @@ def test_proposal_says_it_applied_nothing():
     )
     assert "Not applied. Binding a slot is a human action." in text
     assert text.endswith("Confirm at: /stacks?x=1")
+
+
+# ---- inventory tools, round-tripped through the real API ----
+# Renderers alone would test against payloads written here; these drive
+# _dispatch through MetisClient against the app, so a shape the API stops
+# serving fails here rather than in an agent's transcript.
+
+
+@pytest_asyncio.fixture
+async def api(db, monkeypatch):
+    """The app on the test database, and the MCP server's client pointed at it.
+    Auth is off (no Keycloak in tests); the write boundary has its own tests
+    below and in test_auth."""
+    app = create_app()
+
+    async def _session():
+        async with db() as session:
+            yield session
+
+    app.dependency_overrides[get_db] = _session
+    app.dependency_overrides[get_settings] = lambda: Settings(auth_enabled=False)
+    metis = MetisClient(base_url="http://test")
+    await metis._http.aclose()
+    metis._http = AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
+    metis._settings = Settings(auth_enabled=False)
+    monkeypatch.setattr(server, "client", metis)
+    yield app, db
+    await metis.aclose()
+
+
+async def _world(app, db):
+    """One product of ours, one external, a goal, a dependency and a journey."""
+    async with db() as s:
+        def cap(name, maturity=CapabilityMaturity.planned):
+            return capability_service.create_capability(
+                s, CapabilityCreate(name=name, maturity=maturity)
+            )
+
+        strava = await cap("Strava import", CapabilityMaturity.ga)
+        elevation = await cap("Elevation data", CapabilityMaturity.beta)
+        physics = await cap("Physics model", CapabilityMaturity.alpha)
+        weather = await cap("Weather forecast")
+        await cap("Route planner")
+        climb = Product(name="Can I Climb", slug="can-i-climb")
+        rival = Product(name="Rival", slug="rival", external=True)
+        goal = Goal(goal_type=GoalType.product, title="Riders trust the estimate")
+        s.add_all([climb, rival, goal])
+        await s.commit()
+        await capability_service.add_motivation(s, strava.id, goal.id)
+
+        def feature(name, product, caps, **extra):
+            return feature_service.create_feature(
+                s,
+                FeatureCreate(
+                    name=name,
+                    product_id=product.id,
+                    capability_ids=[c.id for c in caps],
+                    **extra,
+                ),
+            )
+
+        estimate = await feature(
+            "Estimate climb power", climb, [physics, elevation, strava], status=WorkStatus.done
+        )
+        forecast = await feature("Show ride history", climb, [strava])
+        await feature_service.create_edge(
+            s, EdgeCreate(src_id=forecast.id, dst_id=estimate.id)
+        )
+        await feature("Rival weather", rival, [weather])
+        await feature("Rival map", rival, [elevation], unknown_capabilities=True)
+        await feature("Rival social", rival, [], unknown_capabilities=True)
+        journey = await journey_service.create_journey(
+            s,
+            JourneyCreate(
+                name="Plan a climb",
+                steps=[
+                    JourneyStepIn(feature_id=estimate.id),
+                    JourneyStepIn(label="Check wind", needs=["Weather forecast"]),
+                ],
+            ),
+        )
+    graph = FeatureGraph(db)
+    await graph.load()
+    app.state.graph = graph
+    return {"forecast": forecast, "journey": journey, "climb": climb, "rival": rival}
+
+
+def _conventions(text):
+    lines = text.splitlines()
+    assert lines[0][0].isdigit(), lines[0]
+    assert lines[-1].startswith("Open: /"), lines[-1]
+
+
+async def test_products_lists_ours_and_external(api):
+    w = await _world(*api)
+    text = await server._dispatch("products", {})
+    _conventions(text)
+    assert text.startswith("2 product(s): 1 ours, 1 external.")
+    assert str(w["rival"].id) in text and "external" in text
+
+
+async def test_inventory_is_most_reused_first_and_filters_in_order(api):
+    await _world(*api)
+    text = await server._dispatch("capability_inventory", {})
+    _conventions(text)
+    assert text.startswith(
+        "5 capabilit(ies): 3 ours with features, 1 ours with no feature yet, "
+        "1 known only from external products"
+    )
+    rows = [line.split()[0] for line in text.splitlines()[2:7]]
+    assert rows[-1] == "weather-forecast"
+    assert "external only — not ours" in text
+
+    text = await server._dispatch("capability_inventory", {"q": "data"})
+    assert text.startswith("1 of 5 capabilit(ies) match 'data'")
+    text = await server._dispatch("capability_inventory", {"q": "teleport"})
+    assert text.startswith("0 of 5") and "That is an answer" in text
+
+
+async def test_check_idea_never_counts_a_near_name(api):
+    """Ours, external only, and no match with candidates — and the candidate
+    stays a candidate."""
+    await _world(*api)
+    text = await server._dispatch(
+        "check_idea",
+        {"features": [{"name": "Climb planner",
+                       "capabilities": ["Strava import", "Weather forecast", "Elevaton data"]}]},
+    )
+    _conventions(text)
+    assert text.startswith(
+        "1/3 distinct capabilit(ies) are ours, 1 of them proven (beta or ga); 2 not ours."
+    )
+    lines = text.splitlines()
+    assert any(line.strip().startswith("ours") and "strava-import (ga" in line for line in lines)
+    assert any(line.strip().startswith("external only") and "rival" in line for line in lines)
+    miss = next(i for i, line in enumerate(lines) if line.strip() == "no match       Elevaton data")
+    assert "near names, unconfirmed: elevation-data" in lines[miss + 1]
+    assert "Not ours (2): Weather forecast, Elevaton data" in text
+
+
+async def test_product_score_groups_sum_to_the_total(api):
+    w = await _world(*api)
+    text = await server._dispatch("product_score", {"product": "rival"})
+    _conventions(text)
+    assert text.startswith(
+        "0/3 feature(s) of rival buildable from what we have; "
+        "1 partly known, 1 not described, 1 missing a capability."
+    )
+    assert "Partly known" in text and "Rival map" in text
+    assert "Not described" in text and "Rival social" in text
+    assert "Lower bound" in text
+    assert text.endswith(f"Open: /products?product={w['rival'].id}")
+    by_id = await server._dispatch("product_score", {"product": str(w["climb"].id)})
+    assert by_id.startswith("2/2 feature(s) of can-i-climb buildable")
+    assert (await server._dispatch("product_score", {"product": "Rival"})).startswith(
+        "0 products have id or slug 'Rival'"
+    )
+
+
+async def test_capability_says_who_why_and_how_far(api):
+    await _world(*api)
+    text = await server._dispatch("capability", {"slug": "strava-import"})
+    _conventions(text)
+    assert text.startswith(
+        "2 feature(s) of ours realize strava-import across 1 product(s); maturity ga."
+    )
+    assert "Rollup: 2 total — 1 pending, 0 in_progress, 1 done." in text
+    assert "Our products: can-i-climb" in text
+    assert "PG-" in text and "Riders trust the estimate" in text
+    assert "Rival weather" not in text  # external features are not ours
+
+    weather = await server._dispatch("capability", {"slug": "weather-forecast"})
+    assert "Known only from external products" in weather
+    assert "External products that have it: rival" in weather
+    assert "No goal motivates it directly" in weather
+
+    missing = await server._dispatch("capability", {"slug": "strava"})
+    assert missing.startswith("0 capabilities have slug 'strava'. Matching is exact.")
+    assert "Near names, unconfirmed: strava-import" in missing
+
+
+async def test_feature_why_walks_up_to_the_goal(api):
+    w = await _world(*api)
+    text = await server._dispatch("feature_why", {"feature": str(w["forecast"].id)})
+    _conventions(text)
+    assert text.startswith("1 capabilit(ies) and 1 goal(s) above Show ride history.")
+    assert "REALIZES" in text and "MOTIVATES" in text and "PG-" in text
+
+
+async def test_journeys_list_and_analysis(api):
+    w = await _world(*api)
+    listing = await server._dispatch("journeys", {})
+    _conventions(listing)
+    assert listing.startswith("1 journey(s).") and str(w["journey"].id) in listing
+
+    text = await server._dispatch("journeys", {"journey": str(w["journey"].id)})
+    _conventions(text)
+    assert text.startswith(
+        "2 step(s) in Plan a climb: 1 buildable, 0 known_covered, 1 missing, 0 unknown; "
+        "1 live today."
+    )
+    assert "Check wind needs, not ours: Weather forecast" in text
+
+
+async def test_ready_features_filters_by_product(api):
+    await _world(*api)
+    text = await server._dispatch("ready_features", {})
+    _conventions(text)
+    assert text.startswith("1 feature(s) ready to start — pending, every dependency done.")
+    assert "Show ride history" in text and "can-i-climb" in text
+    rival = await server._dispatch("ready_features", {"product": "rival"})
+    assert rival.startswith("0 feature(s) ready to start in rival") and "Nothing is ready" in rival
+    assert (await server._dispatch("ready_features", {"product": "nope"})).startswith("0 products")
+
+
+@pytest.mark.parametrize(
+    "name,args",
+    [
+        ("feature_why", {"feature": "../../admin/llm"}),
+        ("journeys", {"journey": "x/../../users"}),
+        ("capability", {"slug": "../users"}),
+    ],
+)
+async def test_inventory_tools_take_ids_only_in_the_shape_of_ids(name, args):
+    """Ids go into request paths, so the same guard as slugs applies — and it
+    fires before any request is made."""
+    with pytest.raises(ValueError):
+        await server._dispatch(name, args)
+
+
+@pytest.mark.parametrize("path", ["/api/stacks/metis/recommend", "/api/capabilities/coverage"])
+def test_every_post_the_mcp_server_makes_is_a_read(path):
+    """check_idea and the unknown-capability lookup POST the coverage
+    endpoint. The boundary exempts that exact path; nothing else."""
+    authorize("POST", Principal(sub="m", username="m", roles=["viewer"], surface=Surface.mcp), path)
+
+
+@pytest.mark.parametrize(
+    "method,path",
+    [("POST", "/api/capabilities"), ("POST", "/api/features"), ("PATCH", "/api/products/abc")],
+)
+def test_real_writes_from_mcp_are_still_refused(method, path):
+    with pytest.raises(HTTPException) as err:
+        authorize(
+            method,
+            Principal(sub="m", username="m", roles=["admin"], surface=Surface.mcp),
+            path,
+        )
+    assert err.value.status_code == 403
+    assert err.value.detail["error"] == "human_action_required"

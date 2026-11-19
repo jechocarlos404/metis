@@ -85,10 +85,17 @@ def test_coverage_is_a_read_despite_being_a_post(surface):
     authorize("POST", _p("viewer", surface=surface), "/api/capabilities/coverage")
 
 
+@pytest.mark.parametrize("surface", [Surface.api, Surface.mcp])
+def test_mvp_cut_is_a_read_despite_being_a_post(surface):
+    """Targets travel in the body; the cut is computed, never stored."""
+    authorize("POST", _p("viewer", surface=surface), "/api/graph/mvp-cut")
+
+
 @pytest.mark.parametrize(
     "path",
     [
         "/api/capabilities/coverage/x",
+        "/api/graph/mvp-cut/x",
         "/api/capabilities/abc/coverage",
         "/api/stacks/slots/abc/bind/recommend",  # suffix match would exempt this
         "/api/stacks/a/b/recommend",

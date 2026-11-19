@@ -414,7 +414,7 @@ export default function FeaturesIsland({ canWrite = true }) {
             topoError={topoError}
             selectedId={selected}
             onSelect={selectFeature}
-            canCut={canWrite}
+            canCut
             cutTargetOptions={cutTargetOptions}
             cutTarget={cutTarget}
             onPickCutTarget={pickCutTarget}

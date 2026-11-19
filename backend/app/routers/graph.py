@@ -49,7 +49,7 @@ async def topo(request: Request):
         raise HTTPException(
             409,
             {
-                "message": "Dependency cycle detected — break it before ordering.",
+                "message": "These features depend on each other in a circle. Break the circle before ordering.",
                 "cycle": [str(n) for n in e.cycle],
             },
         ) from None
@@ -83,7 +83,7 @@ async def mvp_cut(
         raise HTTPException(
             409,
             {
-                "message": "Dependency cycle detected — break it before cutting scope.",
+                "message": "These features depend on each other in a circle. Break the circle before cutting scope.",
                 "cycle": [str(n) for n in e.cycle],
             },
         ) from None

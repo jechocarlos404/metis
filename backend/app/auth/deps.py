@@ -43,6 +43,7 @@ _SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 _READS_BY_POST = (
     re.compile(r"/api/stacks/[^/]+/recommend"),
     re.compile(r"/api/capabilities/coverage"),
+    re.compile(r"/api/graph/mvp-cut"),
 )
 
 

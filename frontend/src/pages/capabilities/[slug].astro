@@ -1,13 +1,11 @@
 ---
 import AppLayout from "../../layouts/AppLayout.astro";
-import CapabilitySupplyIsland from "../../components/islands/CapabilitySupplyIsland.jsx";
+import CapabilityIsland from "../../components/islands/CapabilityIsland.jsx";
 
-// A detail route reached by link, not a nav item. Nobody wakes up wanting to
-// browse the catalog; they arrive holding a need — from a Spec, a Feature, a
-// slot, or a sentence typed into chat.
 const { slug } = Astro.params;
+const canWrite = ["editor", "admin"].includes(Astro.locals.user?.role);
 ---
 
 <AppLayout title={`Capability · ${slug}`}>
-  <CapabilitySupplyIsland client:load slug={slug} />
+  <CapabilityIsland client:load slug={slug} canWrite={canWrite} />
 </AppLayout>

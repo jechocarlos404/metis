@@ -3,7 +3,11 @@ import { PageHeader } from "../shell/PageHeader.jsx";
 import { Badge, Button, Select } from "../../ds";
 import { api } from "../../lib/api.js";
 import { CARD, FIT_TONE, FLAG_TONE, LAYERS, MICRO, MONO, STANCE_TONE } from "../../lib/ontology.js";
-import { count } from "../../lib/words.js";
+import { FIT, count, productOptions } from "../../lib/words.js";
+import { Term } from "../shared/Term.jsx";
+
+const FLAG = { gap: "empty", redundant: "duplicate", drift: "not in a slot", workaround: "workaround", trial: "on trial" };
+const STACK_IS ="A stack is the set of technologies a product runs on, grouped by layer into slots.";
 
 /**
  * `/stacks` — a product's stack as layers of slots, and the resolver.
@@ -27,7 +31,7 @@ function LayerCard({ layer, slots, activeId, onPick }) {
       <div style={{ display: "flex", gap: "var(--space-3)", alignItems: "baseline", padding: "8px 14px", background: "var(--surface-inset)", borderBottom: "1px solid var(--border-hairline)" }}>
         <span style={{ ...MICRO, color: "var(--text-heading)", fontWeight: "var(--weight-semibold)" }}>{layer}</span>
         <span style={MONO}>
-          {count(slots.length, "slot")}{gaps ? ` · ${gaps} gap` : ""}{redundant ? ` · ${redundant} redundancy` : ""}
+          {count(slots.length, "slot")}{gaps ? ` · ${gaps} empty` : ""}{redundant ? ` · ${redundant} duplicate` : ""}
         </span>
       </div>
       <div style={{ overflowX: "auto" }}>
@@ -65,11 +69,11 @@ function LayerCard({ layer, slots, activeId, onPick }) {
                     unfilled
                   </span>
                 )}
-                {s.fit && <span style={MONO}>fit {s.fit}</span>}
+                {s.fit && <span style={MONO}><Term dict={FIT} value={s.fit} /></span>}
               </span>
               <span style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
                 {s.flags.map((f) => (
-                  <Badge key={f} tone={FLAG_TONE[f] ?? "neutral"}>{f}</Badge>
+                  <Badge key={f} tone={FLAG_TONE[f] ?? "neutral"}><Term dict={FLAG} value={f} /></Badge>
                 ))}
               </span>
             </button>
@@ -95,8 +99,10 @@ export default function StacksIsland({ initialSlot = "", canWrite = false }) {
       .then(([s, p]) => {
         setStacks(s);
         setProducts(p);
-        const first = s.find((x) => x.product_id);
-        if (first) setProductId(first.product_id);
+        // Default to a product that has a stack; otherwise the first in the
+        // picker, so the picker and the panel always name the same product.
+        const first = s.find((x) => x.product_id && p.some((q) => q.id === x.product_id));
+        setProductId(first?.product_id ?? productOptions(p)[0]?.value ?? "");
       })
       .catch((e) => setError(e.detail ?? e.message));
   }, []);
@@ -161,14 +167,18 @@ export default function StacksIsland({ initialSlot = "", canWrite = false }) {
         title="Stacks"
         meta={
           <span style={MONO}>
-            {count(archetypes.length, "archetype")} · {count(stacks.length - archetypes.length, "product stack")} ·{" "}
-            {count(gaps, "gap")} · {view?.drift.length ?? 0} drift
+            {[
+              count(stacks.length - archetypes.length, "product stack"),
+              archetypes.length > 0 && count(archetypes.length, "archetype"),
+              gaps > 0 && count(gaps, "empty required slot"),
+            ].filter(Boolean).join(" · ")}
           </span>
         }
         actions={
-          <Select value={productId} onChange={(e) => { setProductId(e.target.value); setActiveSlot(null); }}>
-            {products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-          </Select>
+          products.length > 0 && (
+            <Select aria-label="Product" value={productId} options={productOptions(products)}
+              onChange={(e) => { setProductId(e.target.value); setActiveSlot(null); }} />
+          )
         }
       />
 
@@ -177,11 +187,9 @@ export default function StacksIsland({ initialSlot = "", canWrite = false }) {
       )}
 
       <div style={{ padding: "var(--space-5)", display: "flex", flexDirection: "column", gap: "var(--space-5)" }}>
+        {archetypes.length > 0 && (
         <section style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
-          <div style={MICRO}>archetypes — slots with capabilities, tech unbound</div>
-          {archetypes.length === 0 ? (
-            <span style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>No archetypes yet. An archetype is a reusable stack shape: slots, each naming the capabilities it must cover, with the technology left open. They're added through the metis API or MCP tools.</span>
-          ) : (
+          <div style={MICRO}>archetypes: reusable stack shapes, technology left open</div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px,1fr))", gap: "var(--space-3)" }}>
               {archetypes.map((a) => (
                 <div key={a.id} style={{ ...CARD, padding: 14 }}>
@@ -198,8 +206,8 @@ export default function StacksIsland({ initialSlot = "", canWrite = false }) {
                 </div>
               ))}
             </div>
-          )}
         </section>
+        )}
 
         <section style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-5)", alignItems: "flex-start" }}>
           <div style={{ flex: "1 1 620px", minWidth: 0, display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
@@ -208,12 +216,14 @@ export default function StacksIsland({ initialSlot = "", canWrite = false }) {
                 product stack{productStack ? ` · ${productStack.name}` : ""}
               </span>
               <span style={{ flex: 1 }} />
-              <span style={{ ...MONO, color: "var(--text-secondary)" }}>click a slot to resolve it</span>
+              {productStack && <span style={{ ...MONO, color: "var(--text-secondary)" }}>pick a slot to fill it</span>}
             </div>
 
             {!productStack ? (
               <div style={{ ...CARD, padding: "var(--space-4)", color: "var(--text-secondary)", fontSize: "var(--text-sm)" }}>
-                This product has no stack yet.
+                {products.length === 0
+                  ? <>No products yet, so no stacks. {STACK_IS} <a href="/products">Add a product</a> first.</>
+                  : <>{products.find((p) => p.id === productId)?.name ?? "This product"} has no stack yet. {STACK_IS}</>}
               </div>
             ) : (
               byLayer.map(([layer, slots]) => (
@@ -223,7 +233,7 @@ export default function StacksIsland({ initialSlot = "", canWrite = false }) {
 
             {(view?.drift.length ?? 0) > 0 && (
               <div style={{ ...CARD, padding: "var(--space-4)" }}>
-                <div style={MICRO}>drift — used, but no slot ever declared it</div>
+                <div style={MICRO}>used, but in no slot</div>
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
                   {view.drift.map((d) => (
                     <a key={d.tech_id} href={`/tech/${d.slug}`} style={{ ...MONO, textDecoration: "none", border: "1px solid var(--border-default)", borderRadius: "var(--radius-xs)", padding: "2px 8px" }}>
@@ -236,7 +246,7 @@ export default function StacksIsland({ initialSlot = "", canWrite = false }) {
 
             {(view?.unanswered_concerns.length ?? 0) > 0 && (
               <div style={{ ...CARD, padding: "var(--space-4)" }}>
-                <div style={MICRO}>unanswered concerns — review blockers, not roadmap items</div>
+                <div style={MICRO}>open concerns to answer before review</div>
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
                   {view.unanswered_concerns.map((c) => <Badge key={c} tone="warn">{c}</Badge>)}
                 </div>
@@ -245,6 +255,7 @@ export default function StacksIsland({ initialSlot = "", canWrite = false }) {
           </div>
 
           {/* The resolver: the one raised surface on the page. */}
+          {productStack && (
           <aside style={{ flex: "1 1 300px", maxWidth: 420, position: "sticky", top: 80, ...CARD, border: "1.5px solid var(--accent)", boxShadow: "var(--shadow-raised)", padding: "var(--space-4)", display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
             <div style={{ ...MICRO, color: "var(--text-accent)" }}>Recommended technology</div>
             {!activeSlot ? (
@@ -262,9 +273,9 @@ export default function StacksIsland({ initialSlot = "", canWrite = false }) {
                   <div style={MICRO}>loading</div>
                 ) : offers.offers.length === 0 ? (
                   <div style={{ padding: "var(--space-4)", border: "1px dashed var(--border-default)", borderRadius: "var(--radius-sm)", color: "var(--text-secondary)", fontSize: "var(--text-sm)" }}>
-                    No offer survives the constraints on this product.
+                    No technology fits this slot within this product's rules.
                     {offers.blocked_by.length > 0 && (
-                      <div style={{ ...MONO, marginTop: 6 }}>blocked_by {offers.blocked_by.join(", ")}</div>
+                      <div title="blocked_by" style={{ ...MONO, marginTop: 6 }}>Ruled out by: {offers.blocked_by.join(", ")}</div>
                     )}
                   </div>
                 ) : (
@@ -274,17 +285,17 @@ export default function StacksIsland({ initialSlot = "", canWrite = false }) {
                       <div key={o.tech_id} style={{ border: `1px solid ${bound ? "var(--accent)" : "var(--border-hairline)"}`, background: bound ? "var(--accent-wash)" : "var(--surface-card)", borderRadius: "var(--radius-sm)", padding: "10px 12px", display: "flex", flexDirection: "column", gap: 6 }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                           <a href={`/tech/${o.slug}`} style={{ flex: 1, fontFamily: "var(--font-mono)", fontSize: "var(--text-sm)", color: "var(--text-heading)", textDecoration: "none" }}>{o.slug}</a>
-                          <Badge tone={o.stance ? STANCE_TONE[o.stance] : "neutral"}>{o.stance ?? "no stance"}</Badge>
+                          {o.stance && <Badge tone={STANCE_TONE[o.stance]}><span title={o.stance}>{o.stance}</span></Badge>}
                         </div>
                         <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-                          <Badge tone={FIT_TONE[o.fit] ?? "neutral"}>fit {o.fit}</Badge>
+                          <Badge tone={FIT_TONE[o.fit] ?? "neutral"}><Term dict={FIT} value={o.fit} /></Badge>
                           {typeof o.cost?.ops_burden === "number" && <span style={MONO}>ops {o.cost.ops_burden}</span>}
                           {o.experience && <span style={MONO}>{o.experience} here</span>}
                           <span style={{ flex: 1 }} />
                           {bound ? (
-                            <span style={{ ...MONO, color: "var(--text-accent)" }}>bound</span>
+                            <span style={{ ...MONO, color: "var(--text-accent)" }}>in use</span>
                           ) : canWrite ? (
-                            <Button size="sm" variant="accent" disabled={binding} onClick={() => bind(o.tech_id)}>bind</Button>
+                            <Button size="sm" variant="accent" disabled={binding} onClick={() => bind(o.tech_id)}>Use</Button>
                           ) : null}
                         </div>
                         {o.notes && <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", textWrap: "pretty" }}>{o.notes}</div>}
@@ -299,17 +310,18 @@ export default function StacksIsland({ initialSlot = "", canWrite = false }) {
                       Ranked by fit, then adoption, then ops burden.
                       {canWrite && (
                         <Button size="sm" style={{ marginTop: 8 }} disabled={binding} onClick={() => bind(null)}>
-                          unbind
+                          Clear slot
                         </Button>
                       )}
                     </>
                   ) : (
-                    "No offer is bound to this slot. Nothing is auto-filled — an empty required slot is a gap the PRD has to answer before tickets are cut."
+                    `No technology fills this slot yet.${canWrite && offers?.offers.length ? " Pick one above." : ""}`
                   )}
                 </div>
               </>
             )}
           </aside>
+          )}
         </section>
       </div>
     </div>

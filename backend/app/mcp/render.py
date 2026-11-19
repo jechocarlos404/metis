@@ -312,7 +312,7 @@ def capability_inventory(rows: list[dict], query: str | None, limit: int = 50) -
             f"Nothing named like {query!r}. That is an answer: we don't have it under that name."
         )
     lines.append("")
-    return _end(lines, "/inventory")
+    return _end(lines, "/capabilities")
 
 
 def _need(need: dict) -> list[str]:
@@ -356,7 +356,7 @@ def check_idea(report: dict) -> str:
         "confirm, never counted as matches.",
         "",
     ]
-    return _end(lines, "/inventory")
+    return _end(lines, "/home")
 
 
 def product_score(score: dict) -> str:
@@ -457,7 +457,7 @@ def no_capability(slug: str, candidates: list[dict]) -> str:
         lines.append(f"Near names, unconfirmed: {_candidates(candidates)}")
     else:
         lines.append("No near names either: we don't have it.")
-    return _end(lines, "/inventory")
+    return _end(lines, "/capabilities")
 
 
 def feature_why(why: dict) -> str:

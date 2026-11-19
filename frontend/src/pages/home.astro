@@ -1,0 +1,12 @@
+---
+import AppLayout from "../layouts/AppLayout.astro";
+import HomeIsland from "../components/islands/HomeIsland.jsx";
+
+const role = Astro.locals.user?.role;
+const canWrite = ["editor", "admin"].includes(role);
+const isAdmin = role === "admin";
+---
+
+<AppLayout title="Home">
+  <HomeIsland client:load canWrite={canWrite} isAdmin={isAdmin} />
+</AppLayout>

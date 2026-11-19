@@ -63,7 +63,16 @@ export function WhatItDoes({ product, features, score, capabilities, journeys, b
         {features.length === 0 ? (
           <div style={muted}>
             No features recorded for {product.name} yet.
-            {canWrite && <> Features you add on <a href="/features">Features</a> appear here, grouped by capability.</>}
+            {canWrite ? (
+              <>
+                {" "}The quickest way in is a seed file: <a href="/settings">add one from its repo</a>. To map it by hand instead, go in this order:
+                <ol style={{ margin: "6px 0 0", paddingLeft: 20, display: "flex", flexDirection: "column", gap: 2 }}>
+                  <li>Name the capabilities it uses on <a href="/capabilities">Capabilities</a>.</li>
+                  <li>Add its features on <a href="/features">Features</a> and pick a capability for each.</li>
+                  <li>Say why: create a goal on <a href="/goals">Goals</a>, then link it from each capability's page.</li>
+                </ol>
+              </>
+            ) : " An editor or admin can add them."}
           </div>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>

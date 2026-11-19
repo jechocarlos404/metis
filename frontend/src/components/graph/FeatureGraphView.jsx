@@ -270,7 +270,7 @@ export function CardLabel({ name, x, fill = "var(--text-heading)" }) {
   );
 }
 
-function GraphToolbar({ onZoomIn, onZoomOut, onFit }) {
+export function GraphToolbar({ onZoomIn, onZoomOut, onFit }) {
   return (
     <div style={{
       position: "absolute", top: 10, right: 10, display: "flex", flexDirection: "column", gap: 2,

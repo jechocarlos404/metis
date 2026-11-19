@@ -1,8 +1,9 @@
 import React from "react";
 import { PageHeader } from "../shell/PageHeader.jsx";
-import { Button, Dialog, Icon, IconButton, Input, PriorityBadge, Select, StatusBadge, DeleteConfirm } from "../../ds";
+import { Button, Dialog, Icon, IconButton, Input, PriorityBadge, Select, StatusBadge, Tabs, DeleteConfirm } from "../../ds";
 import { api } from "../../lib/api.js";
-import { readParam } from "../../lib/url-state.js";
+import { readParam, useParamRestore, writeParams } from "../../lib/url-state.js";
+import { GoalNetworkView } from "../graph/GoalNetworkView.jsx";
 import { PRIORITY_HINT, count, statusLabel } from "../../lib/words.js";
 
 const EMPTY_DRAFT = { goal_type: "product", parent_goal_id: "", title: "", description: "", success_criteria: "", priority: "3", status: "pending" };
@@ -12,6 +13,8 @@ export default function GoalsIsland({ canWrite = true }) {
   const [productCounts, setProductCounts] = React.useState({});
   const [capsByGoal, setCapsByGoal] = React.useState({});
   const [highlight, setHighlight] = React.useState(null); // ?goal=<id>, scrolled to once loaded
+  const [view, setView] = React.useState("list"); // ?view=network, read after mount (the server has no URL)
+  const [picked, setPicked] = React.useState(null); // ?goal=<id> selected in the network
   const [dialog, setDialog] = React.useState(null); // null | {mode:"new"} | {mode:"edit", goal}
   const [draft, setDraft] = React.useState(EMPTY_DRAFT);
   const [saving, setSaving] = React.useState(false);
@@ -48,12 +51,12 @@ export default function GoalsIsland({ canWrite = true }) {
   const loaded = goals != null;
   React.useEffect(() => {
     const id = readParam("goal");
-    if (!loaded || !id) return;
+    if (!loaded || !id || view !== "list") return;
     const el = document.getElementById(`goal-${id}`);
     if (!el) return;
     el.scrollIntoView({ block: "center" });
     setHighlight(id);
-  }, [loaded]);
+  }, [loaded, view]);
 
   const orgs = (goals ?? []).filter((g) => g.goal_type === "org");
   const productGoals = (goals ?? []).filter((g) => g.goal_type === "product");
@@ -146,6 +149,19 @@ export default function GoalsIsland({ canWrite = true }) {
     }
   };
 
+  useParamRestore("view", (v) => setView(v === "network" ? "network" : "list"));
+  useParamRestore("goal", (id) => setPicked(id));
+  const changeView = (next) => {
+    setView(next);
+    // Carry the network's selection over, so the list scrolls to it.
+    writeParams({ view: next === "network" ? "network" : "", goal: picked ?? "" }, { push: true });
+    if (next === "list") setHighlight(picked);
+  };
+  const pickGoal = (id) => {
+    setPicked(id);
+    writeParams({ goal: id }, { push: true });
+  };
+
   const highlightStyle = (id) => (id === highlight ? { outline: "2px solid var(--accent)", outlineOffset: 2 } : null);
 
   const editButton = (goal) =>
@@ -169,6 +185,16 @@ export default function GoalsIsland({ canWrite = true }) {
           )
         }
       />
+      <div style={{ padding: "12px 24px 0", flex: "none" }}>
+        <Tabs tabs={[{ value: "list", label: "List" }, { value: "network", label: "Network" }]} value={view} onChange={changeView} />
+      </div>
+      {view === "network" ? (
+        goals == null ? (
+          <div style={{ padding: 24, color: "var(--text-secondary)", fontSize: "var(--text-sm)" }}>{error ?? "Loading goals…"}</div>
+        ) : (
+          <GoalNetworkView goals={goals} capsByGoal={capsByGoal} selectedId={picked} onSelect={pickGoal} />
+        )
+      ) : (
       <div style={{ flex: 1, overflowY: "auto", padding: 24 }}>
         <div style={{ maxWidth: 760 }}>
           {error && !dialog && (
@@ -228,6 +254,7 @@ export default function GoalsIsland({ canWrite = true }) {
           </div>
         </div>
       </div>
+      )}
 
       <Dialog
         open={dialog != null}

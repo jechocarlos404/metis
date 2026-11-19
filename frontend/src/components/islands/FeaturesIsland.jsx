@@ -390,7 +390,7 @@ export default function FeaturesIsland({ canWrite = true }) {
           <div style={{ fontSize: "var(--text-sm)", color: "var(--text-body)" }}>
             No features yet. Features come in with each product's seed file{canWrite ? "." : ", which an editor loads."}
           </div>
-          {canWrite && <a href="/home" style={{ fontSize: "var(--text-sm)", color: "var(--text-accent)", textDecoration: "none" }}>Get started</a>}
+          {canWrite && <a href="/settings" style={{ fontSize: "var(--text-sm)", color: "var(--text-accent)", textDecoration: "none" }}>Get started</a>}
         </div>
       ) : (
       <div style={{ flex: 1, display: "flex", minHeight: 0 }}>

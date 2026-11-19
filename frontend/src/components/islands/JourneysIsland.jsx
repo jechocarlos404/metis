@@ -79,7 +79,11 @@ export default function JourneysIsland({ canWrite }) {
   React.useEffect(() => {
     setAnalysis(null);
     if (!selected || !journeys?.some((j) => j.id === selected)) return;
-    api(`/journeys/${selected}/analysis`).then(setAnalysis).catch((e) => setError(e.message));
+    let live = true; // a slow answer for the previous journey must not land on this one
+    api(`/journeys/${selected}/analysis`)
+      .then((a) => { if (live) setAnalysis(a); })
+      .catch((e) => { if (live) setError(e.message); });
+    return () => { live = false; };
   }, [selected, journeys]);
 
   const productById = React.useMemo(() => new Map(products.map((p) => [p.id, p])), [products]);

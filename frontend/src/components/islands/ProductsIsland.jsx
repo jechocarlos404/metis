@@ -341,7 +341,7 @@ export default function ProductsIsland({ canWrite = true }) {
                 <Button size="sm" variant="accent" style={{ gap: 6 }} onClick={openNewProduct}>
                   <Icon name="plus" size={13} />New product
                 </Button>
-                <a href="/home">Add one from its repo</a>
+                <a href="/settings">Add one from its repo</a>
               </div>
             )}
           </div>

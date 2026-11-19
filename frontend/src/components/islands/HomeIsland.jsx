@@ -89,6 +89,7 @@ function IdeaChecker({ inventory, canWrite }) {
   const [report, setReport] = React.useState(null);
   const [busy, setBusy] = React.useState(null); // null | "check" | "save"
   const [error, setError] = React.useState(null);
+  const [skipped, setSkipped] = React.useState(0); // named features left out of the last check
 
   const options = React.useMemo(() => inventory.map((c) => ({
     id: c.id, name: c.name, slug: c.slug,
@@ -98,7 +99,17 @@ function IdeaChecker({ inventory, canWrite }) {
   const setRow = (key, patch) => setRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...patch } : r)));
   const removeRow = (key) => setRows((rs) => (rs.length > 1 ? rs.filter((r) => r.key !== key) : rs));
 
+  // Picks without a name, or two features with one name, would silently drop or merge.
+  const rowProblem = (current) => {
+    if (current.some((r) => !r.name.trim() && r.caps.length > 0)) return "Every feature with capabilities needs a name.";
+    const names = current.map((r) => r.name.trim().toLowerCase()).filter(Boolean);
+    if (new Set(names).size < names.length) return "Two features have the same name. Give each one its own.";
+    return null;
+  };
+
   const check = async (current = rows) => {
+    const problem = rowProblem(current);
+    if (problem) { setError(problem); return; }
     const features = current
       .filter((r) => r.name.trim() && r.caps.length > 0)
       .map((r) => ({ name: r.name.trim(), capabilities: r.caps }));
@@ -108,6 +119,7 @@ function IdeaChecker({ inventory, canWrite }) {
     }
     setBusy("check");
     setError(null);
+    setSkipped(current.filter((r) => r.name.trim() && r.caps.length === 0).length);
     try {
       setReport(await api("/capabilities/coverage", { method: "POST", body: { features } }));
     } catch (e) {
@@ -130,6 +142,8 @@ function IdeaChecker({ inventory, canWrite }) {
     const name = idea.trim();
     const steps = rows.filter((r) => r.name.trim()).map((r) => ({ label: r.name.trim(), needs: r.caps }));
     if (!name) { setError("Give the idea a name to save it."); return; }
+    const problem = rowProblem(rows);
+    if (problem) { setError(problem); return; }
     if (steps.length === 0) { setError("Name at least one feature to save the idea."); return; }
     setBusy("save");
     setError(null);
@@ -151,11 +165,11 @@ function IdeaChecker({ inventory, canWrite }) {
         </div>
       </div>
       <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 14 }}>
-        <Input label="Idea" value={idea} placeholder="e.g. Ride planner" onChange={(e) => setIdea(e.target.value)} />
+        <Input label="Idea" value={idea} onChange={(e) => setIdea(e.target.value)} />
         {rows.map((r, i) => (
           <div key={r.key} style={{ display: "flex", flexDirection: "column", gap: 6, paddingTop: 12, borderTop: "1px solid var(--border-hairline)" }}>
             <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
-              <Input label={`Feature ${i + 1}`} value={r.name} placeholder="e.g. Import past rides" style={{ flex: 1 }}
+              <Input label={`Feature ${i + 1}`} value={r.name} style={{ flex: 1 }}
                 onChange={(e) => setRow(r.key, { name: e.target.value })} />
               {rows.length > 1 && (
                 <Button size="sm" variant="ghost" aria-label={`Remove feature ${i + 1}`} onClick={() => removeRow(r.key)}>Remove</Button>
@@ -175,6 +189,9 @@ function IdeaChecker({ inventory, canWrite }) {
           )}
         </div>
         {error && <div role="alert" style={{ fontSize: "var(--text-xs)", color: "var(--danger-fg)" }}>{error}</div>}
+        {report && skipped > 0 && (
+          <div style={QUIET}>{count(skipped, "feature")} with no capabilities picked {skipped === 1 ? "is" : "are"} not in the check.</div>
+        )}
       </div>
       {report && <CoverageReport report={report} onCandidate={useCandidate} />}
     </section>

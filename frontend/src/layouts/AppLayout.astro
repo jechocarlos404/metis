@@ -1,33 +1,67 @@
 ---
 import HealthBadges from "../components/shell/HealthBadges.jsx";
 import NavLink from "../components/shell/NavLink.astro";
+import { roleCan, roleLabel } from "../components/shell/roles.js";
 import "../styles/global.css";
-
-const NAV = [
-  { href: "/chat", label: "Chat", icon: "message-square" },
-  { href: "/inventory", label: "Inventory", icon: "sparkles" },
-  { href: "/goals", label: "Goals", icon: "target" },
-  { href: "/capabilities", label: "Capabilities", icon: "layers" },
-  { href: "/features", label: "Features", icon: "network" },
-  { href: "/journeys", label: "Journeys", icon: "git-branch" },
-  { href: "/products", label: "Products", icon: "package" },
-  // Buy plane. /capabilities/[slug] and /tech/[slug] are detail routes reached
-  // by link, and exposure is a view of /tech — six routes, three nav items.
-  { href: "/tech", label: "Tech", icon: "circuit-board" },
-  { href: "/stacks", label: "Stacks", icon: "boxes" },
-  { href: "/users", label: "Users", icon: "users", admin: true },
-  { href: "/admin", label: "LLM Config", icon: "settings", admin: true },
-  { href: "/data", label: "Data", icon: "database", admin: true },
-  // Help position, last: the user guide. The full ontology reference is linked from it.
-  { href: "/guide", label: "Guide", icon: "book-open", foot: true },
-];
 
 const { title = "Metis" } = Astro.props;
 const user = Astro.locals.user;
-const isAdmin = user?.role === "admin";
-const visible = NAV.filter((item) => !item.admin || isAdmin);
-const nav = visible.filter((item) => !item.foot);
-const footNav = visible.filter((item) => item.foot);
+const canWrite = ["editor", "admin"].includes(user?.role);
+
+// Technology and Stacks stay out of the nav until they hold data. On any
+// failure (timeout, 401, backend down) the item stays hidden.
+const backend = (process.env.API_INTERNAL_URL || "http://localhost:8000").replace(/\/$/, "");
+const hasData = async (route, count) => {
+  try {
+    const res = await fetch(`${backend}${route}`, {
+      headers: { authorization: `Bearer ${Astro.locals.accessToken}` },
+      signal: AbortSignal.timeout(1500),
+    });
+    return res.ok && count(await res.json()) > 0;
+  } catch {
+    return false;
+  }
+};
+const [hasTech, hasStacks] = await Promise.all([
+  hasData("/api/tech?limit=1", (b) => b?.total ?? 0),
+  hasData("/api/stacks", (b) => (Array.isArray(b) ? b.length : 0)),
+]);
+
+const path = Astro.url.pathname;
+const under = (href) => path === href || path.startsWith(href + "/");
+
+const top = [
+  { href: "/home", label: "Home", icon: "house", active: path === "/" || under("/home") || under("/inventory") },
+  { href: "/chat", label: "Chat", icon: "message-square" },
+];
+const groups = [
+  {
+    label: "Portfolio",
+    items: [
+      { href: "/products", label: "Products", icon: "package" },
+      { href: "/journeys", label: "Ideas & journeys", icon: "git-branch" },
+      { href: "/capabilities", label: "Capabilities", icon: "layers" },
+      { href: "/goals", label: "Goals", icon: "target" },
+    ],
+  },
+  {
+    label: "Build & buy",
+    items: [
+      { href: "/features", label: "Features", icon: "network" },
+      hasTech && { href: "/tech", label: "Technology", icon: "circuit-board" },
+      hasStacks && { href: "/stacks", label: "Stacks", icon: "boxes" },
+    ].filter(Boolean),
+  },
+];
+const foot = [
+  canWrite && {
+    href: "/settings", label: "Settings", icon: "settings",
+    active: ["/settings", "/users", "/admin", "/data"].some(under),
+  },
+  { href: "/guide", label: "Guide", icon: "book-open" },
+].filter(Boolean);
+const withActive = (item) => ({ ...item, active: item.active ?? under(item.href) });
+
 const displayName = user?.name || user?.username || "";
 const initials =
   displayName
@@ -36,8 +70,6 @@ const initials =
     .slice(0, 2)
     .map((s) => s[0].toUpperCase())
     .join("") || "?";
-const path = Astro.url.pathname;
-const isActive = (href) => path === href || path.startsWith(href + "/");
 ---
 
 <!doctype html>
@@ -70,17 +102,28 @@ const isActive = (href) => path === href || path.startsWith(href + "/");
           >
         </div>
         <nav aria-label="Main" style="display:flex; flex-direction:column; gap:2px; padding:0 10px;">
-          {nav.map((item) => <NavLink {...item} active={isActive(item.href)} />)}
+          {top.map((item) => <NavLink {...withActive(item)} />)}
+          {
+            groups.map((group) => (
+              <div role="group" aria-label={group.label} style="display:flex; flex-direction:column; gap:2px; margin-top:14px;">
+                <div
+                  class="rail-hide"
+                  style="padding:0 10px 4px; font-size:var(--text-2xs); color:var(--text-secondary); font-weight:var(--weight-medium);"
+                >
+                  {group.label}
+                </div>
+                {group.items.map((item) => <NavLink {...withActive(item)} />)}
+              </div>
+            ))
+          }
         </nav>
         <div style="margin-top:auto; display:flex; flex-direction:column;">
-          {footNav.length > 0 && (
-            <nav aria-label="Help" style="display:flex; flex-direction:column; gap:2px; padding:0 10px 10px;">
-              {footNav.map((item) => <NavLink {...item} active={isActive(item.href)} />)}
-            </nav>
-          )}
+          <nav aria-label="Settings and help" style="display:flex; flex-direction:column; gap:2px; padding:0 10px 10px;">
+            {foot.map((item) => <NavLink {...withActive(item)} />)}
+          </nav>
           {
             user && (
-              <div class="sidebar-user" style="padding:12px 16px; border-top:1px solid var(--border-hairline); display:flex; align-items:center; gap:10px;">
+              <div class="sidebar-user" title={`${roleLabel(user.role)}: ${roleCan(user.role)}`} style="padding:12px 16px; border-top:1px solid var(--border-hairline); display:flex; align-items:center; gap:10px;">
                 <div style="width:30px; height:30px; border-radius:50%; background:var(--accent-wash); color:var(--text-accent); display:flex; align-items:center; justify-content:center; font-family:var(--font-mono); font-size:12px; font-weight:600; flex:none;">
                   {initials}
                 </div>
@@ -88,8 +131,8 @@ const isActive = (href) => path === href || path.startsWith(href + "/");
                   <div style="font-size:var(--text-sm); color:var(--text-heading); font-weight:var(--weight-medium); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
                     {displayName}
                   </div>
-                  <div style="font-family:var(--font-mono); font-size:10px; letter-spacing:var(--tracking-caps); text-transform:uppercase; color:var(--text-secondary);">
-                    {user.role ?? "no role"}
+                  <div style="font-size:var(--text-2xs); color:var(--text-secondary);">
+                    {roleLabel(user.role)}
                   </div>
                 </div>
                 <a
@@ -106,14 +149,7 @@ const isActive = (href) => path === href || path.startsWith(href + "/");
               </div>
             )
           }
-          <div class="rail-hide" style="padding:16px; border-top:1px solid var(--border-hairline); display:flex; flex-direction:column; gap:6px;">
-            <div
-              style="font-family:var(--font-mono); font-size:10px; letter-spacing:var(--tracking-caps); text-transform:uppercase; color:var(--text-secondary);"
-            >
-              Pipeline health
-            </div>
-            <HealthBadges client:idle />
-          </div>
+          <HealthBadges client:idle />
         </div>
       </aside>
       <main id="main" tabindex="-1" style="flex:1; min-width:0; display:flex; flex-direction:column; overflow:hidden;">

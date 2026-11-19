@@ -11,10 +11,14 @@
  * slugs stay unique) applies here too. Only listing and cascade delete are new.
  */
 
-const MATURITIES = ["planned", "alpha", "beta", "ga", "deprecated", "retired"];
-const WORK_STATUSES = ["pending", "in_progress", "done"];
+import { EDGE, MATURITY, plain, statusLabel } from "./words.js";
+
+// Plain words on screen; each column's `raw` keeps the stored value one hover away.
+const MATURITIES = ["planned", "alpha", "beta", "ga", "deprecated", "retired"]
+  .map((v) => ({ value: v, label: plain(MATURITY, v) }));
+const WORK_STATUSES = ["pending", "in_progress", "done"].map((v) => ({ value: v, label: statusLabel(v) }));
 const GOAL_TYPES = ["org", "product"];
-const EDGE_KINDS = ["DEPENDS_ON", "BLOCKS", "RELATES_TO"];
+const EDGE_KINDS = ["DEPENDS_ON", "BLOCKS", "RELATES_TO"].map((v) => ({ value: v, label: plain(EDGE, v) }));
 const BUDGETS = ["S", "M", "L"];
 
 const STATUS_TONE = { pending: "neutral", in_progress: "accent", done: "ok" };
@@ -42,8 +46,8 @@ const GOALS = {
     { key: "parent", label: "Parent", width: "minmax(0,1fr)",
       render: (r, refs) => (r.parent_goal_id ? titleOf(refs, "goals", r.parent_goal_id) : "—") },
     { key: "status", label: "Status", width: "110px",
-      render: (r) => r.status, tone: (r) => STATUS_TONE[r.status] },
-    { key: "priority", label: "Pri", width: "50px", mono: true, render: (r) => r.priority ?? "—" },
+      render: (r) => statusLabel(r.status), raw: (r) => r.status, tone: (r) => STATUS_TONE[r.status] },
+    { key: "priority", label: "Priority", width: "70px", mono: true, render: (r) => r.priority ?? "—" },
   ],
   fields: [
     { key: "title", label: "Title", type: "text", required: true },
@@ -92,7 +96,7 @@ const CAPABILITIES = {
     { key: "parent", label: "Parent", width: "minmax(0,1fr)",
       render: (r, refs) => (r.parent_id ? nameOf(refs, "capabilities", r.parent_id) : "—") },
     { key: "maturity", label: "Maturity", width: "110px",
-      render: (r) => r.maturity, tone: (r) => MATURITY_TONE[r.maturity] },
+      render: (r) => plain(MATURITY, r.maturity), raw: (r) => r.maturity, tone: (r) => MATURITY_TONE[r.maturity] },
   ],
   fields: [
     { key: "name", label: "Name", type: "text", required: true },
@@ -143,8 +147,8 @@ const FEATURES = {
     { key: "product", label: "Product", width: "minmax(0,1fr)",
       render: (r, refs) => (r.product_id ? nameOf(refs, "products", r.product_id) : "—") },
     { key: "status", label: "Status", width: "110px",
-      render: (r) => r.status, tone: (r) => STATUS_TONE[r.status] },
-    { key: "priority", label: "Pri", width: "50px", mono: true, render: (r) => r.priority ?? "—" },
+      render: (r) => statusLabel(r.status), raw: (r) => r.status, tone: (r) => STATUS_TONE[r.status] },
+    { key: "priority", label: "Priority", width: "70px", mono: true, render: (r) => r.priority ?? "—" },
   ],
   fields: [
     { key: "name", label: "Name", type: "text", required: true },
@@ -198,11 +202,11 @@ const FEATURE_EDGES = {
   // list every row would read as two uuids.
   editable: false, // no PATCH route exists; delete and recreate
   title: (r, refs) =>
-    `${nameOf(refs, "features", r.src_id)} ${r.kind} ${nameOf(refs, "features", r.dst_id)}`,
+    `${nameOf(refs, "features", r.src_id)} ${plain(EDGE, r.kind)} ${nameOf(refs, "features", r.dst_id)}`,
   columns: [
     { key: "src", label: "Source", width: "minmax(0,1fr)",
       render: (r, refs) => nameOf(refs, "features", r.src_id) },
-    { key: "kind", label: "Kind", width: "130px", mono: true, render: (r) => r.kind },
+    { key: "kind", label: "Kind", width: "130px", render: (r) => plain(EDGE, r.kind), raw: (r) => r.kind },
     { key: "dst", label: "Target", width: "minmax(0,1fr)",
       render: (r, refs) => nameOf(refs, "features", r.dst_id) },
   ],
@@ -261,7 +265,7 @@ const PRODUCTS = {
       render: (r, refs) => (r.goal_id ? titleOf(refs, "goals", r.goal_id) : "—") },
     { key: "external", label: "External", width: "80px", render: (r) => (r.external ? "yes" : "—") },
     { key: "status", label: "Status", width: "90px",
-      render: (r) => r.status, tone: (r) => (r.status === "approved" ? "ok" : "neutral") },
+      render: (r) => statusLabel(r.status), raw: (r) => r.status, tone: (r) => (r.status === "approved" ? "ok" : "neutral") },
   ],
   fields: [
     { key: "name", label: "Name", type: "text", required: true },
@@ -303,10 +307,10 @@ const PRODUCT_BUNDLES = {
   singular: "bundle",
   listPath: "/product-bundles",
   editable: false,
-  title: (r) => `${r.product_name} ⊃ ${r.capability_name}`,
+  title: (r) => `${r.product_name} includes ${r.capability_name}`,
   columns: [
     { key: "product", label: "Product", width: "minmax(0,1fr)", render: (r) => r.product_name },
-    { key: "arrow", label: "", width: "24px", render: () => "⊃" },
+    { key: "includes", label: "", width: "64px", render: () => "includes" },
     { key: "capability", label: "Capability", width: "minmax(0,1fr)",
       render: (r) => r.capability_name },
   ],
@@ -335,7 +339,7 @@ const TICKETS = {
     { key: "product", label: "Product", width: "minmax(0,1fr)",
       render: (r, refs) => nameOf(refs, "products", r.product_id) },
     { key: "status", label: "Status", width: "110px",
-      render: (r) => r.status, tone: (r) => STATUS_TONE[r.status] },
+      render: (r) => statusLabel(r.status), raw: (r) => r.status, tone: (r) => STATUS_TONE[r.status] },
     { key: "budget", label: "Budget", width: "70px", mono: true, render: (r) => r.context_budget },
   ],
   fields: [

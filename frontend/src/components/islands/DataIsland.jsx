@@ -204,14 +204,14 @@ export default function DataIsland() {
       });
     } catch (e) {
       setPreview(null);
-      setBanner(`Delete failed — nothing was removed. ${e.message}`);
+      setBanner(`Delete failed, so nothing was removed. ${e.message}`);
     } finally {
       setSaving(false);
       setConfirming(false);
       // Unconditional, and load-bearing: nothing re-validates a preview against
       // changes made between preview and confirm, so re-reading is the only
       // trustworthy answer to what is in the database now.
-      await reload(tab).catch(() => setBanner("Reload failed — refresh the page."));
+      await reload(tab).catch(() => setBanner("Reload failed. Refresh the page."));
     }
   };
 
@@ -223,8 +223,8 @@ export default function DataIsland() {
   return (
     <>
       <PageHeader
-        title="Data"
-        meta={`${rows.length} ${ent.label.toLowerCase()} · admin CRUD across the ontology plane`}
+        title="Raw data"
+        meta="Every record, for fixing data by hand"
         actions={
           <Button size="sm" variant="accent" style={{ gap: 6 }} onClick={openNew}>
             <Icon name="plus" size={13} />New {ent.singular}
@@ -290,8 +290,10 @@ export default function DataIsland() {
               {ent.columns.map((c) => {
                 const value = c.render(row, refs);
                 const tone = c.tone?.(row, refs);
+                const raw = c.raw?.(row);
                 return (
-                  <span key={c.key} style={c.mono ? CELL_MONO : CELL}>
+                  <span key={c.key} style={c.mono ? CELL_MONO : CELL}
+                    title={raw != null && String(raw) !== String(value) ? String(raw) : undefined}>
                     {tone ? <Badge tone={tone}>{value}</Badge> : (value ?? "—")}
                   </span>
                 );

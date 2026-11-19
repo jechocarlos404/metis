@@ -7,6 +7,10 @@ export default function AdminIsland() {
   const [providers, setProviders] = React.useState([]);
   const [configs, setConfigs] = React.useState([]);
   const [toast, setToast] = React.useState(null);
+  // Per agent: "saving" | "saved" | {error}. Every change saves at once, so
+  // the row says so where the change was made.
+  const [saveState, setSaveState] = React.useState({});
+  const markSave = (agentName, state) => setSaveState((s) => ({ ...s, [agentName]: state }));
 
   React.useEffect(() => {
     Promise.all([api("/admin/llm/providers"), api("/admin/llm/configs")])
@@ -26,23 +30,29 @@ export default function AdminIsland() {
     const models = modelsFor(provider);
     const nextModel = model || models[0] || "";
     setConfigs((cs) => cs.map((c) => (c.agent_name === agentName ? { ...c, provider, model: nextModel } : c)));
-    if (!nextModel) return; // wait until a model is picked
+    if (!nextModel) {
+      markSave(agentName, null); // wait until a model is picked
+      return;
+    }
+    markSave(agentName, "saving");
     try {
       await api(`/admin/llm/configs/${agentName}`, { method: "PUT", body: { provider, model: nextModel } });
-      setToast({ tone: "ok", title: `${agentName} → ${provider}/${nextModel}` });
+      markSave(agentName, "saved");
     } catch (e) {
+      markSave(agentName, { error: String(e.message) });
       setToast({ tone: "danger", title: "Save failed", detail: String(e.message) });
     }
   };
 
   return (
     <>
-      <PageHeader title="LLM Config" meta="per-agent model selection" />
+      <PageHeader title="AI models" meta="The provider and model each Chat agent uses" />
       <div style={{ flex: 1, overflowY: "auto", padding: 24, display: "flex", flexDirection: "column", gap: 20 }}>
         {providers.length > 0 && !providers.some((p) => p.available) && (
           <div role="status" style={{ maxWidth: 560, padding: "12px 16px", background: "var(--warn-bg)", border: "1px solid var(--border-default)", borderRadius: "var(--radius-md)", fontSize: "var(--text-sm)", color: "var(--text-body)" }}>
-            No provider is connected, so Chat can't answer. Set <code>ANTHROPIC_API_KEY</code> or <code>OPENAI_API_KEY</code> in
-            the server's <code>.env</code> and restart the backend, or start Ollama on this machine. This page picks it up within 10 seconds.
+            No AI provider is connected, so Chat can't answer yet. Whoever runs the metis server adds a provider key
+            (<code>ANTHROPIC_API_KEY</code>, <code>OPENAI_API_KEY</code> or <code>OPENROUTER_API_KEY</code>) to its <code>.env</code> file
+            and restarts it, or starts Ollama where <code>OLLAMA_BASE_URL</code> points. This page notices within 10 seconds.
           </div>
         )}
         <div style={{ maxWidth: 560 }}>
@@ -89,9 +99,13 @@ export default function AdminIsland() {
                   ) : (
                     <Input mono value={c.model} style={{ width: 200 }} inputStyle={{ height: 34 }}
                       placeholder="model id"
-                      onChange={(e) => setConfigs((cs) => cs.map((x) => (x.agent_name === c.agent_name ? { ...x, model: e.target.value } : x)))}
+                      onChange={(e) => {
+                        markSave(c.agent_name, null);
+                        setConfigs((cs) => cs.map((x) => (x.agent_name === c.agent_name ? { ...x, model: e.target.value } : x)));
+                      }}
                       onBlur={(e) => e.target.value.trim() && update(c.agent_name, c.provider, e.target.value.trim())} />
                   )}
+                  <SaveStatus state={saveState[c.agent_name]} />
                 </div>
               );
             })}
@@ -109,5 +123,16 @@ export default function AdminIsland() {
         </div>
       )}
     </>
+  );
+}
+
+function SaveStatus({ state }) {
+  const error = state?.error;
+  const text = state === "saving" ? "Saving…" : state === "saved" ? "Saved" : error ? "Not saved" : "";
+  return (
+    <span role="status" title={error || undefined}
+      style={{ width: 64, flex: "none", fontSize: "var(--text-xs)", color: error ? "var(--danger-fg)" : "var(--text-secondary)" }}>
+      {text}
+    </span>
   );
 }

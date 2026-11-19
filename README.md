@@ -254,7 +254,7 @@ and the gaps are the product.
 flowchart LR
   U["Browser"] --> FE["<b>frontend</b> · Astro 5 SSR<br/>OIDC BFF · session cookie<br/>same-origin /api proxy"]
   FE -->|bearer| API["<b>backend</b> · FastAPI<br/>domain API + JWT/RBAC<br/>agents over SSE<br/><i>one uvicorn worker</i>"]
-  MCPS["<b>mcp</b> · read-only<br/>8 tools · 4 resources"] -->|"same HTTP API"| API
+  MCPS["<b>mcp</b> · read-only<br/>16 tools · 4 resources"] -->|"same HTTP API"| API
   API --- GR["FeatureGraph<br/><i>networkx, in-process</i>"]
   API --> DB[("PostgreSQL 16<br/><i>system of record</i>")]
   FE -.->|OIDC| KC["Keycloak 26<br/><i>metis realm</i>"]
@@ -265,7 +265,7 @@ flowchart LR
 |---|---|---|
 | `frontend/` | Astro 5 (SSR, node adapter) + React islands | UI + OIDC BFF (session cookies, `/api/*` proxy with bearer). |
 | `backend/` | FastAPI + SQLAlchemy 2.0 async | Domain API, JWT/RBAC, agents, in-memory feature graph. |
-| `mcp` | MCP over stdio or SSE (compose profile `mcp`) | Read-only catalog access for coding agents. |
+| `mcp` | MCP over stdio or SSE (compose profile `mcp`) | Read-only inventory and catalog answers for AI agents (see docs/mcp.md). |
 | `keycloak` | Keycloak 26 | Identity provider (`metis` realm, admin/editor/viewer). |
 | `postgres` | PostgreSQL 16 | System of record (JSONB PRD versions, ticket file arrays). |
 
@@ -299,12 +299,16 @@ aspirational.
 
 ### MCP server
 
-A read-only MCP surface for coding agents mid-build ("does this package already have a
-stance, and what does the group run?"). It calls the same **HTTP API** a browser
+A read-only MCP surface for AI agents working for the portfolio owner ("how much of this
+idea do we already have?", "how much of Strava could we build?") and for coding agents
+mid-build ("does this package already have a stance?"). Connection steps and the full
+tool list: [docs/mcp.md](docs/mcp.md). It calls the same **HTTP API** a browser
 does — not the services in-process — so a chat transcript and an API log line up, and
 the write boundary is inherited rather than re-implemented.
 
-Eight tools: the six `question` keys, plus `tech_search` (navigation — everything else
+Sixteen tools. Eight answer inventory questions: `products`, `capability_inventory`,
+`check_idea`, `product_score`, `capability`, `feature_why`, `journeys`, `ready_features`.
+The other eight: the six `question` keys, plus `tech_search` (navigation — everything else
 takes a slug it returns) and `propose_binding` (a hand-off that persists nothing).
 Four resources: `metis://ontology/model`, `metis://policy/adoptions`, and the templated
 `metis://tech/{slug}` and `metis://stacks/{product}`. Three prompts.

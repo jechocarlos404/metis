@@ -77,7 +77,7 @@ Seeded realm users (temporary passwords — Keycloak will force a change on firs
 
 | User | Password | Role |
 |---|---|---|
-| `admin@metis.local` | `admin` | admin (Users + LLM Config + Data browser) |
+| `admin@metis.local` | `admin` | admin (Settings: users, AI models, raw data) |
 | `editor@metis.local` | `editor` | editor (read + write domain) |
 | `viewer@metis.local` | `viewer` | viewer (read-only) |
 
@@ -96,7 +96,7 @@ Keycloak container without a persisted volume (compose already does that).
 
 The app runs with zero LLM keys — chat replies with a clear "provider not configured"
 notice, and everything else works. Add any subset of provider credentials to `.env`
-and pick provider + model per agent in **LLM Config**.
+and pick provider + model per agent in **Settings → AI models**.
 
 ## The model
 
@@ -324,7 +324,7 @@ open port would lend it to anyone who can reach the address.
 Anthropic API, OpenAI, OpenRouter, AWS Bedrock (Claude), and Ollama (local) sit behind
 one streaming protocol. Availability is detected from credentials in the environment
 (Ollama via a live reachability probe); per-agent provider + model selection is
-DB-backed and editable in the LLM Config panel.
+DB-backed and editable in Settings → AI models.
 
 ## Seed workflows
 

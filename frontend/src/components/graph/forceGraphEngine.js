@@ -108,6 +108,8 @@ export function createForceGraph(opts) {
       if (event.sourceEvent) transformAnimation = null; // a real gesture always wins over a running tween
       currentTransform = event.transform;
       viewportEl.setAttribute("transform", currentTransform.toString());
+      // Below this scale labels are under 6px: unreadable, and costly to redraw.
+      svgEl.classList.toggle("graph-far", currentTransform.k < 0.5);
     });
   select(svgEl).call(zoomBehavior).on("dblclick.zoom", null); // dblclick is reserved for unpinning
 

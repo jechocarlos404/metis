@@ -95,3 +95,26 @@ export function buildAdjacency(edges) {
   }
   return adjacency;
 }
+
+/**
+ * Splits a name into at most `maxLines` lines of about `maxChars` characters,
+ * ending with an ellipsis when it doesn't fit. Graph cards draw labels as SVG
+ * text: an HTML label per card (foreignObject) made pan and zoom stutter.
+ */
+export function wrapLabel(name, maxChars = 19, maxLines = 2) {
+  const words = String(name ?? "").split(/\s+/).filter(Boolean);
+  const lines = [];
+  let line = "";
+  for (const word of words) {
+    const next = line ? `${line} ${word}` : word;
+    if (next.length <= maxChars || !line) { line = next; continue; }
+    lines.push(line);
+    line = word;
+  }
+  if (line) lines.push(line);
+  const cut = (s) => `${s.slice(0, maxChars - 1).trimEnd()}…`;
+  const out = lines.slice(0, maxLines).map((l) => (l.length > maxChars ? cut(l) : l));
+  const last = out.length - 1;
+  if (lines.length > maxLines && !out[last].endsWith("…")) out[last] = cut(out[last]);
+  return out;
+}

@@ -314,7 +314,7 @@ export default function ProductsIsland({ canWrite = true }) {
             <Tabs
               tabs={[
                 { value: "does", label: "What it does", count: features?.length },
-                { value: "goals", label: "Goals", count: goal ? 1 : 0 },
+                { value: "goals", label: "Goals" },
                 ...(product.external ? [] : [{ value: "plan", label: "Plan" }]),
               ]}
               value={shownTab}

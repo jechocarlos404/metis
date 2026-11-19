@@ -39,6 +39,7 @@ export default function ProductsIsland({ canWrite = true }) {
   const [confirmingDelete, setConfirmingDelete] = React.useState(false);
   const [confirmingTicketDelete, setConfirmingTicketDelete] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
+  const currentId = React.useRef(null);
 
   const product = products?.find((p) => p.id === productId);
   // ?product=<id>&tab=<tab>: linkable from Goals and Inventory, and Back restores it.
@@ -68,6 +69,7 @@ export default function ProductsIsland({ canWrite = true }) {
       api("/capabilities/inventory"),
       api(`/products/${id}/bundles`),
     ]);
+    if (currentId.current !== id) return; // the person switched product meanwhile
     setEpics(epicList);
     setTickets(ticketList);
     setDecompositions(prdList);
@@ -75,12 +77,13 @@ export default function ProductsIsland({ canWrite = true }) {
     setCapabilities(capabilityList);
     setBundles(bundleList);
     setDetailId(id);
-    setFeatures(null);
-    setScore(null);
+    // Reloads of the same product swap data in place, without a loading flash.
     api("/graph/layout")
-      .then((layout) => setFeatures(layout.nodes.filter((n) => (n.product_ids ?? []).includes(id))))
-      .catch(() => setFeatures([]));
-    api(`/products/${id}/coverage`).then(setScore).catch(() => setScore(false));
+      .then((layout) => currentId.current === id && setFeatures(layout.nodes.filter((n) => (n.product_ids ?? []).includes(id))))
+      .catch(() => currentId.current === id && setFeatures([]));
+    api(`/products/${id}/coverage`)
+      .then((s) => currentId.current === id && setScore(s))
+      .catch(() => currentId.current === id && setScore(false));
   }, []);
 
   React.useEffect(() => {
@@ -89,7 +92,9 @@ export default function ProductsIsland({ canWrite = true }) {
   }, [loadProducts]);
 
   React.useEffect(() => {
+    currentId.current = productId;
     setFeatures(null); // don't show the previous product's features under this one's name
+    setScore(null);
     loadDetail(productId).catch((e) => setToast({ tone: "danger", title: "Load failed", detail: String(e.message) }));
   }, [productId, loadDetail]);
 

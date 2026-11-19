@@ -59,7 +59,7 @@ export function WhatItDoes({ product, features, score, capabilities, journeys, b
       </section>
 
       <section>
-        <div style={heading}>Features · {features.length}</div>
+        <div style={heading}>Features by capability</div>
         {features.length === 0 ? (
           <div style={muted}>
             No features recorded for {product.name} yet.

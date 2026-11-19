@@ -26,7 +26,8 @@ function SectionHead({ title, meta, children }) {
 // Delivery planning for a product we build: spec, plan document (PRD),
 // tickets and strategy. Shown only once one of them exists.
 export function ProductPlan({ product, prd, epics, tickets, strategy, capabilities, features, canWrite, actions }) {
-  const hasPlan = product.status === "approved" || prd || epics.length > 0 || tickets.length > 0 || strategy;
+  // A written spec (body) counts, so a draft spec can be approved before planning.
+  const hasPlan = product.status === "approved" || product.body || prd || epics.length > 0 || tickets.length > 0 || strategy;
   if (!hasPlan) {
     return canWrite ? (
       <div style={{ ...panel, alignItems: "flex-start" }}>

@@ -67,7 +67,7 @@ on the Docker frontend against `metis_verify`, a copy of the real database.
 | C · Product profile + on-demand Plan | S3 | done | browser (admin + viewer) |
 | D · Ideas & journeys | S6 | done | browser: saved idea renders with shared vocabulary |
 | E · Capability page merged; list = tree / most reused / needs attention | S5 | done | browser |
-| F · Features Plan view | S4 | done | browser: tabs render; cut not exercised |
+| F · Features Plan view | S4 | done | browser: ran the smallest-version cut for one feature |
 | Agent MCP: 8 inventory tools (16 total) | S8 | done | 238 backend tests; stdio lists tools, clean exit |
 | Fix 1 onCandidate no-op | foundation + S3 | done | code: links when no handler |
 | Fix 2 parent pre-fill | S5 | done | code |

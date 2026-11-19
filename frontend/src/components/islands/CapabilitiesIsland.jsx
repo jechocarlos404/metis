@@ -1,233 +1,140 @@
 import React from "react";
 import { PageHeader } from "../shell/PageHeader.jsx";
-import { Badge, Button, Dialog, Icon, IconButton, Input, Select, Tag, DeleteConfirm } from "../../ds";
+import { Badge, Button, Dialog, Icon, Input, Select } from "../../ds";
+import { MaturityBadge } from "../shared/coverage.jsx";
 import { api } from "../../lib/api.js";
-import { pressable } from "../../lib/pressable.js";
-import { useParamRestore, writeParams } from "../../lib/url-state.js";
+import { MATURITY, count } from "../../lib/words.js";
 
-const MATURITY_TONES = {
-  planned: "neutral",
-  alpha: "warn",
-  beta: "accent",
-  ga: "ok",
-  deprecated: "danger",
-  retired: "danger",
+// Health finding kinds this page shows, in plain words, and where each links.
+const FINDINGS = {
+  empty_intent: { label: "Goal with no capabilities", tone: "neutral", hint: "This product goal links to no capability" },
+  unmotivated_capability: { label: "No goal explains it", tone: "danger", hint: "No goal links to it or to anything under it" },
+  aspirational_gap: { label: "Wanted but nothing builds it", tone: "warn", hint: "None of our features builds it yet" },
 };
-const MATURITIES = ["planned", "alpha", "beta", "ga", "deprecated", "retired"];
-
-const FINDING_KINDS = [
+const FINDING_FILTERS = [
   { value: "", label: "All findings" },
-  { value: "aspirational_gap", label: "Aspirational gaps" },
-  { value: "unmotivated_capability", label: "Unmotivated" },
-  { value: "empty_intent", label: "Empty intent" },
+  ...Object.entries(FINDINGS).map(([value, f]) => ({ value, label: f.label })),
+];
+const VIEWS = [
+  { value: "tree", label: "Tree" },
+  { value: "reused", label: "Most reused" },
+  { value: "attention", label: "Needs attention" },
 ];
 
-const FINDING_TONES = {
-  aspirational_gap: "warn",
-  unmotivated_capability: "danger",
-  empty_intent: "neutral",
-};
-
 const CAPS_HEADER = {
-  fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: "var(--tracking-caps)",
-  textTransform: "uppercase", color: "var(--text-secondary)",
+  fontFamily: "var(--font-mono)",
+  fontSize: 10,
+  letterSpacing: "var(--tracking-caps)",
+  textTransform: "uppercase",
+  color: "var(--text-secondary)",
 };
+const COLUMNS = "1fr 110px 150px 100px";
 
-function flatten(nodes, depth = 0, out = []) {
-  for (const n of nodes) {
-    out.push({ ...n, depth });
-    flatten(n.children ?? [], depth + 1, out);
+// Inventory entries → depth-first rows, siblings in creation order.
+function treeRows(entries) {
+  const byParent = new Map();
+  for (const e of [...entries].sort((a, b) => a.seq - b.seq)) {
+    const key = e.parent_id ?? null;
+    if (!byParent.has(key)) byParent.set(key, []);
+    byParent.get(key).push(e);
   }
-  return out;
-}
-
-function subtreeIds(node, out = new Set()) {
-  out.add(node.id);
-  for (const c of node.children ?? []) subtreeIds(c, out);
+  const out = [];
+  const walk = (parentId, depth) => {
+    for (const e of byParent.get(parentId) ?? []) {
+      out.push({ ...e, depth });
+      walk(e.id, depth + 1);
+    }
+  };
+  walk(null, 0);
   return out;
 }
 
 const EMPTY_DRAFT = { name: "", description: "", parentId: "", maturity: "planned" };
 
 export default function CapabilitiesIsland({ canWrite = true }) {
-  const [tree, setTree] = React.useState([]);
-  const [loaded, setLoaded] = React.useState(false); // false until the first load finishes, so loading never reads as empty
-  const [goals, setGoals] = React.useState([]);
-  const [selected, setSelected] = React.useState(null);
-  // ?capability=<id>: linkable, and Back restores the previous selection.
-  useParamRestore("capability", (v) => v && setSelected(v));
-  const selectCapability = React.useCallback((id) => {
-    setSelected(id);
-    writeParams({ capability: id }, { push: true });
-  }, []);
-  const [motivations, setMotivations] = React.useState([]);
-  const [dialog, setDialog] = React.useState(null); // null | {mode:"new"} | {mode:"edit"}
+  const [inventory, setInventory] = React.useState(null); // null until the first load finishes
+  const [findings, setFindings] = React.useState([]);
+  const [error, setError] = React.useState(null);
+  const [view, setView] = React.useState("tree");
+  const [findingFilter, setFindingFilter] = React.useState("");
+  const [find, setFind] = React.useState("");
+  const [dialogOpen, setDialogOpen] = React.useState(false);
   const [draft, setDraft] = React.useState(EMPTY_DRAFT);
   const [saving, setSaving] = React.useState(false);
-  const [confirmingDelete, setConfirmingDelete] = React.useState(false);
   const [dialogError, setDialogError] = React.useState(null);
-  const [error, setError] = React.useState(null);
-  const [healthFindings, setHealthFindings] = React.useState([]);
-  const [healthFilter, setHealthFilter] = React.useState("");
-  const [find, setFind] = React.useState("");
-  const [impact, setImpact] = React.useState(null);
 
-  const flat = React.useMemo(() => flatten(tree), [tree]);
-  // Search keeps a match's ancestors so the tree still reads as a tree.
+  React.useEffect(() => {
+    Promise.all([api("/capabilities/inventory"), api("/capabilities/health")])
+      .then(([inv, health]) => {
+        setInventory(inv);
+        setFindings(health.filter((f) => FINDINGS[f.kind]));
+      })
+      .catch((e) => setError(String(e.message)));
+  }, []);
+
+  const all = inventory ?? [];
+  const rows = React.useMemo(() => treeRows(all), [inventory]);
+  const byId = React.useMemo(() => new Map(all.map((c) => [c.id, c])), [inventory]);
+  const q = find.trim().toLowerCase();
+
+  // Tree: a match keeps its ancestors so the tree still reads as a tree.
   const shown = React.useMemo(() => {
-    const q = find.trim().toLowerCase();
-    if (!q) return flat;
+    if (view === "reused") {
+      return all
+        .filter((c) => !q || c.name.toLowerCase().includes(q))
+        .sort((a, b) => b.products.length - a.products.length || b.features - a.features || a.name.localeCompare(b.name))
+        .map((c) => ({ ...c, depth: 0 }));
+    }
+    if (!q) return rows;
     const keep = new Set();
-    const byId = new Map(flat.map((c) => [c.id, c]));
-    for (const c of flat) {
+    for (const c of rows) {
       if (!c.name.toLowerCase().includes(q)) continue;
       for (let cur = c; cur; cur = byId.get(cur.parent_id)) keep.add(cur.id);
     }
-    return flat.filter((c) => keep.has(c.id));
-  }, [flat, find]);
-  const detail = flat.find((c) => c.id === selected) ?? null;
+    return rows.filter((c) => keep.has(c.id));
+  }, [view, rows, byId, q, inventory]);
 
-  const filteredFindings = React.useMemo(
-    () => healthFindings.filter((f) => !healthFilter || f.kind === healthFilter),
-    [healthFindings, healthFilter],
+  const shownFindings = findings.filter(
+    (f) => (!findingFilter || f.kind === findingFilter) && (!q || f.subject_name.toLowerCase().includes(q)),
   );
 
-  const load = React.useCallback(async () => {
-    const [map, goalList, findings] = await Promise.all([
-      api("/capabilities/map"),
-      api("/goals"),
-      api("/capabilities/health"),
-    ]);
-    setTree(map);
-    setLoaded(true);
-    setGoals(goalList);
-    setHealthFindings(findings);
-    const ids = new Set(flatten(map).map((c) => c.id));
-    setSelected((sel) => (sel && ids.has(sel) ? sel : (flatten(map)[0]?.id ?? null)));
-  }, []);
-
-  React.useEffect(() => {
-    load().catch((e) => setError(String(e.message)));
-  }, [load]);
-
-  const loadMotivations = React.useCallback(async (id) => {
-    if (!id) {
-      setMotivations([]);
-      return;
-    }
-    setMotivations(await api(`/capabilities/${id}/motivations`));
-  }, []);
-
-  React.useEffect(() => {
-    setImpact(null);
-    loadMotivations(selected).catch(() => setMotivations([]));
-  }, [selected, loadMotivations]);
-
-  const runImpact = async () => {
-    if (!selected) return;
-    setImpact(await api(`/capabilities/${selected}/impact`));
-  };
-
   const openNew = () => {
-    setDraft({ ...EMPTY_DRAFT, parentId: detail?.id ?? "" });
+    setDraft(EMPTY_DRAFT);
     setDialogError(null);
-    setConfirmingDelete(false);
-    setDialog({ mode: "new" });
+    setDialogOpen(true);
   };
 
-  const openEdit = () => {
-    if (!detail) return;
-    setDraft({
-      name: detail.name,
-      description: detail.description ?? "",
-      parentId: detail.parent_id ?? "",
-      maturity: detail.maturity,
-    });
-    setDialogError(null);
-    setConfirmingDelete(false);
-    setDialog({ mode: "edit" });
-  };
-
-  const save = async () => {
+  const create = async () => {
     if (!draft.name.trim()) return;
     setSaving(true);
     setDialogError(null);
-    const body = {
-      name: draft.name.trim(),
-      description: draft.description.trim() || null,
-      parent_id: draft.parentId || null,
-      maturity: draft.maturity,
-    };
     try {
-      if (dialog.mode === "new") {
-        const created = await api("/capabilities", { method: "POST", body });
-        await load();
-        selectCapability(created.id);
-      } else {
-        await api(`/capabilities/${detail.id}`, { method: "PATCH", body });
-        await load();
-      }
-      setDialog(null);
+      const created = await api("/capabilities", {
+        method: "POST",
+        body: {
+          name: draft.name.trim(),
+          description: draft.description.trim() || null,
+          parent_id: draft.parentId || null,
+          maturity: draft.maturity,
+        },
+      });
+      window.location.href = `/capabilities/${created.slug}`;
     } catch (e) {
       setDialogError(String(e.message));
-    } finally {
       setSaving(false);
     }
   };
 
-  const remove = async () => {
-    setSaving(true);
-    setDialogError(null);
-    try {
-      await api(`/capabilities/${detail.id}`, { method: "DELETE" });
-      setDialog(null);
-      setSelected(null);
-      await load();
-    } catch (e) {
-      setDialogError(String(e.message));
-      setConfirmingDelete(false);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const addMotivation = async (goalId) => {
-    setError(null);
-    try {
-      await api(`/capabilities/${selected}/motivations`, { method: "POST", body: { goal_id: goalId } });
-      await loadMotivations(selected);
-    } catch (e) {
-      setError(String(e.message));
-    }
-  };
-
-  const removeMotivation = async (goalId) => {
-    setError(null);
-    try {
-      await api(`/capabilities/${selected}/motivations/${goalId}`, { method: "DELETE" });
-      await loadMotivations(selected);
-    } catch (e) {
-      setError(String(e.message));
-    }
-  };
-
-  // Re-parenting onto yourself or your own subtree is a containment cycle.
-  const parentOptions = React.useMemo(() => {
-    const excluded = dialog?.mode === "edit" && detail ? subtreeIds(detail) : new Set();
-    return [
-      { value: "", label: "None (top-level)" },
-      ...flat.filter((c) => !excluded.has(c.id)).map((c) => ({ value: c.id, label: `${"— ".repeat(c.depth)}${c.name}` })),
-    ];
-  }, [flat, dialog, detail]);
-
-  const motivationIds = new Set(motivations.map((g) => g.id));
-  const addableGoals = goals.filter((g) => !motivationIds.has(g.id));
+  const parentOptions = [
+    { value: "", label: "None (top level)" },
+    ...rows.map((c) => ({ value: c.id, label: `${"   ".repeat(c.depth)}${c.name}` })),
+  ];
 
   return (
     <>
       <PageHeader
         title="Capabilities"
-        meta={loaded ? `${flat.length} capabilities · ${healthFindings.length} health finding${healthFindings.length === 1 ? "" : "s"}` : "loading"}
+        meta={inventory ? count(all.length, "capability", "capabilities") : "loading"}
         actions={
           canWrite && (
             <Button size="sm" variant="accent" style={{ gap: 6 }} onClick={openNew}>
@@ -237,223 +144,127 @@ export default function CapabilitiesIsland({ canWrite = true }) {
         }
       />
       {error && <div style={{ padding: "8px 24px", fontSize: "var(--text-sm)", color: "var(--danger-fg)" }}>{error}</div>}
-      <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
-        <div style={{ flex: 1, overflowY: "auto", margin: 20, minWidth: 0, display: "flex", flexDirection: "column", gap: 12 }}>
-          <HealthFindingsPanel
-            findings={filteredFindings}
-            total={healthFindings.length}
-            filter={healthFilter}
-            onFilterChange={setHealthFilter}
-            onSelectCapability={selectCapability}
-          />
-          <input type="search" value={find} onChange={(e) => setFind(e.target.value)} placeholder={`Find among ${flat.length || ""} capabilities`} aria-label="Find a capability"
-            style={{ height: 32, padding: "0 10px", fontSize: "var(--text-sm)", fontFamily: "var(--font-body)", color: "var(--text-body)", background: "var(--surface-card)", border: "1px solid var(--border-control)", borderRadius: "var(--radius-sm)" }} />
-          <div style={{ background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", overflow: "hidden" }}>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 90px 110px", padding: "8px 16px", borderBottom: "1px solid var(--border-hairline)", ...CAPS_HEADER }}>
-              <span>Capability</span><span>Scope</span><span>Maturity</span>
-            </div>
-            {shown.map((c, i) => (
-              <div key={c.id} {...pressable(() => selectCapability(c.id))} aria-pressed={c.id === selected}
-                style={{ display: "grid", gridTemplateColumns: "1fr 90px 110px", alignItems: "center", padding: "10px 16px",
-                  borderBottom: i < shown.length - 1 ? "1px solid var(--border-hairline)" : "none", cursor: "pointer", fontSize: "var(--text-sm)",
-                  background: c.id === selected ? "var(--surface-inset)" : "transparent" }}>
-                <span style={{ display: "flex", alignItems: "center", gap: 8, paddingLeft: c.depth * 18, minWidth: 0 }}>
-                  <Icon name="layers" size={13} style={{ color: c.id === selected ? "var(--text-accent)" : "var(--text-secondary)" }} />
-                  <span style={{ color: "var(--text-heading)", fontWeight: "var(--weight-medium)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.name}</span>
-                </span>
-                <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-secondary)" }}>
-                  {c.rollup.done}/{c.rollup.total}
-                </span>
-                <span><Badge tone={MATURITY_TONES[c.maturity] ?? "neutral"}>{c.maturity}</Badge></span>
-              </div>
+      <div style={{ flex: 1, overflowY: "auto", padding: 20, display: "flex", flexDirection: "column", gap: 12, minHeight: 0 }}>
+        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+          <input type="search" value={find} onChange={(e) => setFind(e.target.value)}
+            placeholder={`Find among ${all.length || ""} capabilities`} aria-label="Find a capability"
+            style={{ flex: "1 1 240px", height: 32, padding: "0 10px", fontSize: "var(--text-sm)", fontFamily: "var(--font-body)", color: "var(--text-body)", background: "var(--surface-card)", border: "1px solid var(--border-control)", borderRadius: "var(--radius-sm)" }} />
+          <div role="group" aria-label="View" style={{ display: "inline-flex", border: "1px solid var(--border-control)", borderRadius: "var(--radius-sm)", overflow: "hidden" }}>
+            {VIEWS.map((v, i) => (
+              <button key={v.value} type="button" aria-pressed={view === v.value} onClick={() => setView(v.value)}
+                style={{ height: 30, padding: "0 12px", font: "inherit", fontSize: "var(--text-xs)", cursor: "pointer", border: "none",
+                  borderLeft: i ? "1px solid var(--border-control)" : "none",
+                  background: view === v.value ? "var(--accent-wash)" : "var(--surface-card)",
+                  color: view === v.value ? "var(--text-accent)" : "var(--text-body)" }}>
+                {v.label}{v.value === "attention" && inventory ? ` · ${findings.length}` : ""}
+              </button>
             ))}
-            {loaded && flat.length > 0 && shown.length === 0 && (
+          </div>
+          {view === "attention" && findings.length > 0 && (
+            <div style={{ minWidth: 220 }}>
+              <Select aria-label="Filter findings" value={findingFilter} onChange={(e) => setFindingFilter(e.target.value)} options={FINDING_FILTERS} />
+            </div>
+          )}
+        </div>
+
+        {view === "attention" ? (
+          <FindingList findings={shownFindings} total={findings.length} byId={byId} loaded={inventory != null} />
+        ) : (
+          <div style={{ background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", overflow: "hidden" }}>
+            <div style={{ display: "grid", gridTemplateColumns: COLUMNS, gap: 12, padding: "8px 16px", borderBottom: "1px solid var(--border-hairline)", ...CAPS_HEADER }}>
+              <span>Capability</span><span>Maturity</span><span>Products</span><span>Our features</span>
+            </div>
+            {shown.map((c, i) => <CapabilityRow key={c.id} c={c} last={i === shown.length - 1} />)}
+            {inventory && all.length > 0 && shown.length === 0 && (
               <div style={{ padding: 16, fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>No capability matches "{find.trim()}".</div>
             )}
-            {flat.length === 0 && (
+            {all.length === 0 && (
               <div style={{ padding: 16, fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>
-                {loaded ? "No capabilities yet. Create one to start the map." : error ? "Couldn't load capabilities." : "Loading capabilities…"}
+                {inventory
+                  ? canWrite
+                    ? "No capabilities yet. Add the first one with New capability."
+                    : "No capabilities yet. An editor or admin can add them."
+                  : error ? "Couldn't load capabilities." : "Loading capabilities…"}
               </div>
             )}
           </div>
-        </div>
-        <aside style={{ width: 300, flex: "none", margin: "20px 20px 20px 0", background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", padding: 16, display: "flex", flexDirection: "column", gap: 12, overflowY: "auto" }}>
-          {detail ? (
-            <>
-              <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
-                <div style={{ flex: 1, fontSize: "var(--text-md)", fontWeight: "var(--weight-semibold)", color: "var(--text-heading)" }}>{detail.name}</div>
-                {canWrite && (
-                  <IconButton size="sm" label="Edit capability" onClick={openEdit}><Icon name="pencil" size={13} /></IconButton>
-                )}
-              </div>
-              {detail.description && (
-                <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", lineHeight: "var(--leading-snug)" }}>{detail.description}</div>
-              )}
-              {/* The supply frame is where build-vs-buy gets argued; this is
-                  how you arrive there holding a need. */}
-              <a href={`/capabilities/${detail.slug}`} style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-accent)", textDecoration: "none" }}>
-                build or buy →
-              </a>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                <Badge tone={MATURITY_TONES[detail.maturity] ?? "neutral"}>{detail.maturity}</Badge>
-                {Object.entries(detail.facets ?? {}).map(([k, v]) => (
-                  <Tag key={k}>{k}: {v}</Tag>
-                ))}
-              </div>
-              {detail.parent_id && flat.find((c) => c.id === detail.parent_id) && (
-                <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-secondary)" }}>
-                  part of → {flat.find((c) => c.id === detail.parent_id).name}
-                </div>
-              )}
-              <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-secondary)" }}>
-                scope {detail.rollup.done} done · {detail.rollup.in_progress} in progress · {detail.rollup.pending} pending
-              </div>
-              <div style={{ borderTop: "1px solid var(--border-hairline)", paddingTop: 12, display: "flex", flexDirection: "column", gap: 6 }}>
-                <div style={CAPS_HEADER}>Motivated by</div>
-                {motivations.map((g) => (
-                  <div key={g.id} style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                    <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-secondary)", flex: "none" }}>{g.display_id}</span>
-                    <span style={{ fontSize: "var(--text-xs)", color: "var(--text-body)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{g.title}</span>
-                    {canWrite && (
-                      <IconButton size="sm" label="Remove motivation" onClick={() => removeMotivation(g.id)}><Icon name="x" size={12} /></IconButton>
-                    )}
-                  </div>
-                ))}
-                {motivations.length === 0 && (
-                  <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-secondary)" }}>no motivating goals</div>
-                )}
-                {canWrite && addableGoals.length > 0 && (
-                  <Select value="" onChange={(e) => e.target.value && addMotivation(e.target.value)}
-                    options={[{ value: "", label: "Link a goal…" },
-                      ...addableGoals.map((g) => ({ value: g.id, label: `${g.display_id} ${g.title}` }))]} />
-                )}
-              </div>
-              {impact && (
-                <div style={{ borderTop: "1px solid var(--border-hairline)", paddingTop: 12, display: "flex", flexDirection: "column", gap: 6 }}>
-                  <div style={CAPS_HEADER}>Coupling impact</div>
-                  <div style={{ fontSize: "var(--text-xs)", color: "var(--text-body)" }}>
-                    {impact.dependents.length} dependent{impact.dependents.length === 1 ? "" : "s"} break if this changes; needs {impact.dependencies.length}.
-                  </div>
-                  {impact.dependents.length > 0 && (
-                    <>
-                      <div style={{ ...CAPS_HEADER, marginTop: 4 }}>Dependents</div>
-                      {impact.dependents.map((c) => (
-                        <button key={c.id} type="button" onClick={() => selectCapability(c.id)}
-                          style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--danger-fg)", textAlign: "left", border: "none", background: "transparent", cursor: "pointer", padding: 0 }}>
-                          {c.name}
-                        </button>
-                      ))}
-                    </>
-                  )}
-                  {impact.dependencies.length > 0 && (
-                    <>
-                      <div style={{ ...CAPS_HEADER, marginTop: 4 }}>Dependencies</div>
-                      {impact.dependencies.map((c) => (
-                        <button key={c.id} type="button" onClick={() => selectCapability(c.id)}
-                          style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-secondary)", textAlign: "left", border: "none", background: "transparent", cursor: "pointer", padding: 0 }}>
-                          {c.name}
-                        </button>
-                      ))}
-                    </>
-                  )}
-                </div>
-              )}
-              <Button size="sm" variant="secondary" style={{ marginTop: "auto", gap: 6 }} onClick={runImpact}>
-                <Icon name="git-branch" size={13} />Impact query
-              </Button>
-            </>
-          ) : (
-            <div style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>Select a capability.</div>
-          )}
-        </aside>
+        )}
       </div>
 
       <Dialog
-        open={dialog != null}
-        title={dialog?.mode === "new" ? "New capability" : `Edit ${detail?.name ?? ""}`}
-        onClose={() => setDialog(null)}
+        open={dialogOpen}
+        title="New capability"
+        onClose={() => setDialogOpen(false)}
         footer={
           <>
-            {dialog?.mode === "edit" && (
-              <DeleteConfirm armed={confirmingDelete} onArm={() => setConfirmingDelete(true)} onCancel={() => setConfirmingDelete(false)} onConfirm={remove} disabled={saving}
-                label="Delete" confirmLabel={"Delete capability"} style={{ marginRight: "auto" }} />
-            )}
-            <Button size="sm" variant="secondary" onClick={() => setDialog(null)}>Cancel</Button>
-            <Button size="sm" variant="accent" disabled={saving || !draft.name.trim()} onClick={save}>
-              {dialog?.mode === "new" ? "Create capability" : "Save"}
-            </Button>
+            <Button size="sm" variant="secondary" onClick={() => setDialogOpen(false)}>Cancel</Button>
+            <Button size="sm" variant="accent" disabled={saving || !draft.name.trim()} onClick={create}>Create capability</Button>
           </>
         }
       >
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-          {dialogError && <div style={{ fontSize: "var(--text-sm)", color: "var(--danger-fg)" }}>{dialogError}</div>}
-          <Input label="Name (a system quality, noun phrase)" value={draft.name}
-            onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="PM tracker export" />
-          <Input label="Description" value={draft.description}
-            onChange={(e) => setDraft({ ...draft, description: e.target.value })} />
-          <Select label="Part of" value={draft.parentId}
-            onChange={(e) => setDraft({ ...draft, parentId: e.target.value })} options={parentOptions} />
-          <Select label="Maturity" value={draft.maturity}
-            onChange={(e) => setDraft({ ...draft, maturity: e.target.value })} options={MATURITIES} />
+          {dialogError && <div role="alert" style={{ fontSize: "var(--text-sm)", color: "var(--danger-fg)" }}>{dialogError}</div>}
+          <Input label="Name" hint="A noun phrase, e.g. Route planning" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
+          <Input label="Description" value={draft.description} onChange={(e) => setDraft({ ...draft, description: e.target.value })} />
+          <Select label="Part of" value={draft.parentId} onChange={(e) => setDraft({ ...draft, parentId: e.target.value })} options={parentOptions} />
+          <Select label="Maturity" value={draft.maturity} onChange={(e) => setDraft({ ...draft, maturity: e.target.value })}
+            options={Object.entries(MATURITY).map(([value, label]) => ({ value, label }))} />
         </div>
       </Dialog>
     </>
   );
 }
 
-function HealthFindingsPanel({ findings, total, filter, onFilterChange, onSelectCapability }) {
-  // Collapsed to one line by default so the map, the page's point, comes first.
-  const [open, setOpen] = React.useState(false);
+function CapabilityRow({ c, last }) {
+  const theirs = c.external_products;
   return (
-    <div style={{ background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", padding: open ? 16 : "10px 16px", display: "flex", flexDirection: "column", gap: 10 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-        <button type="button" aria-expanded={open} onClick={() => setOpen(!open)}
-          style={{ ...CAPS_HEADER, background: "none", border: "none", padding: 0, cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}>
-          <Icon name="chevron-right" size={12} style={{ transform: open ? "rotate(90deg)" : "none" }} />
-          Taxonomy health · {total === 0 ? "no findings" : `${total} finding${total === 1 ? "" : "s"} to review`}
-        </button>
-        {open && total > 0 && (
-          <div style={{ marginLeft: "auto", minWidth: 180 }}>
-            <Select aria-label="Filter findings" value={filter} onChange={(e) => onFilterChange(e.target.value)} options={FINDING_KINDS} />
-          </div>
+    <a href={`/capabilities/${c.slug}`}
+      style={{ display: "grid", gridTemplateColumns: COLUMNS, gap: 12, alignItems: "center", padding: "10px 16px", textDecoration: "none", color: "inherit",
+        borderBottom: last ? "none" : "1px solid var(--border-hairline)", fontSize: "var(--text-sm)" }}>
+      <span style={{ display: "flex", alignItems: "center", gap: 8, paddingLeft: c.depth * 18, minWidth: 0 }}>
+        <Icon name="layers" size={13} style={{ color: "var(--text-secondary)", flex: "none" }} />
+        <span style={{ color: "var(--text-heading)", fontWeight: "var(--weight-medium)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.name}</span>
+      </span>
+      <span><MaturityBadge maturity={c.maturity} /></span>
+      <span style={{ display: "flex", gap: 8, alignItems: "baseline", minWidth: 0 }}>
+        <span title={c.products.map((p) => p.name).join(", ") || undefined} style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--text-heading)" }}>
+          {c.products.length}
+        </span>
+        {theirs.length > 0 && (
+          <span title={theirs.map((p) => p.name).join(", ")} style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", whiteSpace: "nowrap" }}>
+            +{theirs.length} not ours
+          </span>
         )}
-      </div>
-      {!open ? null : total === 0 ? (
-        <div style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>no findings — taxonomy looks healthy</div>
-      ) : findings.length === 0 ? (
-        <div style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>no findings match this filter</div>
-      ) : (
-        findings.map((f) => {
-          const isCapability = f.kind !== "empty_intent";
-          const label = f.subject_display_id ? `${f.subject_display_id} ${f.subject_name}` : f.subject_name;
-          const row = (
-            <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <Badge tone={FINDING_TONES[f.kind] ?? "neutral"}>{f.kind.replace(/_/g, " ")}</Badge>
-                <span style={{ fontSize: "var(--text-sm)", fontWeight: "var(--weight-medium)", color: "var(--text-heading)" }}>{label}</span>
-              </div>
-              <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", lineHeight: "var(--leading-snug)" }}>{f.detail}</div>
-            </div>
-          );
-          if (isCapability) {
-            return (
-              <button
-                key={`${f.kind}-${f.subject_id}`}
-                type="button"
-                onClick={() => onSelectCapability(f.subject_id)}
-                style={{ textAlign: "left", padding: "8px 10px", margin: "0 -10px", border: "none", borderRadius: "var(--radius-sm)", cursor: "pointer", background: "transparent" }}
-              >
-                {row}
-              </button>
-            );
-          }
-          return (
-            <a key={`${f.kind}-${f.subject_id}`} href="/goals" style={{ textDecoration: "none", color: "inherit", padding: "8px 10px", margin: "0 -10px", display: "block", borderRadius: "var(--radius-sm)" }}>
-              {row}
-            </a>
-          );
-        })
-      )}
+      </span>
+      <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--text-heading)" }}>{c.features}</span>
+    </a>
+  );
+}
+
+function FindingList({ findings, total, byId, loaded }) {
+  const box = { background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", overflow: "hidden" };
+  const note = { padding: 16, fontSize: "var(--text-sm)", color: "var(--text-secondary)" };
+  if (!loaded) return <div style={box}><div style={note}>Loading…</div></div>;
+  if (total === 0) return <div style={box}><div style={note}>Nothing needs attention.</div></div>;
+  if (findings.length === 0) return <div style={box}><div style={note}>No finding matches.</div></div>;
+  return (
+    <div style={box}>
+      {findings.map((f, i) => {
+        const kind = FINDINGS[f.kind];
+        const capability = byId.get(f.subject_id);
+        const href = f.kind === "empty_intent" ? `/goals?goal=${f.subject_id}` : capability ? `/capabilities/${capability.slug}` : null;
+        const label = f.subject_display_id ? `${f.subject_display_id} ${f.subject_name}` : f.subject_name;
+        const Tag = href ? "a" : "div";
+        return (
+          <Tag key={`${f.kind}-${f.subject_id}`} href={href ?? undefined}
+            style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "10px 16px", textDecoration: "none", color: "inherit",
+              borderBottom: i < findings.length - 1 ? "1px solid var(--border-hairline)" : "none" }}>
+            <Badge tone={kind.tone}>{kind.label}</Badge>
+            <span style={{ fontSize: "var(--text-sm)", fontWeight: "var(--weight-medium)", color: "var(--text-heading)" }}>{label}</span>
+            <span style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>{kind.hint}</span>
+          </Tag>
+        );
+      })}
     </div>
   );
 }

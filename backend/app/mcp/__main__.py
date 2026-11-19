@@ -14,8 +14,13 @@ from app.mcp.server import client, server
 async def _stdio() -> None:
     from mcp.server.stdio import stdio_server
 
-    async with stdio_server() as (read, write):
-        await server.run(read, write, server.create_initialization_options())
+    try:
+        async with stdio_server() as (read, write):
+            await server.run(read, write, server.create_initialization_options())
+    finally:
+        # Close the HTTP client on the loop that opened it; closing it later
+        # from a fresh asyncio.run() prints "Event loop is closed" on exit.
+        await client.aclose()
 
 
 def main() -> None:
@@ -66,7 +71,6 @@ def main() -> None:
     else:
         with contextlib.suppress(KeyboardInterrupt):
             asyncio.run(_stdio())
-    asyncio.run(client.aclose())
 
 
 if __name__ == "__main__":

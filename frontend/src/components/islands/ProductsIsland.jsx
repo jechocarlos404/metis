@@ -1,45 +1,54 @@
 import React from "react";
 import { PageHeader } from "../shell/PageHeader.jsx";
-import { Badge, Button, Card, Checkbox, Dialog, Icon, Input, Select, StatusBadge, Tabs, Tag, TicketCard, Toast, DeleteConfirm } from "../../ds";
+import { Badge, Button, Card, Checkbox, Dialog, Icon, Input, Select, StatusBadge, Tabs, Toast, DeleteConfirm } from "../../ds";
 import { api } from "../../lib/api.js";
-import { productOptions } from "../../lib/words.js";
+import { count, productOptions, statusLabel } from "../../lib/words.js";
 import { openChatWithPrompt } from "../../lib/chat-launch.js";
-import { pressable } from "../../lib/pressable.js";
 import { useParamRestore, writeParams } from "../../lib/url-state.js";
-import { CoverageReport, ProductScore } from "../shared/coverage.jsx";
+import { exportSeedFile } from "../shared/SeedFiles.jsx";
+import { WhatItDoes } from "../products/WhatItDoes.jsx";
+import { ProductGoals } from "../products/ProductGoals.jsx";
+import { ProductPlan, SIZE_HINT } from "../products/ProductPlan.jsx";
+
+const TABS = ["does", "goals", "plan"];
+const SIZES = [
+  { value: "S", label: "S: one file" },
+  { value: "M", label: "M: 2 to 4 files" },
+  { value: "L", label: "L: must be split" },
+];
+const TICKET_STATUSES = ["pending", "in_progress", "done"].map((s) => ({ value: s, label: statusLabel(s) }));
 
 export default function ProductsIsland({ canWrite = true }) {
-  const [products, setProducts] = React.useState([]);
+  const [products, setProducts] = React.useState(null); // null until loaded
   const [productId, setProductId] = React.useState(null);
   const [goals, setGoals] = React.useState([]);
+  const [detailId, setDetailId] = React.useState(null); // the product the plan data below belongs to
   const [epics, setEpics] = React.useState([]);
   const [tickets, setTickets] = React.useState([]);
   const [decompositions, setDecompositions] = React.useState([]);
   const [strategies, setStrategies] = React.useState([]);
   const [capabilities, setCapabilities] = React.useState([]);
   const [bundles, setBundles] = React.useState([]);
-  const [tab, setTab] = React.useState("overview");
-  const [features, setFeatures] = React.useState(null); // this product's features, from the graph layout
+  const [journeys, setJourneys] = React.useState(null);
+  const [tab, setTab] = React.useState("does");
+  const [features, setFeatures] = React.useState(null); // this product's features, from graph layout
   const [score, setScore] = React.useState(null);
   const [toast, setToast] = React.useState(null);
-  const [ticketDialog, setTicketDialog] = React.useState(null); // null | {mode:'new'} | {mode:'edit', ticket}
+  const [ticketDialog, setTicketDialog] = React.useState(null); // null | {mode:'new'|'edit'|'view', ticket?}
   const [productDialog, setProductDialog] = React.useState(null); // null | {mode:'new'} | {mode:'edit'}
-  const [seedDialog, setSeedDialog] = React.useState(false);
-  const [seedText, setSeedText] = React.useState("");
-  const [seedResult, setSeedResult] = React.useState(null);
-  const [seedAction, setSeedAction] = React.useState(null); // null | "validate" | "import"
-  const [unseedDialog, setUnseedDialog] = React.useState(false);
-  const [unseedText, setUnseedText] = React.useState("");
-  const [unseedResult, setUnseedResult] = React.useState(null);
-  const [unseedAction, setUnseedAction] = React.useState(null); // null | "preview" | "delete"
   const [confirmingDelete, setConfirmingDelete] = React.useState(false);
   const [confirmingTicketDelete, setConfirmingTicketDelete] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
+  const currentId = React.useRef(null);
 
-  const product = products.find((p) => p.id === productId);
-  // ?product=<id>: linkable from Goals and Inventory, and Back restores it.
+  const product = products?.find((p) => p.id === productId);
+  // ?product=<id>&tab=<tab>: linkable from Goals and Inventory, and Back restores it.
   useParamRestore("product", (v) => v && setProductId(v));
-  const selectProduct = (id) => { setProductId(id); setTab("overview"); writeParams({ product: id }, { push: true }); };
+  useParamRestore("tab", (v) => setTab(TABS.includes(v) ? v : "does"));
+  const selectProduct = (id) => { setProductId(id); setTab("does"); writeParams({ product: id, tab: null }, { push: true }); };
+  const changeTab = (t) => { setTab(t); writeParams({ tab: t === "does" ? null : t }, { push: true }); };
+  // The plan only applies to products we build.
+  const shownTab = tab === "plan" && product?.external ? "does" : tab;
   const prd = decompositions[0];
   const strategy = strategies[0];
 
@@ -57,28 +66,35 @@ export default function ProductsIsland({ canWrite = true }) {
       api(`/products/${id}/tickets`),
       api(`/products/${id}/decompositions`),
       api(`/products/${id}/strategies`),
-      api("/capabilities"),
+      api("/capabilities/inventory"),
       api(`/products/${id}/bundles`),
     ]);
+    if (currentId.current !== id) return; // the person switched product meanwhile
     setEpics(epicList);
     setTickets(ticketList);
     setDecompositions(prdList);
     setStrategies(strategyList);
     setCapabilities(capabilityList);
     setBundles(bundleList);
-    setFeatures(null);
-    setScore(null);
+    setDetailId(id);
+    // Reloads of the same product swap data in place, without a loading flash.
     api("/graph/layout")
-      .then((layout) => setFeatures(layout.nodes.filter((n) => (n.product_ids ?? []).includes(id))))
-      .catch(() => setFeatures([]));
-    api(`/products/${id}/coverage`).then(setScore).catch(() => setScore(false));
+      .then((layout) => currentId.current === id && setFeatures(layout.nodes.filter((n) => (n.product_ids ?? []).includes(id))))
+      .catch(() => currentId.current === id && setFeatures([]));
+    api(`/products/${id}/coverage`)
+      .then((s) => currentId.current === id && setScore(s))
+      .catch(() => currentId.current === id && setScore(false));
   }, []);
 
   React.useEffect(() => {
     loadProducts().catch((e) => setToast({ tone: "danger", title: "Load failed", detail: String(e.message) }));
+    api("/journeys").then(setJourneys).catch(() => setJourneys([]));
   }, [loadProducts]);
 
   React.useEffect(() => {
+    currentId.current = productId;
+    setFeatures(null); // don't show the previous product's features under this one's name
+    setScore(null);
     loadDetail(productId).catch((e) => setToast({ tone: "danger", title: "Load failed", detail: String(e.message) }));
   }, [productId, loadDetail]);
 
@@ -92,7 +108,12 @@ export default function ProductsIsland({ canWrite = true }) {
   const approvePrd = () =>
     api(`/decompositions/${prd.id}/approve`, { method: "POST" })
       .then(() => { setToast({ tone: "ok", title: `${prd.display_id} approved` }); return loadDetail(productId); })
-      .catch(showError("PRD not ready"));
+      .catch(showError("Plan document not ready"));
+
+  const exportProduct = () =>
+    exportSeedFile(productId)
+      .then((filename) => setToast({ tone: "ok", title: "Seed file downloaded", detail: filename }))
+      .catch(showError("Export failed"));
 
   const openNewProduct = () => {
     setConfirmingDelete(false);
@@ -146,9 +167,6 @@ export default function ProductsIsland({ canWrite = true }) {
     }
   };
 
-  const bundleIds = new Set(bundles.map((capability) => capability.id));
-  const addableBundles = capabilities.filter((capability) => !bundleIds.has(capability.id));
-
   const addBundle = async (capabilityId) => {
     setSaving(true);
     try {
@@ -158,7 +176,7 @@ export default function ProductsIsland({ canWrite = true }) {
       });
       await loadDetail(productId);
     } catch (e) {
-      showError("Bundle save failed")(e);
+      showError("Couldn't add the capability")(e);
     } finally {
       setSaving(false);
     }
@@ -170,7 +188,7 @@ export default function ProductsIsland({ canWrite = true }) {
       await api(`/products/${productId}/bundles/${capabilityId}`, { method: "DELETE" });
       await loadDetail(productId);
     } catch (e) {
-      showError("Bundle remove failed")(e);
+      showError("Couldn't remove the capability")(e);
     } finally {
       setSaving(false);
     }
@@ -219,12 +237,7 @@ export default function ProductsIsland({ canWrite = true }) {
     }
   };
 
-  const ticketCounts = (epicId) => {
-    const inEpic = tickets.filter((t) => t.epic_id === epicId);
-    return { total: inEpic.length, done: inEpic.filter((t) => t.status === "done").length };
-  };
-
-  const maxPhaseEnd = Math.max(1, ...(strategy?.phases ?? []).map((p) => (p.start || 0) + (p.length || 0)));
+  const closeTicket = () => { setTicketDialog(null); setConfirmingTicketDelete(false); };
 
   const decomposePrompt = () =>
     `Decompose the Spec "${product.name}" (${product.display_id}, product id ${productId}) into a PRD: epics must pin capabilities, stories must pin features, tickets sized S/M/L for one Claude session each. Use the current capability map and feature graph.`;
@@ -233,128 +246,34 @@ export default function ProductsIsland({ canWrite = true }) {
     `Refresh the draft PRD for "${product.name}" (${product.display_id}, product id ${productId}). Keep approved pins where still valid; update epics/stories/tickets to match the current taxonomy.`;
 
   const strategyPrompt = () =>
-    `Create a delivery strategy for "${product.name}" (${product.display_id}, product id ${productId}): phased Gantt plan aligned to the current PRD and feature graph.${strategy ? " Replace the existing strategy with a new version." : ""}`;
+    `Create a delivery strategy for "${product.name}" (${product.display_id}, product id ${productId}): a phased Gantt plan aligned with the current PRD and feature graph.${strategy ? " Replace the existing strategy with a new version." : ""}`;
 
-  const summarizeCounts = (counts) =>
-    [
-      formatCounts("goals", counts?.goals),
-      formatCounts("capabilities", counts?.capabilities),
-      formatCounts("motivations", counts?.motivations),
-      formatCounts("features", counts?.features),
-      formatCounts("edges", counts?.edges),
-      formatCounts("products", counts?.products),
-      formatCounts("bundles", counts?.bundles),
-      formatCounts("decompositions", counts?.decompositions),
-    ].filter(Boolean);
-
-  const runSeedImport = async (dryRun) => {
-    if (!seedText.trim()) return;
-    setSeedAction(dryRun ? "validate" : "import");
-    try {
-      const result = await api("/seed/import", {
-        method: "POST",
-        body: { document: seedText, dryRun },
-      });
-      setSeedResult(result);
-      if (!dryRun) {
-        setToast({
-          tone: "ok",
-          title: "Seed imported",
-          detail: summarizeCounts(result.counts).join(" · "),
-        });
-        await loadProducts();
-        if (productId) await loadDetail(productId);
-      }
-    } catch (e) {
-      setToast({
-        tone: "danger",
-        title: dryRun ? "Validation failed" : "Import failed",
-        detail: String(e.message),
-      });
-    } finally {
-      setSeedAction(null);
-    }
+  const planActions = {
+    decompose: () => openChatWithPrompt(decomposePrompt()),
+    refreshPrd: () => openChatWithPrompt(refreshPrdPrompt()),
+    strategy: () => openChatWithPrompt(strategyPrompt()),
+    approveSpec: approveProduct,
+    approvePrd,
+    newTicket: () => setTicketDialog({ mode: "new", title: "", description: "", budget: "M", files: "" }),
+    openTicket: (t) => setTicketDialog(canWrite
+      ? { mode: "edit", ticket: t, title: t.title, description: t.description || "", budget: t.context_budget, status: t.status, files: (t.affected_files || []).join(", ") }
+      : { mode: "view", ticket: t }),
   };
 
-  const loadSeedFile = async (event) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    setSeedText(await file.text());
-    setSeedResult(null);
-  };
-
-  const runUnseed = async (dryRun) => {
-    if (!unseedText.trim()) return;
-    setUnseedAction(dryRun ? "preview" : "delete");
-    try {
-      const result = await api("/seed/unseed", {
-        method: "POST",
-        body: { document: unseedText, dryRun },
-      });
-      setUnseedResult(result);
-      if (!dryRun) {
-        setToast({
-          tone: result.warnings?.length ? "danger" : "ok",
-          title: result.warnings?.length ? "Unseed completed with warnings" : "Seed removed",
-          detail: summarizeCounts(result.counts).join(" · "),
-        });
-        await loadProducts();
-        if (productId) await loadDetail(productId);
-      }
-    } catch (e) {
-      setToast({
-        tone: "danger",
-        title: dryRun ? "Preview failed" : "Delete failed",
-        detail: String(e.message),
-      });
-    } finally {
-      setUnseedAction(null);
-    }
-  };
-
-  const loadUnseedFile = async (event) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    setUnseedText(await file.text());
-    setUnseedResult(null);
-  };
-
-  const exportSeed = async () => {
-    if (!productId) return;
-    setSaving(true);
-    try {
-      const res = await fetch(`/api/seed/export?productId=${encodeURIComponent(productId)}`);
-      const body = await res.json();
-      if (!res.ok) throw new Error(body.detail || "Export failed");
-      const blob = new Blob([JSON.stringify(body.document, null, 2)], { type: "application/json" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = body.filename || "metis-seed.json";
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
-      setToast({ tone: "ok", title: "Seed exported", detail: body.filename || "metis-seed.json" });
-    } catch (e) {
-      setToast({ tone: "danger", title: "Export failed", detail: String(e.message) });
-    } finally {
-      setSaving(false);
-    }
-  };
+  const goal = product && goals.find((g) => g.id === product.goal_id);
 
   return (
     <>
       <PageHeader
         title="Products"
-        meta={product ? `${product.name}${product.external ? " · external" : ""} · ${product.display_id}` : products.length ? "loading" : "no products"}
+        meta={products?.length ? count(products.length, "product") : undefined}
         actions={
           <>
-            {products.length > 1 && (
+            {products?.length > 1 && (
               <Select aria-label="Product" value={productId ?? ""} onChange={(e) => selectProduct(e.target.value)} style={{ width: 240 }}
                 options={productOptions(products)} />
             )}
-            {canWrite && (
+            {canWrite && products?.length > 0 && (
               <Button size="sm" variant="accent" style={{ gap: 6 }} onClick={openNewProduct}>
                 <Icon name="plus" size={13} />New product
               </Button>
@@ -363,440 +282,104 @@ export default function ProductsIsland({ canWrite = true }) {
         }
       />
       <div style={{ flex: 1, overflowY: "auto", padding: 24 }}>
-        {product ? (
+        {products == null ? (
+          <div role="status" style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>Loading products…</div>
+        ) : product ? (
           <div style={{ maxWidth: 860, display: "flex", flexDirection: "column", gap: 16 }}>
-            <Card
-              title={product.name}
-              meta={`${product.display_id} · v${product.version}`}
-              footer={
-                <>
-                  <StatusBadge status={product.status} />
-                  {prd && <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-secondary)" }}>{prd.display_id} v{prd.version} · {prd.created_by}</span>}
-                  <span style={{ flex: 1 }} />
-                  {canWrite && (
+            <Card>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                <h2 style={{ margin: 0, fontSize: "var(--text-lg)", fontWeight: "var(--weight-semibold)", color: "var(--text-heading)" }}>{product.name}</h2>
+                {product.external && <span title="Someone else's product. Its features never count as ours."><Badge>external</Badge></span>}
+                <span style={{ flex: 1 }} />
+                {canWrite && (
+                  <>
                     <Button size="sm" variant="secondary" style={{ gap: 6 }} onClick={openEditProduct}>
                       <Icon name="pencil" size={13} />Edit
                     </Button>
-                  )}
-                  {canWrite && !product.external && product.status === "draft" && (
-                    <Button size="sm" onClick={approveProduct}>Approve spec</Button>
-                  )}
-                </>
-              }
-            >
-              <span style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)", lineHeight: "var(--leading-body)" }}>
-                {product.summary}
-              </span>
-              <div style={{ marginTop: 14, display: "flex", flexDirection: "column", gap: 8 }}>
-                <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-secondary)", letterSpacing: "var(--tracking-caps)", textTransform: "uppercase" }}>
-                  Also offers (added by hand)
-                </div>
-                {bundles.length > 0 ? (
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                    {bundles.map((capability) => (
-                      <Tag
-                        key={capability.id}
-                        onRemove={canWrite ? () => removeBundle(capability.id) : undefined}
-                      >
-                        {capability.name}
-                      </Tag>
-                    ))}
-                  </div>
-                ) : (
-                  <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>
-                    None. Capabilities its features realize are listed under Overview; add one here only if the product offers it without a feature.
-                  </div>
-                )}
-                {canWrite && addableBundles.length > 0 && (
-                  <div style={{ maxWidth: 320 }}>
-                    <Select
-                      value=""
-                      onChange={(e) => e.target.value && addBundle(e.target.value)}
-                      options={[
-                        { value: "", label: "Bundle a capability..." },
-                        ...addableBundles.map((capability) => ({
-                          value: capability.id,
-                          label: capability.name,
-                        })),
-                      ]}
-                    />
-                  </div>
+                    <Button size="sm" variant="secondary" style={{ gap: 6 }} onClick={exportProduct}>
+                      <Icon name="arrow-right" size={13} />Export
+                    </Button>
+                  </>
                 )}
               </div>
+              {product.summary && (
+                <div style={{ marginTop: 8, fontSize: "var(--text-sm)", color: "var(--text-secondary)", lineHeight: "var(--leading-body)" }}>
+                  {product.summary}
+                </div>
+              )}
             </Card>
 
             <Tabs
               tabs={[
-                { value: "overview", label: "Overview", count: features?.length },
-                // Spec, PRD and delivery planning only apply to products we build.
-                ...(product.external ? [] : [
-                  { value: "prd", label: "PRD", count: epics.length },
-                  { value: "tickets", label: "Tickets", count: tickets.length },
-                  { value: "strategy", label: "Delivery strategy" },
-                ]),
+                { value: "does", label: "What it does", count: features?.length },
+                { value: "goals", label: "Goals", count: goal ? 1 : 0 },
+                ...(product.external ? [] : [{ value: "plan", label: "Plan" }]),
               ]}
-              value={tab}
-              onChange={setTab}
+              value={shownTab}
+              onChange={changeTab}
             />
 
-            {tab === "overview" && (
-              <ProductOverview product={product} features={features} score={score} capabilities={capabilities} />
+            {shownTab === "does" && (
+              <WhatItDoes product={product} features={features} score={score} capabilities={capabilities} journeys={journeys}
+                bundles={bundles} canWrite={canWrite} onAddBundle={addBundle} onRemoveBundle={removeBundle} />
             )}
 
-            {!product.external && tab === "prd" && (
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {canWrite && (
-                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                    <Button size="sm" variant="secondary" style={{ gap: 6 }} onClick={() => openChatWithPrompt(decomposePrompt())}>
-                      <Icon name="sparkles" size={13} />{epics.length === 0 ? "Decompose spec" : "Regenerate PRD"}
-                    </Button>
-                    {prd && prd.status === "draft" && (
-                      <Button size="sm" variant="secondary" style={{ gap: 6 }} onClick={() => openChatWithPrompt(refreshPrdPrompt())}>
-                        <Icon name="sparkles" size={13} />Refresh PRD draft
-                      </Button>
-                    )}
-                  </div>
-                )}
-                {prd && prd.status === "draft" && canWrite && (
-                  <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", background: "var(--accent-wash)", borderRadius: "var(--radius-md)", fontSize: "var(--text-sm)", color: "var(--text-accent)" }}>
-                    <span style={{ fontFamily: "var(--font-mono)", fontSize: 11 }}>{prd.display_id} v{prd.version}</span>
-                    <span style={{ flex: 1 }}>Draft until approved. L tickets must be split first.</span>
-                    <Button size="sm" onClick={approvePrd}>Approve PRD</Button>
-                  </div>
-                )}
-                {prd && prd.status === "draft" && !canWrite && (
-                  <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", background: "var(--accent-wash)", borderRadius: "var(--radius-md)", fontSize: "var(--text-sm)", color: "var(--text-accent)" }}>
-                    <span style={{ fontFamily: "var(--font-mono)", fontSize: 11 }}>{prd.display_id} v{prd.version}</span>
-                    <span style={{ flex: 1 }}>Draft PRD — awaiting approval.</span>
-                  </div>
-                )}
-                {epics.map((e, i) => {
-                  const counts = ticketCounts(e.id);
-                  return (
-                    <div key={e.id} style={{ display: "flex", alignItems: "center", gap: 12, background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", padding: "12px 16px" }}>
-                      <Icon name="layers" size={15} style={{ color: "var(--stage-prd)" }} />
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: "var(--text-sm)", fontWeight: "var(--weight-semibold)", color: "var(--text-heading)" }}>Epic {i + 1} — {e.title}</div>
-                        {e.acceptance_criteria && <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", marginTop: 2 }}>AC: {e.acceptance_criteria}</div>}
-                        {(() => {
-                          const cap = capabilities.find((c) => c.id === e.capability_id);
-                          return cap ? (
-                            <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-secondary)", marginTop: 2 }}>
-                              snapshots {cap.name}
-                            </div>
-                          ) : null;
-                        })()}
-                      </div>
-                      <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-secondary)" }}>{counts.done}/{counts.total}</span>
-                      <Icon name="chevron-right" size={14} style={{ color: "var(--text-secondary)" }} />
-                    </div>
-                  );
-                })}
-                {epics.length === 0 && (
-                  <div style={{ border: "1px dashed var(--border-default)", borderRadius: "var(--radius-md)", padding: 16, color: "var(--text-secondary)", fontSize: "var(--text-sm)" }}>
-                    No PRD yet. Use Decompose spec above to draft one in Chat.
-                  </div>
-                )}
-              </div>
-            )}
+            {shownTab === "goals" && <ProductGoals product={product} goals={goals} canWrite={canWrite} />}
 
-            {!product.external && tab === "tickets" && (
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                {tickets.map((t) => (
-                  <TicketCard key={t.id} id={t.display_id} title={t.title} description={t.description}
-                    status={t.status} budget={t.context_budget} files={t.affected_files}
-                    onClick={canWrite ? () => setTicketDialog({ mode: "edit", ticket: t, title: t.title, description: t.description || "", budget: t.context_budget, status: t.status, files: (t.affected_files || []).join(", ") }) : undefined} />
-                ))}
-                {canWrite && (
-                  <div {...pressable(() => setTicketDialog({ mode: "new", title: "", description: "", budget: "M", files: "" }))}
-                    style={{ border: "1px dashed var(--border-default)", borderRadius: "var(--radius-md)", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, color: "var(--text-secondary)", fontSize: "var(--text-sm)", minHeight: 90, cursor: "pointer" }}>
-                    <Icon name="plus" size={14} /> New ticket
-                  </div>
-                )}
-              </div>
-            )}
-
-            {!product.external && tab === "strategy" && (
-              <div style={{ background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", padding: 20, display: "flex", flexDirection: "column", gap: 10 }}>
-                {canWrite && (
-                  <Button size="sm" variant="secondary" style={{ alignSelf: "flex-start", gap: 6 }}
-                    onClick={() => openChatWithPrompt(strategyPrompt())}>
-                    <Icon name="sparkles" size={13} />{strategy ? "Regenerate strategy" : "Create strategy"}
-                  </Button>
-                )}
-                {(strategy?.phases ?? []).map((p, i) => (
-                  <div key={i} style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                    <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-secondary)", width: 16 }}>{i + 1}</span>
-                    <div style={{ display: "flex", flex: "0 0 420px" }}>
-                      <div style={{ width: `${((p.start || 0) / maxPhaseEnd) * 100}%` }} />
-                      <div style={{ height: 10, borderRadius: 5, background: i === 0 ? "var(--stage-prd)" : "var(--ink-2)", width: `${((p.length || 0) / maxPhaseEnd) * 100}%` }} />
-                    </div>
-                    <span style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>{p.name}</span>
-                  </div>
-                ))}
-                {strategy ? (
-                  <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-secondary)", marginTop: 4 }}>
-                    {strategy.created_by} · v{strategy.version} · gantt
-                  </div>
-                ) : (
-                  <div style={{ color: "var(--text-secondary)", fontSize: "var(--text-sm)" }}>
-                    No delivery strategy yet. Use Create strategy above to draft one in Chat.
-                  </div>
-                )}
-              </div>
-            )}
-            {canWrite && (
-              <SeedTools
-                productName={product.name}
-                saving={saving}
-                onExport={exportSeed}
-                onImport={() => { setSeedDialog(true); setSeedResult(null); }}
-                onUnseed={() => { setUnseedDialog(true); setUnseedResult(null); }}
-              />
-            )}
+            {shownTab === "plan" && (detailId === productId ? (
+              <ProductPlan product={product} prd={prd} epics={epics} tickets={tickets} strategy={strategy}
+                capabilities={capabilities} features={features} canWrite={canWrite} actions={planActions} />
+            ) : (
+              <div role="status" style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>Loading the plan…</div>
+            ))}
           </div>
         ) : (
-          <div style={{ maxWidth: 860, border: "1px dashed var(--border-default)", borderRadius: "var(--radius-md)", padding: 24, color: "var(--text-secondary)", fontSize: "var(--text-sm)" }}>
-            No products yet. Create one with New product, or import a seed file below.
+          <div style={{ maxWidth: 860, border: "1px dashed var(--border-default)", borderRadius: "var(--radius-md)", padding: 24, display: "flex", flexDirection: "column", gap: 12, alignItems: "flex-start", color: "var(--text-secondary)", fontSize: "var(--text-sm)" }}>
+            <div>No products yet.{canWrite ? "" : " An editor adds products."}</div>
             {canWrite && (
-              <SeedTools
-                onImport={() => { setSeedDialog(true); setSeedResult(null); }}
-                onUnseed={() => { setUnseedDialog(true); setUnseedResult(null); }}
-              />
+              <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+                <Button size="sm" variant="accent" style={{ gap: 6 }} onClick={openNewProduct}>
+                  <Icon name="plus" size={13} />New product
+                </Button>
+                <a href="/settings">Add one from its repo</a>
+              </div>
             )}
           </div>
         )}
       </div>
 
       <Dialog
-        open={seedDialog}
-        title="Import a seed file"
-        width="640px"
-        onClose={() => {
-          setSeedDialog(false);
-          setSeedAction(null);
-        }}
-        footer={
-          <>
-            <Button size="sm" variant="secondary" onClick={() => setSeedResult(null)}>
-              Clear summary
-            </Button>
-            <Button size="sm" variant="secondary" onClick={() => setSeedDialog(false)}>
-              Close
-            </Button>
-            <Button
-              size="sm"
-              variant="secondary"
-              disabled={seedAction != null || !seedText.trim()}
-              onClick={() => runSeedImport(true)}
-            >
-              {seedAction === "validate" ? "Validating..." : "Validate"}
-            </Button>
-            <Button
-              size="sm"
-              variant="accent"
-              disabled={seedAction != null || !seedText.trim()}
-              onClick={() => runSeedImport(false)}
-            >
-              {seedAction === "import" ? "Importing..." : "Import"}
-            </Button>
-          </>
-        }
-      >
-        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-          <AgentPromptPanel />
-          <div style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)", lineHeight: "var(--leading-body)" }}>
-            Paste a `metis-seed/v1` document or load a local `.json` file. Validate runs the
-            same seed-format checks as the loader; import uses the same add-only identity rules.
-          </div>
-          <input type="file" accept=".json,application/json" onChange={loadSeedFile} />
-          <textarea
-            rows={14}
-            value={seedText}
-            onChange={(e) => {
-              setSeedText(e.target.value);
-              setSeedResult(null);
-            }}
-            placeholder='{"format":"metis-seed/v1", ...}'
-            style={{
-              width: "100%",
-              resize: "vertical",
-              border: "1px solid var(--border-default)",
-              borderRadius: "var(--radius-md)",
-              background: "var(--surface-card)",
-              color: "var(--text-body)",
-              fontFamily: "var(--font-mono)",
-              fontSize: "var(--text-xs)",
-              padding: 12,
-              lineHeight: 1.5,
-            }}
-          />
-          {seedResult && (
-            <div
-              style={{
-                border: "1px solid var(--border-hairline)",
-                borderRadius: "var(--radius-md)",
-                background: "var(--surface-inset)",
-                padding: 12,
-                display: "flex",
-                flexDirection: "column",
-                gap: 8,
-              }}
-            >
-              <div style={{ fontSize: "var(--text-sm)", fontWeight: "var(--weight-semibold)", color: "var(--text-heading)" }}>
-                {seedResult.dryRun ? "Dry run" : "Imported"}
-              </div>
-              <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", lineHeight: "var(--leading-snug)" }}>
-                {summarizeCounts(seedResult.counts).join(" · ")}
-              </div>
-              {(seedResult.notes || []).length > 0 && (
-                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                  <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-secondary)" }}>Notes</div>
-                  {seedResult.notes.map((note, i) => (
-                    <div key={i} style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>{note}</div>
-                  ))}
-                </div>
-              )}
-              {(seedResult.warnings || []).length > 0 && (
-                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                  <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--danger-fg)" }}>Warnings</div>
-                  {seedResult.warnings.map((warning, i) => (
-                    <div key={i} style={{ fontSize: "var(--text-xs)", color: "var(--danger-fg)" }}>{warning}</div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      </Dialog>
-
-      <Dialog
-        open={unseedDialog}
-        title="Remove seeded project"
-        onClose={() => {
-          setUnseedDialog(false);
-          setUnseedAction(null);
-        }}
-        footer={
-          <>
-            <Button size="sm" variant="secondary" onClick={() => setUnseedResult(null)}>
-              Clear summary
-            </Button>
-            <Button size="sm" variant="secondary" onClick={() => setUnseedDialog(false)}>
-              Close
-            </Button>
-            <Button
-              size="sm"
-              variant="secondary"
-              disabled={unseedAction != null || !unseedText.trim()}
-              onClick={() => runUnseed(true)}
-            >
-              {unseedAction === "preview" ? "Previewing..." : "Preview delete"}
-            </Button>
-            <Button
-              size="sm"
-              variant="danger"
-              disabled={unseedAction != null || !unseedText.trim() || !unseedResult?.dryRun}
-              onClick={() => runUnseed(false)}
-            >
-              {unseedAction === "delete" ? "Deleting..." : "Delete now"}
-            </Button>
-          </>
-        }
-      >
-        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-          <div style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)", lineHeight: "var(--leading-body)" }}>
-            Paste or upload the same `metis-seed/v1` slice you want removed. Always preview first:
-            the app will keep shared capabilities/goals and report warnings instead of deleting them blindly.
-          </div>
-          <input type="file" accept=".json,application/json" onChange={loadUnseedFile} />
-          <textarea
-            rows={14}
-            value={unseedText}
-            onChange={(e) => {
-              setUnseedText(e.target.value);
-              setUnseedResult(null);
-            }}
-            placeholder='{"format":"metis-seed/v1", ...}'
-            style={{
-              width: "100%",
-              resize: "vertical",
-              border: "1px solid var(--border-default)",
-              borderRadius: "var(--radius-md)",
-              background: "var(--surface-card)",
-              color: "var(--text-body)",
-              fontFamily: "var(--font-mono)",
-              fontSize: "var(--text-xs)",
-              padding: 12,
-              lineHeight: 1.5,
-            }}
-          />
-          {unseedResult && (
-            <div
-              style={{
-                border: "1px solid var(--border-hairline)",
-                borderRadius: "var(--radius-md)",
-                background: "var(--surface-inset)",
-                padding: 12,
-                display: "flex",
-                flexDirection: "column",
-                gap: 8,
-              }}
-            >
-              <div style={{ fontSize: "var(--text-sm)", fontWeight: "var(--weight-semibold)", color: "var(--text-heading)" }}>
-                {unseedResult.dryRun ? "Preview" : "Deleted"}
-              </div>
-              <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", lineHeight: "var(--leading-snug)" }}>
-                {summarizeCounts(unseedResult.counts).join(" · ")}
-              </div>
-              {(unseedResult.notes || []).length > 0 && (
-                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                  <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-secondary)" }}>Notes</div>
-                  {unseedResult.notes.map((note, i) => (
-                    <div key={i} style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>{note}</div>
-                  ))}
-                </div>
-              )}
-              {(unseedResult.warnings || []).length > 0 && (
-                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                  <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--danger-fg)" }}>Warnings</div>
-                  {unseedResult.warnings.map((warning, i) => (
-                    <div key={i} style={{ fontSize: "var(--text-xs)", color: "var(--danger-fg)" }}>{warning}</div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      </Dialog>
-
-      <Dialog
         open={ticketDialog != null}
-        title={ticketDialog?.mode === "new" ? "New ticket" : `Edit ${ticketDialog?.ticket?.display_id ?? ""}`}
-        onClose={() => { setTicketDialog(null); setConfirmingTicketDelete(false); }}
-        footer={
+        title={ticketDialog?.mode === "new" ? "New ticket" : ticketDialog?.mode === "view" ? ticketDialog.ticket.display_id : `Edit ${ticketDialog?.ticket?.display_id ?? ""}`}
+        onClose={closeTicket}
+        footer={ticketDialog?.mode === "view" ? (
+          <Button size="sm" variant="secondary" onClick={closeTicket}>Close</Button>
+        ) : (
           <>
             {ticketDialog?.mode === "edit" && (
               <DeleteConfirm armed={confirmingTicketDelete} onArm={() => setConfirmingTicketDelete(true)} onCancel={() => setConfirmingTicketDelete(false)} onConfirm={deleteTicket} disabled={saving}
                 label="Delete" confirmLabel={"Delete ticket"} style={{ marginRight: "auto" }} />
             )}
-            <Button size="sm" variant="secondary" onClick={() => { setTicketDialog(null); setConfirmingTicketDelete(false); }}>Cancel</Button>
+            <Button size="sm" variant="secondary" onClick={closeTicket}>Cancel</Button>
             <Button size="sm" variant="accent" disabled={saving || !ticketDialog?.title?.trim()} onClick={saveTicket}>
               {ticketDialog?.mode === "new" ? "Create ticket" : "Save"}
             </Button>
           </>
-        }
+        )}
       >
-        {ticketDialog && (
+        {ticketDialog?.mode === "view" && <TicketView ticket={ticketDialog.ticket} />}
+        {ticketDialog && ticketDialog.mode !== "view" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             <Input label="Title" value={ticketDialog.title} onChange={(e) => setTicketDialog({ ...ticketDialog, title: e.target.value })} />
-            <Input label="Description (verifiable done condition)" value={ticketDialog.description} onChange={(e) => setTicketDialog({ ...ticketDialog, description: e.target.value })} />
+            <Input label="Description (how to tell it's done)" value={ticketDialog.description} onChange={(e) => setTicketDialog({ ...ticketDialog, description: e.target.value })} />
             <Input label="Affected files (comma-separated)" mono value={ticketDialog.files} onChange={(e) => setTicketDialog({ ...ticketDialog, files: e.target.value })} placeholder="migration.sql, features.py" />
-            <Select label="context_budget (one ticket = one Claude session)" value={ticketDialog.budget} onChange={(e) => setTicketDialog({ ...ticketDialog, budget: e.target.value })}
-              options={[{ value: "S", label: "S — single file change" }, { value: "M", label: "M — 2-4 files" }, { value: "L", label: "L — must be split" }]} />
+            <div title={SIZE_HINT}>
+              <Select label="Size (one ticket is one coding session)" value={ticketDialog.budget} onChange={(e) => setTicketDialog({ ...ticketDialog, budget: e.target.value })}
+                options={SIZES} />
+            </div>
             {ticketDialog.mode === "edit" && (
               <Select label="Status" value={ticketDialog.status} onChange={(e) => setTicketDialog({ ...ticketDialog, status: e.target.value })}
-                options={[{ value: "pending", label: "planned" }, { value: "in_progress", label: "in progress" }, { value: "done", label: "done" }]} />
+                options={TICKET_STATUSES} />
             )}
           </div>
         )}
@@ -826,7 +409,7 @@ export default function ProductsIsland({ canWrite = true }) {
             <Select label="Product goal" value={productDialog.goalId} onChange={(e) => setProductDialog({ ...productDialog, goalId: e.target.value })}
               options={[{ value: "", label: "None" },
                 ...goals.map((g) => ({ value: g.id, label: `${g.display_id} ${g.title}` }))]} />
-            <Checkbox label="External — someone else's product, known from the outside. Its features never count as ours."
+            <Checkbox label="External: someone else's product, known from the outside. Its features never count as ours."
               checked={productDialog.external} onChange={(on) => setProductDialog({ ...productDialog, external: on })} />
           </div>
         )}
@@ -841,166 +424,25 @@ export default function ProductsIsland({ canWrite = true }) {
   );
 }
 
-function formatCounts(collection, counts) {
-  if (!counts) return null;
-  const detail = Object.entries(counts)
-    .filter(([, value]) => value > 0)
-    .map(([action, value]) => `${value} ${action}`)
-    .join(", ");
-  return detail ? `${collection}: ${detail}` : null;
-}
-
-function ProductOverview({ product, features, score, capabilities }) {
-  const capById = React.useMemo(() => new Map(capabilities.map((c) => [c.id, c])), [capabilities]);
-  if (features == null) {
-    return <div role="status" style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>Loading {product.name}'s features…</div>;
-  }
-  const realized = new Map();
-  for (const f of features) for (const cid of f.capability_ids ?? []) realized.set(cid, (realized.get(cid) ?? 0) + 1);
-  const caps = [...realized.entries()]
-    .map(([id, n]) => ({ cap: capById.get(id), n }))
-    .filter((x) => x.cap)
-    .sort((a, b) => b.n - a.n || a.cap.name.localeCompare(b.cap.name));
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      <section style={{ background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)" }}>
-        <div style={{ padding: "12px 16px", fontSize: "var(--text-sm)", fontWeight: "var(--weight-semibold)", color: "var(--text-heading)" }}>
-          {product.external ? `How much of ${product.name} we could build` : "Coverage"}
-        </div>
-        {score == null && <div role="status" style={{ padding: "0 16px 14px", fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>Scoring…</div>}
-        {score === false && <div style={{ padding: "0 16px 14px", fontSize: "var(--text-xs)", color: "var(--danger-fg)" }}>Couldn't score this product.</div>}
-        {score && score.report && (
-          <div style={{ padding: "0 16px 4px", fontSize: "var(--text-sm)", color: "var(--text-heading)" }}>
-            We have {score.report.existing} of the {score.report.needed} capabilities its features need · {score.report.mature} proven (beta or later)
-          </div>
-        )}
-        {score && <ProductScore score={score} />}
-        {score && score.report && (
-          <details style={{ borderTop: "1px solid var(--border-hairline)" }}>
-            <summary style={{ padding: "10px 16px", cursor: "pointer", fontSize: "var(--text-xs)", color: "var(--text-accent)" }}>Show the capability-by-capability breakdown</summary>
-            <CoverageReport report={score.report} onCandidate={() => {}} />
-          </details>
-        )}
-        {score && !score.report && <div style={{ padding: "0 16px 14px", fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>No capability links known for this product yet.</div>}
-      </section>
-
-      <section>
-        <div style={{ fontSize: "var(--text-sm)", fontWeight: "var(--weight-semibold)", color: "var(--text-heading)", marginBottom: 8 }}>
-          Features · {features.length}
-        </div>
-        {features.length === 0 ? (
-          <div style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>No features recorded for {product.name} yet.</div>
-        ) : (
-          <div style={{ background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)" }}>
-            {features.map((f, i) => (
-              <a key={f.id} href={`/features?feature=${f.id}`}
-                style={{ display: "flex", gap: 12, alignItems: "center", padding: "9px 14px", borderBottom: i < features.length - 1 ? "1px solid var(--border-hairline)" : "none", textDecoration: "none", fontSize: "var(--text-sm)" }}>
-                <span style={{ flex: 1, minWidth: 0, color: "var(--text-heading)" }}>{f.name}</span>
-                <span style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", maxWidth: "45%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {(f.capability_ids ?? []).map((c) => capById.get(c)?.name).filter(Boolean).join(", ") || "capabilities not identified"}
-                </span>
-                {!product.external && <StatusBadge status={f.status} />}
-              </a>
-            ))}
-          </div>
-        )}
-      </section>
-
-      {caps.length > 0 && (
-        <section>
-          <div style={{ fontSize: "var(--text-sm)", fontWeight: "var(--weight-semibold)", color: "var(--text-heading)", marginBottom: 8 }}>
-            Capabilities its features realize · {caps.length}
-          </div>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: "6px 14px", fontSize: "var(--text-sm)" }}>
-            {caps.map(({ cap, n }) => (
-              <a key={cap.id} href={`/capabilities/${cap.slug}`}>{cap.name}<span style={{ color: "var(--text-secondary)", fontFamily: "var(--font-mono)", fontSize: 11 }}> {n}</span></a>
-            ))}
-          </div>
-        </section>
-      )}
+// Read-only ticket for viewers: everything the card leaves out.
+function TicketView({ ticket: t }) {
+  const row = (label, value) => value && (
+    <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+      <span style={{ fontSize: "var(--text-xs)", fontWeight: "var(--weight-medium)", color: "var(--text-heading)" }}>{label}</span>
+      <span style={{ fontSize: "var(--text-sm)", color: "var(--text-body)", whiteSpace: "pre-wrap" }}>{value}</span>
     </div>
   );
-}
-
-// The prompt a coding agent needs to describe a repo it can read as a seed
-// file: built by the backend from the canonical format spec and the live
-// inventory, so the agent reuses today's exact capability names.
-function AgentPromptPanel() {
-  const [prompt, setPrompt] = React.useState(null);
-  const [capabilities, setCapabilities] = React.useState(0);
-  const [state, setState] = React.useState("idle"); // idle | loading | copied | error
-  const [error, setError] = React.useState(null);
-
-  const load = async () => {
-    setState("loading");
-    setError(null);
-    try {
-      const r = await api("/ontology/agent-export-prompt");
-      setPrompt(r.prompt);
-      setCapabilities(r.capabilities);
-      return r.prompt;
-    } catch (e) {
-      setError(`Couldn't build the prompt: ${e.message}`);
-      setState("error");
-      return null;
-    }
-  };
-  const copy = async () => {
-    const text = prompt ?? (await load());
-    if (!text) return;
-    try {
-      await navigator.clipboard.writeText(text);
-      setState("copied");
-    } catch {
-      setState("idle");
-      setError("Your browser blocked copying. Select the prompt below and copy it by hand.");
-    }
-  };
-
   return (
-    <div style={{ border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", padding: 14, background: "var(--surface-inset)", display: "flex", flexDirection: "column", gap: 8 }}>
-      <div style={{ fontSize: "var(--text-sm)", fontWeight: "var(--weight-semibold)", color: "var(--text-heading)" }}>No file yet? Have a coding agent write one</div>
-      <ol style={{ margin: 0, paddingLeft: 18, fontSize: "var(--text-sm)", color: "var(--text-body)", lineHeight: "var(--leading-body)" }}>
-        <li>Copy the prompt and paste it into a coding agent (Claude Code, Codex, Cursor…) opened in the repo.</li>
-        <li>It reads the repo and writes <code>metis-seed.json</code>, reusing the capability names metis already has.</li>
-        <li>Load that file below, Validate, then Import.</li>
-      </ol>
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-        <Button size="sm" variant="accent" disabled={state === "loading"} onClick={copy}>
-          {state === "loading" ? "Building the prompt…" : state === "copied" ? "Copied" : "Copy prompt for a coding agent"}
-        </Button>
-        {state === "copied" && <span role="status" style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>Includes {capabilities} capability names and the full seed format.</span>}
+        <span style={{ fontSize: "var(--text-md)", fontWeight: "var(--weight-semibold)", color: "var(--text-heading)" }}>{t.title}</span>
+        <StatusBadge status={t.status} />
+        <span title={SIZE_HINT} style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>size {t.context_budget}</span>
       </div>
-      {error && <div role="alert" style={{ fontSize: "var(--text-xs)", color: "var(--danger-fg)" }}>{error}</div>}
-      <details onToggle={(e) => { if (e.currentTarget.open && !prompt) load().then(() => setState("idle")); }}>
-        <summary style={{ cursor: "pointer", fontSize: "var(--text-xs)", color: "var(--text-accent)" }}>See the prompt</summary>
-        <textarea readOnly aria-label="Prompt for a coding agent" value={prompt ?? "Building the prompt…"} rows={12}
-          style={{ marginTop: 8, width: "100%", boxSizing: "border-box", fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-body)", background: "var(--surface-card)", border: "1px solid var(--border-control)", borderRadius: "var(--radius-sm)", padding: 8 }} />
-      </details>
+      {row("Description", t.description)}
+      {row("Approach", t.technical_approach)}
+      {row("Acceptance", t.acceptance_criteria)}
+      {row("Affected files", (t.affected_files ?? []).join(", "))}
     </div>
-  );
-}
-
-function SeedTools({ productName, saving, onExport, onImport, onUnseed }) {
-  return (
-    <section style={{ marginTop: 16, paddingTop: 16, borderTop: "1px solid var(--border-hairline)", display: "flex", flexDirection: "column", gap: 8 }}>
-      <div style={{ fontSize: "var(--text-sm)", fontWeight: "var(--weight-semibold)", color: "var(--text-heading)" }}>Seed files</div>
-      <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>
-        Add a repo by having a coding agent describe it as a metis-seed JSON file, or move a project between metis instances.
-      </div>
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-        {productName && (
-          <Button size="sm" variant="secondary" style={{ gap: 6 }} disabled={saving} onClick={onExport}>
-            <Icon name="arrow-right" size={13} />Export {productName}
-          </Button>
-        )}
-        <Button size="sm" variant="secondary" style={{ gap: 6 }} onClick={onImport}>
-          <Icon name="paperclip" size={13} />Import a seed file
-        </Button>
-        <Button size="sm" variant="secondary" style={{ gap: 6 }} onClick={onUnseed}>
-          <Icon name="trash" size={13} />Remove a seeded project
-        </Button>
-      </div>
-    </section>
   );
 }

@@ -1,8 +1,4 @@
 ---
-import AppLayout from "../layouts/AppLayout.astro";
-import InventoryIsland from "../components/islands/InventoryIsland.jsx";
+// Inventory became Home; old links keep working, query string included.
+return Astro.redirect(`/home${Astro.url.search}`);
 ---
-
-<AppLayout title="Inventory">
-  <InventoryIsland client:load />
-</AppLayout>

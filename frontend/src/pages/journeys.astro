@@ -5,6 +5,6 @@ import JourneysIsland from "../components/islands/JourneysIsland.jsx";
 const canWrite = ["editor", "admin"].includes(Astro.locals.user?.role);
 ---
 
-<AppLayout title="Journeys">
+<AppLayout title="Ideas & journeys">
   <JourneysIsland client:load canWrite={canWrite} />
 </AppLayout>

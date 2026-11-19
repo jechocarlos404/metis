@@ -3,8 +3,9 @@ import { PageHeader } from "../shell/PageHeader.jsx";
 import { Badge, Button, Dialog, Icon, IconButton, Input, Select, Switch, DeleteConfirm } from "../../ds";
 import { api } from "../../lib/api.js";
 import { pressable } from "../../lib/pressable.js";
+import { ROLE_WORDS, roleCan, roleLabel } from "../shell/roles.js";
 
-const ROLES = ["admin", "editor", "viewer"];
+const ROLES = ["admin", "editor", "viewer"].map((r) => ({ value: r, label: roleLabel(r) }));
 const ROLE_TONES = { admin: "accent", editor: "ok", viewer: "neutral" };
 
 const TH = {
@@ -146,6 +147,14 @@ export default function UsersIsland() {
           </Button>
         }
       />
+      <dl style={{ margin: 0, padding: "12px 24px 0", display: "grid", gridTemplateColumns: "max-content 1fr", gap: "4px 12px", fontSize: "var(--text-xs)", flex: "none" }}>
+        {["viewer", "editor", "admin"].map((r) => (
+          <React.Fragment key={r}>
+            <dt style={{ fontWeight: "var(--weight-semibold)", color: "var(--text-heading)" }}>{ROLE_WORDS[r].label}</dt>
+            <dd style={{ margin: 0, color: "var(--text-secondary)" }}>{ROLE_WORDS[r].can}</dd>
+          </React.Fragment>
+        ))}
+      </dl>
       {error && (
         <div style={{ padding: "8px 24px", fontSize: "var(--text-sm)", color: "var(--danger-fg)" }}>{error}</div>
       )}
@@ -169,7 +178,7 @@ export default function UsersIsland() {
                 )}
               </span>
               <span style={{ color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{u.email || "—"}</span>
-              <span>{u.role ? <Badge tone={ROLE_TONES[u.role]}>{u.role}</Badge> : <Badge tone="warn">none</Badge>}</span>
+              <span title={u.role ? roleCan(u.role) : "No role yet, so this person sees nothing until you give them one."}>{u.role ? <Badge tone={ROLE_TONES[u.role]}>{roleLabel(u.role)}</Badge> : <Badge tone="warn">no role</Badge>}</span>
               <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: u.enabled ? "var(--ok-fg)" : "var(--text-secondary)" }}>
                 {u.enabled ? "enabled" : "disabled"}
               </span>
@@ -179,7 +188,7 @@ export default function UsersIsland() {
             </div>
           ))}
           {users.length === 0 && !error && (
-            <div style={{ padding: 16, fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>No users yet.</div>
+            <div style={{ padding: 16, fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>No users yet. Add one with New user above.</div>
           )}
         </div>
       </div>
@@ -219,8 +228,11 @@ export default function UsersIsland() {
             <Input label="Last name" style={{ flex: 1 }} value={draft.lastName}
               onChange={(e) => setDraft({ ...draft, lastName: e.target.value })} />
           </div>
-          <Select label="Role" value={draft.role}
-            onChange={(e) => setDraft({ ...draft, role: e.target.value })} options={ROLES} />
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            <Select label="Role" value={draft.role}
+              onChange={(e) => setDraft({ ...draft, role: e.target.value })} options={ROLES} />
+            <span style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>{roleCan(draft.role)}</span>
+          </div>
 
           {dialog?.mode === "new" ? (
             <>

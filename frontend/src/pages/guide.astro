@@ -13,7 +13,7 @@ import AppLayout from "../layouts/AppLayout.astro";
     <article class="guide">
       <h1>How metis works</h1>
       <p class="lede">
-        Metis keeps one list of what your products can already do, so a new product starts from what
+        Metis keeps one list of what your products can already do, so the next product starts from what
         exists instead of from zero. Four ideas carry everything else.
       </p>
 
@@ -44,7 +44,7 @@ import AppLayout from "../layouts/AppLayout.astro";
           <dt>Technology</dt>
           <dd>
             Something we could buy or adopt instead of building, such as a library, service or vendor. A technology
-            can cover the same capability a feature does; that's how build-or-buy is compared on a capability's page.
+            can cover the same capability a feature does; a capability's page compares the two once technology data exists.
           </dd>
         </div>
       </dl>
@@ -52,39 +52,77 @@ import AppLayout from "../layouts/AppLayout.astro";
       <h2>Where to start</h2>
       <ul>
         <li>
-          <a href="/inventory">Inventory</a>: everything we can already do, most-reused first. Paste a product idea
-          to see which parts we already have, or pick a product, ours or a competitor's, to see how much of it we
-          could build.
+          <a href="/home">Home</a>: describe an idea as a few features and pick the capabilities each one needs.
+          Metis says which ones we already have, which only other companies' products have, and which nobody has.
+          Save it as an idea to come back to. Home also scores every product, ours or not, and lists the most
+          reused capabilities.
         </li>
         <li>
-          <a href="/products">Products</a>: one product at a time, with its features, the capabilities they rely on,
-          and its coverage. Products marked <em>external</em> belong to someone else; we record them to compare.
+          <a href="/products">Products</a>: one product at a time. <em>What it does</em> groups its features by
+          capability; <em>Goals</em> says why it exists; <em>Plan</em> holds a spec, plan document and tickets, but
+          only once someone asks for one. Products marked <em>external</em> belong to someone else; we record them
+          to compare.
         </li>
         <li>
-          <a href="/journeys">Journeys</a>: the path a person takes through several features, possibly across
-          products. Metis shows which steps exist, which we could build, and what's missing.
+          <a href="/journeys">Ideas &amp; journeys</a>: a journey is the path a person takes through features,
+          possibly across products. An idea is a journey whose steps aren't built yet.
         </li>
         <li>
-          <a href="/features">Features</a>: every feature in a searchable list, with a graph view of how they depend
-          on each other.
+          <a href="/capabilities">Capabilities</a>: the shared list, as a tree or most reused first, plus what needs
+          attention. Each capability has one page: what it is, who uses it, why, and what depends on it.
+        </li>
+        <li>
+          <a href="/features">Features</a>: every feature, as a list or a graph of what needs what. The
+          <em>Plan</em> tab answers whole-graph questions: what's ready to start, the build order, and the smallest
+          version that reaches a feature.
+        </li>
+        <li>
+          <a href="/chat">Chat</a>: ask any of this in plain words. When Chat proposes a change, nothing happens
+          until you approve it.
         </li>
       </ul>
+
+      <h2>Getting products in</h2>
+      <p>
+        Metis only holds what your repos actually ship. A coding agent reads a repo and writes a seed file; you
+        import it. On an empty instance, Home walks you through it; after that, it lives in
+        <a href="/settings">Settings</a>. Technology and Stacks appear in the menu once technology data exists.
+      </p>
 
       <h2>Reading the numbers</h2>
       <ul>
         <li>
+          <strong>Live</strong>: one of our products does this today. <strong>Buildable</strong>: every capability
+          it needs is ours. <strong>Partly known</strong>: everything named so far is ours, but the list is
+          incomplete. <strong>Missing</strong>: it needs a capability we don't have. <strong>Not described</strong>:
+          nobody has named what it needs yet.
+        </li>
+        <li>
           A capability's feature count means <strong>our features, including those of its sub-capabilities</strong>.
-          Features of external products are listed separately and never counted.
+          Products we don't own are listed separately and never counted.
         </li>
         <li>
-          <strong>Buildable</strong> means every capability a feature needs is one we have.
-          <strong>Probably buildable</strong> means we have every capability named so far, but someone has marked
-          the list as incomplete.
+          Coverage is a lower bound: a capability nobody has identified yet can't count as one we have. Names match
+          exactly; a near name is offered as "did you mean", never assumed.
         </li>
         <li>
-          Coverage is a lower bound: a capability nobody has identified yet can't count as one we have.
+          Hover a status or relationship word to see the exact value metis stores, the same one Chat, agents and
+          logs use.
         </li>
       </ul>
+
+      <h2>Who can do what</h2>
+      <ul>
+        <li><strong>Viewer</strong>: reads everything.</li>
+        <li><strong>Editor</strong>: also changes products, features, capabilities, goals and journeys, and imports seed files.</li>
+        <li><strong>Admin</strong>: also manages users, AI models and raw data, from Settings.</li>
+      </ul>
+
+      <h2>For AI agents</h2>
+      <p>
+        Agents can ask metis the same questions over MCP, read only. See <code>docs/mcp.md</code> in the repository
+        for how to connect one.
+      </p>
 
       <p class="more">
         Building on metis or extending its model? The full specification, with its engineering rationale, is in
@@ -113,6 +151,7 @@ import AppLayout from "../layouts/AppLayout.astro";
   dt { font-weight: var(--weight-semibold); color: var(--text-heading); }
   dd { margin: 0; text-wrap: pretty; }
   ul { padding-left: var(--space-5); margin: 0; display: grid; gap: var(--space-2); }
+  p { margin: 0 0 var(--space-3); }
   .more { margin-top: var(--space-8); color: var(--text-secondary); font-size: var(--text-sm); }
   @media (max-width: 560px) {
     .terms > div { grid-template-columns: minmax(0, 1fr); gap: var(--space-1); }

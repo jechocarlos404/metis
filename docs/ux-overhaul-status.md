@@ -70,17 +70,17 @@ on the Docker frontend against `metis_verify`, a copy of the real database.
 | F · Features Plan view | S4 | done | browser: ran the smallest-version cut for one feature |
 | Agent MCP: 8 inventory tools (16 total) | S8 | done | 238 backend tests; stdio lists tools, clean exit |
 | Fix 1 onCandidate no-op | foundation + S3 | done | code: links when no handler |
-| Fix 2 parent pre-fill | S5 | done | code |
+| Fix 2 parent pre-fill | S5 | done | browser: New starts top level; Edit pre-fills its real parent |
 | Fix 3 dead-end empty states | S2, S3, S7 | done | browser (viewer Plan tab) |
 | Fix 4 Chat examples | S7 | done | browser |
-| Fix 5 journeys "pending" | S6 | done | code |
-| Fix 6 Features empty copy | S4 | done | code |
-| Fix 7 Exposure empty copy | S7 | done | code |
-| Fix 8 Goals dialog default | S5 | done | code |
+| Fix 5 journeys "pending" | S6 | done | browser: steps read "not built" |
+| Fix 6 Features empty copy | S4 | done | browser: "No feature matches …"; empty-instance copy by code |
+| Fix 7 Exposure empty copy | S7 | done | browser: "No technologies recorded, so nothing to check." |
+| Fix 8 Goals dialog default | S5 | done | browser: product goal when org goals exist; org when none (code) |
 | Fix 9 supply note dismissal | S5 | done | note removed |
 | Fix 10 health badges | S1 | done | browser |
-| Fix 11 toggle + delete patterns | S6, S7 | done | code |
-| Fix 12 Stacks picker | S7 | done | code (bug was real) |
+| Fix 11 toggle + delete patterns | S6, S7 | done | browser: journey delete is inline Keep / Delete; Tech uses Tabs |
+| Fix 12 Stacks picker | S7 | done | browser: picker and panel name the same product |
 | Viewers can run the MVP cut (read-by-POST) | me | done | tests |
 | Guide + README | me | done | browser (Guide, on real data) |
 | Unverified tech guesses | — | deferred | proposal: docs/proposal-unverified-tech.md |
@@ -95,26 +95,31 @@ on the Docker frontend against `metis_verify`, a copy of the real database.
 | Cause 2 · each screen does three jobs | done | Features panel slimmed + Plan tab (S4); Products profile tabs (S3); Capabilities list split from one capability page (S5) |
 | Cause 3 · jargon, many words for one idea | done | `lib/words.js` + `<Term>`; one VERDICT/NEED vocabulary. Some labels still defined locally (follow-ups) |
 | Cause 4 · no way in | done | Get started on an empty instance; seed tools in Settings |
-| Cause 5 · three products share one shell | partial | pipeline is on demand under a product's Plan tab; Tech/Stacks hidden until data; Features and its Plan view stay in the nav under Build & buy |
+| Cause 5 · three products share one shell | done | pipeline on demand under a product's Plan tab; Tech/Stacks hidden until data; Build & buy starts collapsed and opens on its own pages (browser) |
 | Journey 1 · first run | done | Get started (browser, empty database) |
 | Journey 2 · could we build this idea | done | picker + Check + Save as idea (browser, real data) |
 | Journey 3 · how much of product X | done | one wording on Home and the product profile |
-| Journey 4 · map a product by hand | partial | order stated in the Guide only; no in-screen checklist |
-| Journey 5 · build or buy | deferred | section hidden until technology data exists; no write path added (see the unverified-tech proposal) |
+| Journey 4 · map a product by hand | done | numbered order on a product with no features (WhatItDoes) and in the Guide; code only, no featureless product to open |
+| Journey 5 · build or buy | deferred | section hidden until technology data exists; it links each technology to its page, but no screen records which capabilities a technology covers (see the unverified-tech proposal) |
 | Journey 6 · plan delivery | done | Plan tab on demand, Approve all in Chat, Features Plan view |
 | Journey 7 · Chat | done | examples, readable steps, plain statuses (browser) |
 | Journey 8 · read-only viewer | done in UI | browser as viewer; the stack runs with `AUTH_ENABLED=false`, so backend refusals are covered by unit tests, not end to end |
 
-Marked "code" above: implemented and read, not clicked through.
+
+## Second pass (2026-11-20)
+
+| Item | Status | Verified |
+|---|---|---|
+| Nav presence: one `GET /api/tech/presence` instead of two calls | done | 4 backend tests; endpoint answers on the stack |
+| Capability delete warns about sub-capabilities | done | browser: "Its sub-capability will move to the top level." |
+| Features with no capability shown under Needs attention | done | code; this data has none to show |
+| Product Goals also lists goals behind capabilities its features use (collapsed, with a count) | done | browser |
+| Chat: cards with waiting changes stay open; one-helper replies say "Metis" | done | build only; not run, since a chat turn spends AI credits |
+| Labels with one copy in `lib/words.js` (chat agents, proposal statuses, stack flags, incoming edges) | done | build + grep; roles.js was already the single copy |
 
 ## Open follow-ups
 
-- Labels streams defined locally that could move into `lib/words.js`: chat agent
-  names and proposal statuses (ChatIsland), stack flags (StacksIsland), incoming
-  edge words (FeaturesIsland), role words (components/shell/roles.js).
-- The nav presence check makes two backend calls per page render; a cheap count
-  endpoint would be better.
-- `unlinked_feature` health findings (a feature with no capability) have no home
-  in the UI yet.
-- Deleting a capability that has sub-capabilities moves them to the top level
-  without a warning.
+- A shared capability (e.g. User Authentication) pulls every goal behind it onto
+  each product's Goals tab. Collapsed for now; a sharper rule needs the owner.
+- Single-specialist Chat replies now say "Metis"; nothing on them names which
+  specialist answered.

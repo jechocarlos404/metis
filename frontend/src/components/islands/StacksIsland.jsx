@@ -3,10 +3,9 @@ import { PageHeader } from "../shell/PageHeader.jsx";
 import { Badge, Button, Select } from "../../ds";
 import { api } from "../../lib/api.js";
 import { CARD, FIT_TONE, FLAG_TONE, LAYERS, MICRO, MONO, STANCE_TONE } from "../../lib/ontology.js";
-import { FIT, count, productOptions } from "../../lib/words.js";
+import { FIT, FLAG, count, productOptions } from "../../lib/words.js";
 import { Term } from "../shared/Term.jsx";
 
-const FLAG = { gap: "empty", redundant: "duplicate", drift: "not in a slot", workaround: "workaround", trial: "on trial" };
 const STACK_IS ="A stack is the set of technologies a product runs on, grouped by layer into slots.";
 
 /**

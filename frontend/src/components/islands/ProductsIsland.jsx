@@ -30,6 +30,7 @@ export default function ProductsIsland({ canWrite = true }) {
   const [capabilities, setCapabilities] = React.useState([]);
   const [bundles, setBundles] = React.useState([]);
   const [journeys, setJourneys] = React.useState(null);
+  const [motivations, setMotivations] = React.useState(null); // goal -> capability links
   const [tab, setTab] = React.useState("does");
   const [features, setFeatures] = React.useState(null); // this product's features, from graph layout
   const [score, setScore] = React.useState(null);
@@ -89,6 +90,7 @@ export default function ProductsIsland({ canWrite = true }) {
   React.useEffect(() => {
     loadProducts().catch((e) => setToast({ tone: "danger", title: "Load failed", detail: String(e.message) }));
     api("/journeys").then(setJourneys).catch(() => setJourneys([]));
+    api("/motivations").then(setMotivations).catch(() => setMotivations([]));
   }, [loadProducts]);
 
   React.useEffect(() => {
@@ -260,7 +262,6 @@ export default function ProductsIsland({ canWrite = true }) {
       : { mode: "view", ticket: t }),
   };
 
-  const goal = product && goals.find((g) => g.id === product.goal_id);
 
   return (
     <>
@@ -312,7 +313,7 @@ export default function ProductsIsland({ canWrite = true }) {
             <Tabs
               tabs={[
                 { value: "does", label: "What it does", count: features?.length },
-                { value: "goals", label: "Goals", count: goal ? 1 : 0 },
+                { value: "goals", label: "Goals" },
                 ...(product.external ? [] : [{ value: "plan", label: "Plan" }]),
               ]}
               value={shownTab}
@@ -324,7 +325,8 @@ export default function ProductsIsland({ canWrite = true }) {
                 bundles={bundles} canWrite={canWrite} onAddBundle={addBundle} onRemoveBundle={removeBundle} />
             )}
 
-            {shownTab === "goals" && <ProductGoals product={product} goals={goals} canWrite={canWrite} />}
+            {shownTab === "goals" && <ProductGoals product={product} goals={goals} features={features} capabilities={capabilities}
+              motivations={motivations} canWrite={canWrite} />}
 
             {shownTab === "plan" && (detailId === productId ? (
               <ProductPlan product={product} prd={prd} epics={epics} tickets={tickets} strategy={strategy}

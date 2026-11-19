@@ -64,6 +64,11 @@ main:focus { outline: none; }
 [role="button"][tabindex="0"]:focus-visible { outline: 2px solid var(--border-focus); outline-offset: -2px; }
 .graph-node:focus { outline: none; }
 .graph-node:focus-visible > rect { stroke: var(--border-focus); stroke-width: 2.5px; }
+.graph-far .graph-node text { display: none; }
+/* Dim a card through its shapes, not group opacity: opacity on hundreds of
+   <g> makes the browser blend each card separately and drags drop to ~50fps. */
+.graph-node > * { transition: fill-opacity var(--dur-med) var(--ease-out), stroke-opacity var(--dur-med) var(--ease-out); }
+.graph-node.is-dim > * { fill-opacity: 0.25; stroke-opacity: 0.25; }
 
 /* Agent replies rendered from markdown (ChatIsland). */
 .chat-md > :first-child { margin-top: 0; }

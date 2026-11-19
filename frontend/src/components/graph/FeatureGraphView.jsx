@@ -1,7 +1,7 @@
 import React from "react";
 import { Icon, IconButton } from "../../ds";
 import { createForceGraph } from "./forceGraphEngine.js";
-import { buildFeatureGraph, buildAdjacency, edgeStyle, nodeAccentVar, NODE_W, NODE_H, NODE_COLLIDE_R } from "./graph-data.js";
+import { buildFeatureGraph, buildAdjacency, edgeStyle, nodeAccentVar, wrapLabel, NODE_W, NODE_H, NODE_COLLIDE_R } from "./graph-data.js";
 import { EDGE, LAYER, statusLabel } from "../../lib/words.js";
 import { Term } from "../shared/Term.jsx";
 
@@ -218,7 +218,7 @@ function FeatureNode({ node, isSelected, isTabStop, isHovered, isDimmed, isFaded
       // One tab stop for the whole graph (the selected node, else the first);
       // the Directory tab is the keyboard route through every feature.
       tabIndex={isTabStop ? 0 : -1}
-      className="graph-node"
+      className={isDimmed || isDeferred ? "graph-node is-dim" : "graph-node"}
       role="button"
       aria-label={node.name}
       aria-pressed={isSelected}
@@ -230,13 +230,15 @@ function FeatureNode({ node, isSelected, isTabStop, isHovered, isDimmed, isFaded
           onSelect && onSelect(node.id);
         }
       }}
-      style={{ opacity: isDimmed || isDeferred ? 0.25 : 1, transition: "opacity var(--dur-med) var(--ease-out)", cursor: "grab" }}
+      style={{ cursor: "grab" }}
     >
+      <title>{node.name}</title>
       <rect
         x={-NODE_W / 2} y={-NODE_H / 2} width={NODE_W} height={NODE_H} rx={8}
         fill="var(--surface-card)" stroke={ring} strokeWidth={ringWide ? 1.5 : 1}
         style={{
-          filter: isHovered || isSelected ? "drop-shadow(var(--shadow-raised))" : "drop-shadow(var(--shadow-card))",
+          // A shadow on every card made each zoom step redraw all labels; only the focused card gets one.
+          filter: isHovered || isSelected ? "drop-shadow(var(--shadow-raised))" : "none",
           transition: "stroke var(--dur-fast) var(--ease-out), filter var(--dur-fast) var(--ease-out)",
         }}
       />
@@ -249,22 +251,26 @@ function FeatureNode({ node, isSelected, isTabStop, isHovered, isDimmed, isFaded
           </g>
         </g>
       )}
-      <foreignObject x={-NODE_W / 2 + 8} y={-NODE_H / 2 + 6} width={NODE_W - 26} height={NODE_H - 10} style={{ pointerEvents: "none" }}>
-        <div xmlns="http://www.w3.org/1999/xhtml" style={{ fontFamily: "var(--font-body)", display: "flex", alignItems: "center", gap: 5, height: "100%" }}>
-          <span style={{ width: 6, height: 6, borderRadius: "50%", background: accent, flex: "none" }} />
-          <div style={{
-            fontSize: 11.5, fontWeight: 500, color: "var(--text-heading)", lineHeight: 1.25,
-            overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical",
-          }}>
-            {node.name}
-          </div>
-        </div>
-      </foreignObject>
+      <circle cx={-NODE_W / 2 + 11} cy={0} r={3} fill={accent} />
+      <CardLabel name={node.name} x={-NODE_W / 2 + 19} />
     </g>
   );
 }
 
-function GraphToolbar({ onZoomIn, onZoomOut, onFit }) {
+// SVG text, not an HTML foreignObject: 462 HTML labels made pan and zoom
+// drop to about 29fps. Hidden when zoomed out too far to read (.graph-far).
+export function CardLabel({ name, x, fill = "var(--text-heading)" }) {
+  const lines = wrapLabel(name);
+  const lineH = 14;
+  return (
+    <text x={x} y={-((lines.length - 1) * lineH) / 2} dominantBaseline="central" fill={fill}
+      style={{ fontFamily: "var(--font-body)", fontSize: 11.5, fontWeight: 500, pointerEvents: "none" }}>
+      {lines.map((l, i) => <tspan key={i} x={x} dy={i === 0 ? 0 : lineH}>{l}</tspan>)}
+    </text>
+  );
+}
+
+export function GraphToolbar({ onZoomIn, onZoomOut, onFit }) {
   return (
     <div style={{
       position: "absolute", top: 10, right: 10, display: "flex", flexDirection: "column", gap: 2,

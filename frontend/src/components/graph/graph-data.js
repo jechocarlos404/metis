@@ -95,3 +95,106 @@ export function buildAdjacency(edges) {
   }
   return adjacency;
 }
+
+/**
+ * Splits a name into at most `maxLines` lines of about `maxChars` characters,
+ * ending with an ellipsis when it doesn't fit. Graph cards draw labels as SVG
+ * text: an HTML label per card (foreignObject) made pan and zoom stutter.
+ */
+export function wrapLabel(name, maxChars = 19, maxLines = 2) {
+  const words = String(name ?? "").split(/\s+/).filter(Boolean);
+  const lines = [];
+  let line = "";
+  for (const word of words) {
+    const next = line ? `${line} ${word}` : word;
+    if (next.length <= maxChars || !line) { line = next; continue; }
+    lines.push(line);
+    line = word;
+  }
+  if (line) lines.push(line);
+  const cut = (s) => `${s.slice(0, maxChars - 1).trimEnd()}…`;
+  const out = lines.slice(0, maxLines).map((l) => (l.length > maxChars ? cut(l) : l));
+  const last = out.length - 1;
+  if (lines.length > maxLines && !out[last].endsWith("…")) out[last] = cut(out[last]);
+  return out;
+}
+
+/**
+ * Goals as a network. One card per goal; a PART_OF line from each org goal
+ * to its product goals, and a SHARES line between any two goals that motivate
+ * the same capability, weighted by how many they share.
+ *
+ * Anchors cluster each org goal with its product goals (org in the middle,
+ * product goals on a ring), clusters on a grid; product goals with no org
+ * goal form their own cluster. SHARES lines are weak, so they cross between
+ * clusters instead of pulling them together.
+ *
+ *   goals:      [{ id, goal_type, parent_goal_id, ... }]
+ *   capsByGoal: { goalId: [{ id, name, slug }] }
+ */
+export function buildGoalNetwork(goals, capsByGoal) {
+  const orgs = goals.filter((g) => g.goal_type === "org");
+  const orgIds = new Set(orgs.map((o) => o.id));
+  const clusters = orgs.map((o) => ({ center: o, members: goals.filter((g) => g.goal_type !== "org" && g.parent_goal_id === o.id) }));
+  const loose = goals.filter((g) => g.goal_type !== "org" && !orgIds.has(g.parent_goal_id));
+  if (loose.length) clusters.push({ center: null, members: loose });
+
+  const ringR = (n) => Math.max(150, (n * (NODE_W + 24)) / (2 * Math.PI));
+  const cell = 2 * Math.max(0, ...clusters.map((c) => ringR(c.members.length))) + NODE_W + 120;
+  const cols = Math.max(1, Math.ceil(Math.sqrt(clusters.length)));
+  const anchor = new Map();
+  clusters.forEach((c, i) => {
+    const cx = (i % cols) * cell;
+    const cy = Math.floor(i / cols) * cell;
+    if (c.center) anchor.set(c.center.id, { x: cx, y: cy });
+    const r = c.center || c.members.length > 1 ? ringR(c.members.length) : 0;
+    c.members.forEach((g, j) => {
+      const a = (2 * Math.PI * j) / c.members.length - Math.PI / 2;
+      anchor.set(g.id, { x: cx + r * Math.cos(a), y: cy + r * Math.sin(a) });
+    });
+  });
+
+  const nodes = goals.map((g) => ({
+    id: g.id,
+    goal: g,
+    isOrg: g.goal_type === "org",
+    capCount: (capsByGoal[g.id] ?? []).length,
+    anchorX: anchor.get(g.id).x,
+    anchorY: anchor.get(g.id).y,
+  }));
+
+  const edges = [];
+  for (const g of goals) {
+    if (g.goal_type !== "org" && orgIds.has(g.parent_goal_id)) {
+      edges.push({ id: `${g.parent_goal_id}>${g.id}`, source: g.parent_goal_id, target: g.id, kind: "PART_OF" });
+    }
+  }
+  // Goals behind each capability, then every pair of them shares it.
+  const goalsByCap = new Map();
+  const capById = new Map();
+  for (const [goalId, caps] of Object.entries(capsByGoal)) {
+    for (const c of caps) {
+      capById.set(c.id, c);
+      if (!goalsByCap.has(c.id)) goalsByCap.set(c.id, new Set());
+      goalsByCap.get(c.id).add(goalId);
+    }
+  }
+  const known = new Set(goals.map((g) => g.id));
+  const shared = new Map();
+  for (const [capId, ids] of goalsByCap) {
+    const list = [...ids].filter((id) => known.has(id)).sort();
+    for (let i = 0; i < list.length; i++) {
+      for (let j = i + 1; j < list.length; j++) {
+        const key = `${list[i]}~${list[j]}`;
+        if (!shared.has(key)) shared.set(key, { id: key, source: list[i], target: list[j], kind: "SHARES", capabilities: [] });
+        shared.get(key).capabilities.push(capById.get(capId));
+      }
+    }
+  }
+  for (const e of shared.values()) {
+    e.capabilities.sort((a, b) => a.name.localeCompare(b.name));
+    e.weight = e.capabilities.length;
+    edges.push(e);
+  }
+  return { nodes, edges };
+}

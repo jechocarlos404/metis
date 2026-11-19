@@ -210,6 +210,13 @@ export default function CapabilityIsland({ slug, canWrite = false }) {
               <Button size="sm" variant="secondary" style={{ gap: 6 }} onClick={openEdit}>
                 <Icon name="pencil" size={13} />Edit
               </Button>
+              {confirmingDelete && children.length > 0 && (
+                <span style={{ fontSize: "var(--text-xs)", color: "var(--text-body)" }}>
+                  {children.length === 1
+                    ? "Its sub-capability will move to the top level."
+                    : `Its ${children.length} sub-capabilities will move to the top level.`}
+                </span>
+              )}
               <DeleteConfirm armed={confirmingDelete} onArm={() => setConfirmingDelete(true)} onCancel={() => setConfirmingDelete(false)}
                 onConfirm={remove} disabled={saving} label="Delete" confirmLabel="Delete capability" />
             </span>
@@ -319,6 +326,11 @@ export default function CapabilityIsland({ slug, canWrite = false }) {
                 </div>
               ))
             )}
+            <div style={NOTE}>
+              {canWrite
+                ? <>To build it ourselves, link a feature to it on <a href="/features">Features</a>.</>
+                : "To build it ourselves, an editor or admin links a feature to it."}
+            </div>
           </section>
         )}
 

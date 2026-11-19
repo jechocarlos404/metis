@@ -133,8 +133,8 @@ export default function JourneysIsland({ canWrite }) {
     if (saved.id !== selected) select(saved.id);
   }
 
-  async function remove() {
-    await api(`/journeys/${selected}`, { method: "DELETE" });
+  async function remove(id) {
+    await api(`/journeys/${id}`, { method: "DELETE" });
     await loadList(); // the selection falls back to the first one
   }
 
@@ -167,7 +167,8 @@ export default function JourneysIsland({ canWrite }) {
               analysis={analysis}
               canWrite={canWrite}
               onEdit={startEdit}
-              onDelete={() => remove().catch((e) => setError(e.message))}
+              onDelete={remove}
+              onError={setError}
             />
           )}
           {!editing && journeys && journeys.length === 0 && <EmptyState />}
@@ -234,9 +235,14 @@ function Tally({ kinds }) {
   );
 }
 
-function JourneyDetail({ analysis, canWrite, onEdit, onDelete }) {
+function JourneyDetail({ analysis, canWrite, onEdit, onDelete, onError }) {
   const { journey, steps, products, external_products: external, report } = analysis;
   const [confirmingDelete, setConfirmingDelete] = React.useState(false);
+  const [deleting, setDeleting] = React.useState(false);
+  const confirmDelete = () => {
+    setDeleting(true);
+    onDelete(journey.id).catch((e) => { onError(e.message); setDeleting(false); });
+  };
   const productLink = { textDecoration: "none" };
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
@@ -246,7 +252,7 @@ function JourneyDetail({ analysis, canWrite, onEdit, onDelete }) {
           {canWrite && <>
             {!confirmingDelete && <Button size="sm" variant="secondary" onClick={() => onEdit(null)}>Edit</Button>}
             <DeleteConfirm armed={confirmingDelete} onArm={() => setConfirmingDelete(true)} onCancel={() => setConfirmingDelete(false)}
-              onConfirm={onDelete} label="Delete" confirmLabel="Delete journey" />
+              onConfirm={confirmDelete} disabled={deleting} label="Delete" confirmLabel="Delete journey" />
           </>}
         </div>
         {journey.persona && <div style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>For {journey.persona}</div>}

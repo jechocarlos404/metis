@@ -181,7 +181,8 @@ export default function FeaturesIsland({ canWrite = true }) {
   }, [detail, nodeById, productById, goalParent]);
   const visibleReady = productFilter ? ready.filter((f) => matchesProduct(f.id)) : ready;
   const visibleTopo = productFilter && topoOrder ? topoOrder.filter((f) => matchesProduct(f.id)) : topoOrder;
-  const visibleCycles = productFilter ? cycles.filter((c) => c.some((f) => matchesProduct(f.id))) : cycles;
+  // A cycle anywhere stops the build order, so show every cycle when it does.
+  const visibleCycles = productFilter && topoError !== "cycle" ? cycles.filter((c) => c.some((f) => matchesProduct(f.id))) : cycles;
 
   const runImpact = async () => {
     if (!selected) return;
@@ -250,12 +251,17 @@ export default function FeaturesIsland({ canWrite = true }) {
     setDialog({ mode: "edit" });
   };
 
-  // The shared picker speaks names; the API takes ids.
+  // The shared picker speaks names; the API takes ids. Names are not unique
+  // (only slugs are), so keep the ids already linked and look up only new names.
   const draftCapabilityNames = draft.capabilityIds.map((id) => capabilityById.get(id)?.name).filter(Boolean);
-  const setDraftCapabilityNames = (names) => setDraft((d) => ({
-    ...d,
-    capabilityIds: names.map((n) => capabilityByName.get(n.toLowerCase())?.id).filter(Boolean),
-  }));
+  const setDraftCapabilityNames = (names) => setDraft((d) => {
+    const wanted = new Set(names.map((n) => n.toLowerCase()));
+    const kept = d.capabilityIds.filter((id) => wanted.has(capabilityById.get(id)?.name.toLowerCase()));
+    const keptNames = new Set(kept.map((id) => capabilityById.get(id).name.toLowerCase()));
+    const added = names.filter((n) => !keptNames.has(n.toLowerCase()))
+      .map((n) => capabilityByName.get(n.toLowerCase())?.id).filter(Boolean);
+    return { ...d, capabilityIds: [...kept, ...added] };
+  });
 
   // At least one capability, unless the rest are declared unknown.
   const canSave = Boolean(draft.name.trim()) && (draft.capabilityIds.length > 0 || draft.unknownCapabilities);
@@ -746,7 +752,7 @@ function PlanView({ hasFeatures, externalProduct, ready, cycles, topoOrder, topo
   const body = (content) => (
     <div style={{ flex: 1, minWidth: 0, overflowY: "auto", padding: 20 }}>{content}</div>
   );
-  if (!hasFeatures) return body(<div style={{ ...PLAN_CARD, ...NOTE }}>This product has no features to plan yet.</div>);
+  if (!hasFeatures) return body(<div style={{ ...PLAN_CARD, ...NOTE }}>{productFilter === "unattributed" ? "Every feature has a product, so there is nothing here to plan." : "This product has no features to plan yet."}</div>);
   if (externalProduct) return body(<div style={{ ...PLAN_CARD, ...NOTE }}>{externalProduct} is an external product, so none of its features are ours to plan.</div>);
 
   const canWait = cut ? (productFilter ? cut.deferrable.filter((f) => matchesProduct(f.id)) : cut.deferrable) : [];

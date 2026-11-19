@@ -117,9 +117,17 @@ on the Docker frontend against `metis_verify`, a copy of the real database.
 | Chat: cards with waiting changes stay open; one-helper replies say "Metis" | done | build only; not run, since a chat turn spends AI credits |
 | Labels with one copy in `lib/words.js` (chat agents, proposal statuses, stack flags, incoming edges) | done | build + grep; roles.js was already the single copy |
 
+## Third pass (2026-11-20)
+
+| Item | Status | Verified |
+|---|---|---|
+| Features graph smooth: SVG labels, shadow only on focus, labels hidden below 0.5 scale, dimming per shape | done | browser, 462 features: zoom ~29fps to 144fps, drag ~50fps to 144fps |
+| Goals Network view: goals linked by shared capabilities, side panel lists what each pair shares | done | browser: select, list hand-off, Back |
+
 ## Open follow-ups
 
 - A shared capability (e.g. User Authentication) pulls every goal behind it onto
-  each product's Goals tab. Collapsed for now; a sharper rule needs the owner.
+  each product's Goals tab. Collapsed there; the owner chose the Goals Network
+  view as the place to read shared goals.
 - Single-specialist Chat replies now say "Metis"; nothing on them names which
   specialist answered.

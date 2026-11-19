@@ -262,7 +262,6 @@ export default function ProductsIsland({ canWrite = true }) {
       : { mode: "view", ticket: t }),
   };
 
-  const goal = product && goals.find((g) => g.id === product.goal_id);
 
   return (
     <>

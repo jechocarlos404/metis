@@ -4,26 +4,57 @@ import { VizBlock } from "../chat/VizBlock.jsx";
 import { ProposalDraft } from "../chat/ProposalDraft.jsx";
 import { Badge, Button, Icon, IconButton, Select, DeleteConfirm } from "../../ds";
 import { count } from "../../lib/words.js";
+import { Term } from "../shared/Term.jsx";
 import { api } from "../../lib/api.js";
 import { renderChatMarkdown } from "../../lib/chat-markdown.js";
 
 const stepLabel = (name) => name.replace(/_/g, " ");
 const STEP_STATUS = { started: "running…", finished: "done", failed: "failed", proposed: "proposed" };
-const stepArgs = (args) => {
-  const parts = Object.entries(args ?? {}).map(([k, v]) => `${k}: ${typeof v === "string" ? v : JSON.stringify(v)}`);
-  const line = parts.join(" · ");
-  return line.length > 160 ? `${line.slice(0, 160)}…` : line;
+
+// Who answered, in people's words. The orchestrator is the one voice the
+// reader talks to; specialists are named by the job they do.
+const AGENT = {
+  orchestrator: "Metis",
+  spec_decomposer: "Specs and tickets",
+  feature_manager: "Features and capabilities",
+  graph_agent: "Dependencies",
+  strategist: "Delivery strategy",
 };
+const agentLabel = (name) => AGENT[name] ?? (name ? stepLabel(name) : "Metis");
+
+const argValue = (v) => {
+  if (v == null) return "none";
+  if (typeof v !== "object") return String(v);
+  if (Array.isArray(v)) return v.every((x) => x == null || typeof x !== "object") ? v.join(", ") : count(v.length, "item");
+  return count(Object.keys(v).length, "field");
+};
+
+// A step's arguments as readable lines; the exact JSON stays one click away.
+function StepArgs({ args }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 2, color: "var(--text-secondary)" }}>
+      {Object.entries(args).map(([k, v]) => (
+        <div key={k} style={{ overflowWrap: "anywhere" }}>
+          {stepLabel(k)}: <span style={{ color: "var(--text-body)" }}>{argValue(v)}</span>
+        </div>
+      ))}
+      <details>
+        <summary style={{ cursor: "pointer" }}>Raw</summary>
+        <pre style={{ margin: "4px 0 0", fontFamily: "var(--font-mono)", fontSize: 11, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{JSON.stringify(args, null, 2)}</pre>
+      </details>
+    </div>
+  );
+}
 
 // What an agent did on the way to its reply: each tool it called, whether
 // that read or changed data, what it was given and what came back.
-function AgentSteps({ agent, tools, open }) {
+function AgentSteps({ tools }) {
   const proposed = tools.filter((t) => t.status === "proposed").length;
   const failed = tools.filter((t) => t.status === "failed").length;
   return (
-    <details open={open || undefined} style={{ fontSize: "var(--text-xs)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-sm)", background: "var(--surface-card)" }}>
+    <details style={{ fontSize: "var(--text-xs)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-sm)", background: "var(--surface-card)" }}>
       <summary style={{ cursor: "pointer", padding: "6px 10px", color: "var(--text-secondary)" }}>
-        What {agent || "the agent"} did: {count(tools.length, "step", "steps")}
+        What it did: {count(tools.length, "step", "steps")}
         {proposed > 0 && <span style={{ color: "var(--warn-fg)", fontWeight: "var(--weight-medium)" }}> · proposed {count(proposed, "change", "changes")}</span>}
         {failed > 0 && <span style={{ color: "var(--danger-fg)" }}> · {failed} failed</span>}
       </summary>
@@ -31,15 +62,13 @@ function AgentSteps({ agent, tools, open }) {
         {tools.map((t, i) => (
           <li key={i} style={{ color: "var(--text-body)" }}>
             <span style={{ display: "inline-flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-              <span style={{ fontFamily: "var(--font-mono)", color: "var(--text-heading)" }}>{stepLabel(t.name)}</span>
+              <span title={t.name} style={{ color: "var(--text-heading)" }}>{stepLabel(t.name)}</span>
               {t.changes && <Badge tone="warn">changes data</Badge>}
               <span style={{ color: t.status === "failed" ? "var(--danger-fg)" : "var(--text-secondary)" }}>
                 {STEP_STATUS[t.status] ?? t.status}
               </span>
             </span>
-            {t.arguments && Object.keys(t.arguments).length > 0 && (
-              <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-secondary)", overflowWrap: "anywhere" }}>{stepArgs(t.arguments)}</div>
-            )}
+            {t.arguments && Object.keys(t.arguments).length > 0 && <StepArgs args={t.arguments} />}
             {t.summary && <div style={{ color: t.status === "failed" ? "var(--danger-fg)" : "var(--text-body)" }}>→ {t.summary}</div>}
           </li>
         ))}
@@ -65,11 +94,11 @@ function AgentMessage({ agent, text, viz, tools, status }) {
         <span style={{ width: 22, height: 22, borderRadius: "var(--radius-sm)", background: "var(--accent-wash)", color: "var(--text-accent)", display: "flex", alignItems: "center", justifyContent: "center" }}>
           <Icon name="sparkles" size={12} />
         </span>
-        <span style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-2xs)", color: "var(--text-secondary)" }}>{agent || "agent"}</span>
+        <span title={agent} style={{ fontSize: "var(--text-xs)", fontWeight: "var(--weight-medium)", color: "var(--text-secondary)" }}>{agentLabel(agent)}</span>
         {running && <Dot />}
         {running && !text && <span style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>working…</span>}
       </div>
-      {tools && tools.length > 0 && <AgentSteps agent={agent} tools={tools} open={running} />}
+      {tools && tools.length > 0 && <AgentSteps tools={tools} />}
       {text && (
         // renderChatMarkdown escapes raw HTML and unsafe links; see lib/chat-markdown.js.
         <div className="chat-md" style={{ fontSize: "var(--text-sm)", color: "var(--text-body)", lineHeight: "var(--leading-body)" }}
@@ -84,6 +113,7 @@ function AgentMessage({ agent, text, viz, tools, status }) {
 }
 
 const PROPOSAL_TONE = { pending: "warn", applying: "accent", applied: "ok", rejected: "neutral", failed: "danger" };
+const PROPOSAL_STATUS = { pending: "waiting for you", applying: "applying", applied: "applied", rejected: "rejected", failed: "failed" };
 
 // Changes an agent wants to make. Nothing is written until someone with edit
 // access approves; within one reply they are decided in the order proposed.
@@ -122,12 +152,13 @@ function Proposals({ message, canWrite, onDecided }) {
         )}
       </div>
       {!agentDone && pending.length > 0 && <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>You can decide once the agent finishes.</div>}
+      {pending.length > 1 && <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>Changes apply in order; each waits for the one before it.</div>}
       <ol style={{ margin: 0, paddingLeft: 20, display: "flex", flexDirection: "column", gap: 8 }}>
         {list.map((p) => (
           <li key={p.id} style={{ fontSize: "var(--text-xs)", color: "var(--text-body)" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-              <span style={{ fontFamily: "var(--font-mono)", color: "var(--text-heading)" }}>{stepLabel(p.tool_name)}</span>
-              <Badge tone={PROPOSAL_TONE[p.status] ?? "neutral"}>{p.status}</Badge>
+              <span title={p.tool_name} style={{ fontWeight: "var(--weight-medium)", color: "var(--text-heading)" }}>{stepLabel(p.tool_name)}</span>
+              <Badge tone={PROPOSAL_TONE[p.status] ?? "neutral"}><Term dict={PROPOSAL_STATUS} value={p.status} /></Badge>
               <span style={{ flex: 1 }} />
               {canWrite && agentDone && p === next && (
                 <>
@@ -153,27 +184,30 @@ function Proposals({ message, canWrite, onDecided }) {
 
 function SpecialistCard({ message, canWrite, onDecided }) {
   const running = message.status === "running";
+  const waiting = (message.proposals ?? []).filter((p) => p.status === "pending").length;
   return (
-    <div style={{ border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", padding: 12, display: "flex", flexDirection: "column", gap: 8, background: "var(--surface-inset)" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-        <span style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-xs)", color: "var(--text-heading)" }}>{message.agent_name}</span>
-        <Badge tone={running ? "accent" : message.status === "done" ? "ok" : "danger"}>{running ? "working" : message.status}</Badge>
-        {running && <Dot />}
-      </div>
-      {message.task && <div style={{ fontSize: "var(--text-xs)", color: "var(--text-body)" }}>Task: {message.task}</div>}
-      {message.tool_calls?.length > 0 && <AgentSteps agent={message.agent_name} tools={message.tool_calls} open={running} />}
-      {message.content && (
-        <details>
-          <summary style={{ cursor: "pointer", fontSize: "var(--text-xs)", color: "var(--text-accent)" }}>What it found</summary>
-          <div className="chat-md" style={{ marginTop: 6, fontSize: "var(--text-sm)", color: "var(--text-body)", lineHeight: "var(--leading-body)" }}
+    <details style={{ border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", background: "var(--surface-inset)" }}>
+      <summary style={{ cursor: "pointer", padding: "8px 12px", fontSize: "var(--text-xs)", color: "var(--text-secondary)", lineHeight: 1.8 }}>
+        <span title={message.agent_name} style={{ fontWeight: "var(--weight-medium)", color: "var(--text-heading)", marginRight: 8 }}>{agentLabel(message.agent_name)}</span>
+        <Badge tone={running ? "accent" : message.status === "done" ? "ok" : "danger"}><Term dict={SPECIALIST_STATUS} value={message.status} /></Badge>
+        {message.task && <span style={{ marginLeft: 8 }}>{message.task.length > 90 ? `${message.task.slice(0, 90)}…` : message.task}</span>}
+        {waiting > 0 && <span style={{ marginLeft: 8, color: "var(--warn-fg)", fontWeight: "var(--weight-medium)" }}>· {count(waiting, "change", "changes")} waiting for you</span>}
+      </summary>
+      <div style={{ padding: "0 12px 12px", display: "flex", flexDirection: "column", gap: 8 }}>
+        {message.task && <div style={{ fontSize: "var(--text-xs)", color: "var(--text-body)" }}>Task: {message.task}</div>}
+        {message.tool_calls?.length > 0 && <AgentSteps tools={message.tool_calls} />}
+        {message.content && (
+          <div className="chat-md" style={{ fontSize: "var(--text-sm)", color: "var(--text-body)", lineHeight: "var(--leading-body)" }}
             dangerouslySetInnerHTML={{ __html: renderChatMarkdown(message.content) }} />
-        </details>
-      )}
-      {RUN_NOTE[message.status] && <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>{RUN_NOTE[message.status]}</div>}
-      <Proposals message={message} canWrite={canWrite} onDecided={onDecided} />
-    </div>
+        )}
+        {RUN_NOTE[message.status] && <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>{RUN_NOTE[message.status]}</div>}
+        <Proposals message={message} canWrite={canWrite} onDecided={onDecided} />
+      </div>
+    </details>
   );
 }
+
+const SPECIALIST_STATUS = { running: "working", done: "done", failed: "failed", interrupted: "stopped" };
 
 // One request: the orchestrator's run, the specialists it delegated to (in
 // parallel), and, when there were several, its combined answer.
@@ -209,7 +243,7 @@ function TurnBody({ run, children, canWrite, onDecided }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
       <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>
-        The orchestrator split this across {count(children.length, "agent", "agents")} working at the same time
+        Metis split this across {count(children.length, "helper", "helpers")} working at the same time
         {working > 0 ? `, ${working} still working` : ""}.
       </div>
       {children.map((c) => <SpecialistCard key={c.id} message={c} canWrite={canWrite} onDecided={onDecided} />)}
@@ -229,6 +263,7 @@ export default function ChatIsland({ threadId: initialThreadId = null, canWrite 
   const [error, setError] = React.useState(null);
   const [confirmingDelete, setConfirmingDelete] = React.useState(false);
   const [available, setAvailable] = React.useState(null); // null until /chat/status answers
+  const [products, setProducts] = React.useState([]);
   const scrollRef = React.useRef(null);
   const stickRef = React.useRef(true); // follow new content only while the reader is at the bottom
   const threadRef = React.useRef(threadId);
@@ -237,7 +272,20 @@ export default function ChatIsland({ threadId: initialThreadId = null, canWrite 
   React.useEffect(() => {
     api("/chat/threads").then(setThreads).catch((e) => setError(`Couldn't load threads: ${e.message}`));
     api("/chat/status").then((s) => setAvailable(!!s.available)).catch(() => setAvailable(null));
+    api("/products").then(setProducts).catch(() => {});
   }, []);
+
+  // Starter questions built from what is in metis, so each one has an answer.
+  const examples = React.useMemo(() => {
+    const byName = (a, b) => a.name.localeCompare(b.name);
+    const ours = products.filter((p) => !p.external).sort(byName)[0];
+    const theirs = products.filter((p) => p.external).sort(byName)[0];
+    return [
+      ours && `What could we build next from what ${ours.name} already has?`,
+      "Which capabilities are shared by the most products?",
+      theirs && `How much of ${theirs.name} could we build?`,
+    ].filter(Boolean);
+  }, [products]);
 
   // /chat?prompt=… — launch from Products (decompose, strategy, etc.)
   const [launchPrompt, setLaunchPrompt] = React.useState(null);
@@ -365,15 +413,23 @@ export default function ChatIsland({ threadId: initialThreadId = null, canWrite 
         meta={activeThread ? `thread: ${activeThread.title}` : "new thread"}
         actions={
           <>
-            <Select
-              value={threadId ?? ""}
-              onChange={(e) => switchThread(e.target.value)}
-              style={{ width: 180 }}
-              options={[
-                ...(canWrite ? [{ value: "", label: "New thread…" }] : [{ value: "", label: "Select thread…" }]),
-                ...threads.map((t) => ({ value: t.id, label: t.title })),
-              ]}
-            />
+            {canWrite && threadId && (
+              <Button size="sm" variant="secondary" onClick={() => switchThread(null)} style={{ gap: 6 }}>
+                <Icon name="plus" size={12} /> New thread
+              </Button>
+            )}
+            {threads.length > 0 && (
+              <Select
+                value={threadId ?? ""}
+                onChange={(e) => switchThread(e.target.value)}
+                aria-label="Thread"
+                style={{ width: 180 }}
+                options={[
+                  { value: "", label: canWrite ? "New thread" : "Pick a thread…" },
+                  ...threads.map((t) => ({ value: t.id, label: t.title })),
+                ]}
+              />
+            )}
             {canWrite && threadId && (
               <DeleteConfirm armed={confirmingDelete} onArm={() => setConfirmingDelete(true)} onCancel={() => setConfirmingDelete(false)} onConfirm={deleteThread} disabled={busy || running}
                 label="Delete thread" confirmLabel={"Delete thread"} />
@@ -395,11 +451,18 @@ export default function ChatIsland({ threadId: initialThreadId = null, canWrite 
           {messages.length === 0 && (
             <div style={{ border: "1px dashed var(--border-default)", borderRadius: "var(--radius-md)", padding: 20, color: "var(--text-secondary)", fontSize: "var(--text-sm)", lineHeight: "var(--leading-body)" }}>
               Ask about the inventory in plain words. For example:
-              <ul style={{ margin: "8px 0 0", paddingLeft: 18 }}>
-                <li>Which capabilities do two or more of our products share?</li>
-                <li>Break the Petrogreen goal into features.</li>
-                <li>What would we need to build to match Strava's route planning?</li>
-              </ul>
+              {canWrite && available !== false ? (
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 6, marginTop: 8 }}>
+                  {examples.map((q) => (
+                    <Button key={q} size="sm" variant="secondary" disabled={busy || running} onClick={() => send(q)}
+                      style={{ whiteSpace: "normal", height: "auto", minHeight: 28, padding: "4px 10px", textAlign: "left" }}>{q}</Button>
+                  ))}
+                </div>
+              ) : (
+                <ul style={{ margin: "8px 0 0", paddingLeft: 18 }}>
+                  {examples.map((q) => <li key={q}>{q}</li>)}
+                </ul>
+              )}
               <div style={{ marginTop: 10 }}>Agents keep working if you leave this page. Anything they want to change waits for your approval.</div>
             </div>
           )}

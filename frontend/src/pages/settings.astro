@@ -1,0 +1,10 @@
+---
+import AppLayout from "../layouts/AppLayout.astro";
+import SettingsIsland from "../components/islands/SettingsIsland.jsx";
+
+const role = Astro.locals.user?.role ?? null;
+---
+
+<AppLayout title="Settings">
+  <SettingsIsland client:load role={role} />
+</AppLayout>

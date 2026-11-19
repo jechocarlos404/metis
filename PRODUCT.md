@@ -36,8 +36,9 @@ are hidden until someone asks for them or data exists.
 - **Honest numbers.** Capability names match exactly; near names are offered,
   never assumed. Coverage is a lower bound. A gap is an answer. Never add fuzzy
   auto-matching to reduce friction — offer exact picks instead.
-- **Only real data.** No demo or sample rows. Anything guessed is marked
-  *unverified* and never counted as ours.
+- **Only real data.** No demo or sample rows. (Proposed, not yet built:
+  guesses for the technology plane, marked *unverified* and never counted as
+  ours — see docs/ux-overhaul-status.md.)
 - **Plain words on screen, raw values underneath.** Humans see "needs",
   "stable", "planned"; the raw value (`DEPENDS_ON`, `ga`, `pending`) is one
   hover away (`title`) and stays verbatim in Chat tool output, MCP and logs.

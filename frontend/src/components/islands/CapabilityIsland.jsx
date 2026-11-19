@@ -326,11 +326,6 @@ export default function CapabilityIsland({ slug, canWrite = false }) {
                 </div>
               ))
             )}
-            <div style={NOTE}>
-              {canWrite
-                ? <>To build it ourselves, link a feature to it on <a href="/features">Features</a>.</>
-                : "To build it ourselves, an editor or admin links a feature to it."}
-            </div>
           </section>
         )}
 

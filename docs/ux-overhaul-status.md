@@ -82,10 +82,30 @@ on the Docker frontend against `metis_verify`, a copy of the real database.
 | Fix 11 toggle + delete patterns | S6, S7 | done | code |
 | Fix 12 Stacks picker | S7 | done | code (bug was real) |
 | Viewers can run the MVP cut (read-by-POST) | me | done | tests |
-| Guide + README | me | done | browser (Guide) |
+| Guide + README | me | done | browser (Guide, on real data) |
 | Unverified tech guesses | — | deferred | proposal: docs/proposal-unverified-tech.md |
 
 \* shown only when data exists.
+
+### Against the audit's causes and journeys
+
+| Audit item | Status | Where |
+|---|---|---|
+| Cause 1 · nav is the ontology | done | grouped by job (S1) |
+| Cause 2 · each screen does three jobs | done | Features panel slimmed + Plan tab (S4); Products profile tabs (S3); Capabilities list split from one capability page (S5) |
+| Cause 3 · jargon, many words for one idea | done | `lib/words.js` + `<Term>`; one VERDICT/NEED vocabulary. Some labels still defined locally (follow-ups) |
+| Cause 4 · no way in | done | Get started on an empty instance; seed tools in Settings |
+| Cause 5 · three products share one shell | partial | pipeline is on demand under a product's Plan tab; Tech/Stacks hidden until data; Features and its Plan view stay in the nav under Build & buy |
+| Journey 1 · first run | done | Get started (browser, empty database) |
+| Journey 2 · could we build this idea | done | picker + Check + Save as idea (browser, real data) |
+| Journey 3 · how much of product X | done | one wording on Home and the product profile |
+| Journey 4 · map a product by hand | partial | order stated in the Guide only; no in-screen checklist |
+| Journey 5 · build or buy | deferred | section hidden until technology data exists; no write path added (see the unverified-tech proposal) |
+| Journey 6 · plan delivery | done | Plan tab on demand, Approve all in Chat, Features Plan view |
+| Journey 7 · Chat | done | examples, readable steps, plain statuses (browser) |
+| Journey 8 · read-only viewer | done in UI | browser as viewer; the stack runs with `AUTH_ENABLED=false`, so backend refusals are covered by unit tests, not end to end |
+
+Marked "code" above: implemented and read, not clicked through.
 
 ## Open follow-ups
 

@@ -1,10 +1,10 @@
 /**
  * Shared vocabulary for the tech-plane screens.
  *
- * Every value here is rendered verbatim — snake_case stays snake_case, and a
- * stance is never title-cased. A screenshot, a log line and a chat transcript
- * have to stay greppable against each other, which stops being true the moment
- * one surface prettifies `in_progress` into "In Progress".
+ * The constants here are the API's raw enum values (tones, facet orders).
+ * Screens show people plain words and keep the raw value one hover away
+ * (<Term>, lib/words.js; see PRODUCT.md). Chat tool output, MCP and logs keep
+ * the raw values verbatim so they stay greppable against each other.
  */
 
 /** Adoption stance → Badge tone. From the design handoff, unchanged. */

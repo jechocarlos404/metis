@@ -3,7 +3,10 @@ import { PageHeader } from "../shell/PageHeader.jsx";
 import { Badge, Button, Input, Select } from "../../ds";
 import { api } from "../../lib/api.js";
 import { CARD, FIT_TONE, MICRO, MONO, STANCE_TONE } from "../../lib/ontology.js";
-import { count } from "../../lib/words.js";
+import { FIT, count } from "../../lib/words.js";
+import { Term } from "../shared/Term.jsx";
+
+const OFF_STACK = "not in the product's stack";
 
 /**
  * `/tech/[slug]` — everything known about one technology, plus the two things
@@ -116,7 +119,7 @@ export default function TechDetailIsland({ slug, canWrite = false }) {
           detail.adoption ? (
             <Badge tone={STANCE_TONE[detail.adoption]}>{detail.adoption}</Badge>
           ) : (
-            <span style={{ ...MONO, color: "var(--text-secondary)" }}>no stance taken</span>
+            <span style={{ ...MONO, color: "var(--text-secondary)" }}>no stance yet</span>
           )
         }
       />
@@ -132,7 +135,7 @@ export default function TechDetailIsland({ slug, canWrite = false }) {
             <Fact label="kind">{detail.kind}</Fact>
             <Fact label="layer">{detail.layer ?? "—"}</Fact>
             <Fact label="vendor">{detail.vendor?.name ?? "—"}</Fact>
-            <Fact label="bus factor">
+            <Fact label="maintainers">
               {detail.vendor?.bus_factor ?? "—"}
               {detail.vendor?.bus_factor === 1 && (
                 <span style={{ marginLeft: 6 }}><Badge tone="danger">one maintainer</Badge></span>
@@ -155,7 +158,7 @@ export default function TechDetailIsland({ slug, canWrite = false }) {
         <Section label="satisfies" meta={count(detail.satisfactions.length, "capability", "capabilities")}>
           {detail.satisfactions.length === 0 ? (
             <span style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>
-              In the catalog, not a candidate for anything. That is a normal state.
+              Not linked to any capability yet.
             </span>
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
@@ -166,7 +169,7 @@ export default function TechDetailIsland({ slug, canWrite = false }) {
                     <a href={cap ? `/capabilities/${cap.slug}` : "#"} style={{ flex: 1, fontSize: "var(--text-sm)", color: "var(--text-heading)", textDecoration: "none", minWidth: 0 }}>
                       {cap?.name ?? s.capability_id}
                     </a>
-                    <Badge tone={FIT_TONE[s.fit] ?? "neutral"}>{s.fit}</Badge>
+                    <Badge tone={FIT_TONE[s.fit] ?? "neutral"}><Term dict={FIT} value={s.fit} /></Badge>
                     {s.notes && <span style={{ ...MONO, flex: 2, minWidth: 0 }}>{s.notes}</span>}
                   </div>
                 );
@@ -177,12 +180,12 @@ export default function TechDetailIsland({ slug, canWrite = false }) {
 
         {/* Count-led. required is a break; optional is an inconvenience. */}
         <Section
-          label="blast radius"
-          meta={`${count(breaks.length, "product")} · ${count(required, "required slot")} · ${offStack} off the approved stack`}
+          label="What breaks without it"
+          meta={`${count(breaks.length, "product")} · ${count(required, "required slot")}${offStack ? ` · ${offStack} ${OFF_STACK}` : ""}`}
         >
           {breaks.length === 0 ? (
             <span style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>
-              {radius?.unresolved?.[0]?.reason ?? "No product records using this."}
+              No product records using it, so nothing breaks.
             </span>
           ) : (
             breaks.map((b, i) => (
@@ -191,7 +194,7 @@ export default function TechDetailIsland({ slug, canWrite = false }) {
                 <span style={MONO}>{b.layer ?? "—"}</span>
                 <span style={{ ...MONO, flex: 1, minWidth: 0 }}>{b.role ?? "—"}</span>
                 <Badge tone={b.required ? "danger" : "neutral"}>{b.required ? "required" : "optional"}</Badge>
-                {b.off_stack && <Badge tone="warn">off_stack</Badge>}
+                {b.off_stack && <Badge tone="warn"><span title="off_stack" data-raw="off_stack">{OFF_STACK}</span></Badge>}
               </div>
             ))
           )}
@@ -200,17 +203,17 @@ export default function TechDetailIsland({ slug, canWrite = false }) {
               <span style={MICRO}>alternatives</span>
               {radius.alternatives.map((a) => (
                 <a key={a.tech} href={`/tech/${a.tech}`} style={{ ...MONO, textDecoration: "none", border: "1px solid var(--border-default)", borderRadius: "var(--radius-xs)", padding: "2px 8px" }}>
-                  {a.tech} · {a.fit} · {a.stance ?? "no stance"}
+                  {a.tech} · <Term dict={FIT} value={a.fit} />{a.stance ? ` · ${a.stance}` : ""}
                 </a>
               ))}
             </div>
           )}
         </Section>
 
-        <Section label="who has touched this" meta={count(encounters?.answer.length ?? 0, "person", "people")}>
+        <Section label="Who has used it" meta={count(encounters?.answer.length ?? 0, "person", "people")}>
           {(encounters?.answer.length ?? 0) === 0 ? (
             <span style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>
-              Nobody has recorded touching this.
+              Nobody has recorded using this yet.{canWrite ? " Add a handle below." : ""}
             </span>
           ) : (
             <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-2)" }}>
@@ -240,7 +243,7 @@ export default function TechDetailIsland({ slug, canWrite = false }) {
                 {saving ? "recording" : "record"}
               </Button>
               <span style={{ ...MONO, color: "var(--text-secondary)" }}>
-                a handle and a depth — no levels, no endorsements
+                your handle and how far you went with it
               </span>
             </form>
           )}

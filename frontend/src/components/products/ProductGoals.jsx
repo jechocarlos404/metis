@@ -1,5 +1,6 @@
 import React from "react";
 import { StatusBadge } from "../../ds";
+import { count } from "../../lib/words.js";
 
 // A product serves one product goal (Product.goal_id), which may sit under an
 // org goal. Same link Goals uses to list a goal's products.
@@ -50,27 +51,31 @@ function GoalsBehindCapabilities({ product, goals, features, capabilities, motiv
   const rows = goals.filter((g) => byGoal.has(g.id));
   if (rows.length === 0) return null;
   return (
-    <section style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-      <div style={{ fontSize: "var(--text-sm)", fontWeight: "var(--weight-semibold)", color: "var(--text-heading)" }}>
-        Goals behind capabilities this product uses
+    <details style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      {/* Closed by default: shared capabilities pull in other products' goals, so this list runs long. */}
+      <summary style={{ cursor: "pointer", fontSize: "var(--text-sm)", fontWeight: "var(--weight-semibold)", color: "var(--text-heading)" }}>
+        {count(rows.length, "goal")} behind capabilities this product uses
+      </summary>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8 }}>
+        {rows.map((g) => (
+          <div key={g.id} style={{ display: "grid", gridTemplateColumns: "3.5rem minmax(0, 1fr) auto", gap: 10, alignItems: "baseline", fontSize: "var(--text-sm)" }}>
+            <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-secondary)" }}>{g.display_id}</span>
+            <span>
+              <a href={`/goals?goal=${g.id}`}>{g.title}</a>
+              <span style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>
+                {" "}through{" "}
+                {byGoal.get(g.id).map((c, i) => (
+                  <React.Fragment key={c.id}>
+                    {i > 0 && ", "}
+                    <a href={`/capabilities/${c.slug}`}>{c.name}</a>
+                  </React.Fragment>
+                ))}
+              </span>
+            </span>
+            <StatusBadge status={g.status} />
+          </div>
+        ))}
       </div>
-      {rows.map((g) => (
-        <div key={g.id} style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", fontSize: "var(--text-sm)" }}>
-          <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-secondary)" }}>{g.display_id}</span>
-          <a href={`/goals?goal=${g.id}`}>{g.title}</a>
-          <span style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>
-            through{" "}
-            {byGoal.get(g.id).map((c, i) => (
-              <React.Fragment key={c.id}>
-                {i > 0 && ", "}
-                <a href={`/capabilities/${c.slug}`}>{c.name}</a>
-              </React.Fragment>
-            ))}
-          </span>
-          <span style={{ flex: 1 }} />
-          <StatusBadge status={g.status} />
-        </div>
-      ))}
-    </section>
+    </details>
   );
 }

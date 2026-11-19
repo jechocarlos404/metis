@@ -444,7 +444,7 @@ export default function ChatIsland({ threadId: initialThreadId = null, canWrite 
           {available === false && (
             <div role="status" style={{ border: "1px solid var(--border-default)", background: "var(--surface-inset)", borderRadius: "var(--radius-md)", padding: 16, fontSize: "var(--text-sm)", color: "var(--text-body)" }}>
               Chat can't answer yet: no AI model is connected to this metis.{" "}
-              {isAdmin ? <>Connect one in <a href="/admin">LLM Config</a>.</> : "Ask an admin to connect one."}
+              {isAdmin ? <>Connect one in <a href="/admin">AI models</a>.</> : "Ask an admin to connect one."}
               {" "}Everything else in metis works without it.
             </div>
           )}

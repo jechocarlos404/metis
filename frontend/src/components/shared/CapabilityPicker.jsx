@@ -41,7 +41,11 @@ export function CapabilityPicker({ id = "capability-picker", options, value, onC
       if (matches[active]) add(matches[active].name);
       else if (canAddNew) add(query.trim());
     } else if (e.key === "Backspace" && !query && value.length) remove(value[value.length - 1]);
-    else if (e.key === "Escape") setOpen(false);
+    else if (e.key === "Escape" && open && (matches.length > 0 || canAddNew)) {
+      // Close the list only; don't let a surrounding Dialog close too.
+      e.stopPropagation();
+      setOpen(false);
+    }
   };
 
   const listId = `${id}-list`;

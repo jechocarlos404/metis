@@ -45,6 +45,8 @@ export const EDGE = {
   BLOCKS: "blocks",
   RELATES_TO: "related to",
 };
+// The same edges read from the other end: X DEPENDS_ON this → "needed by X".
+export const EDGE_INCOMING = { DEPENDS_ON: "needed by", BLOCKS: "blocked by", RELATES_TO: "related to" };
 
 /** Feature layer facet. */
 export const LAYER = {
@@ -60,6 +62,22 @@ export const FIT = {
   partial: "partial fit",
   workaround: "workaround",
 };
+
+/** Stack slot flags. */
+export const FLAG = { gap: "empty", redundant: "duplicate", drift: "not in a slot", workaround: "workaround", trial: "on trial" };
+
+// Who answered in Chat. The orchestrator is the one voice the reader talks
+// to; specialists are named by the job they do.
+export const AGENT = {
+  orchestrator: "Metis",
+  spec_decomposer: "Specs and tickets",
+  feature_manager: "Features and capabilities",
+  graph_agent: "Dependencies",
+  strategist: "Delivery strategy",
+};
+
+/** A change a Chat agent proposed. */
+export const PROPOSAL_STATUS = { pending: "waiting for you", applying: "applying", applied: "applied", rejected: "rejected", failed: "failed" };
 
 /** Priority 1–5, 1 most urgent. */
 export const priorityLabel = (p) => (p == null ? "no priority" : `P${p}`);

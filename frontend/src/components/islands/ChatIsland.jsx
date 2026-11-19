@@ -3,7 +3,7 @@ import { PageHeader } from "../shell/PageHeader.jsx";
 import { VizBlock } from "../chat/VizBlock.jsx";
 import { ProposalDraft } from "../chat/ProposalDraft.jsx";
 import { Badge, Button, Icon, IconButton, Select, DeleteConfirm } from "../../ds";
-import { count } from "../../lib/words.js";
+import { AGENT, PROPOSAL_STATUS, count } from "../../lib/words.js";
 import { Term } from "../shared/Term.jsx";
 import { api } from "../../lib/api.js";
 import { renderChatMarkdown } from "../../lib/chat-markdown.js";
@@ -11,15 +11,6 @@ import { renderChatMarkdown } from "../../lib/chat-markdown.js";
 const stepLabel = (name) => name.replace(/_/g, " ");
 const STEP_STATUS = { started: "running…", finished: "done", failed: "failed", proposed: "proposed" };
 
-// Who answered, in people's words. The orchestrator is the one voice the
-// reader talks to; specialists are named by the job they do.
-const AGENT = {
-  orchestrator: "Metis",
-  spec_decomposer: "Specs and tickets",
-  feature_manager: "Features and capabilities",
-  graph_agent: "Dependencies",
-  strategist: "Delivery strategy",
-};
 const agentLabel = (name) => AGENT[name] ?? (name ? stepLabel(name) : "Metis");
 
 const argValue = (v) => {
@@ -113,7 +104,6 @@ function AgentMessage({ agent, text, viz, tools, status }) {
 }
 
 const PROPOSAL_TONE = { pending: "warn", applying: "accent", applied: "ok", rejected: "neutral", failed: "danger" };
-const PROPOSAL_STATUS = { pending: "waiting for you", applying: "applying", applied: "applied", rejected: "rejected", failed: "failed" };
 
 // Changes an agent wants to make. Nothing is written until someone with edit
 // access approves; within one reply they are decided in the order proposed.

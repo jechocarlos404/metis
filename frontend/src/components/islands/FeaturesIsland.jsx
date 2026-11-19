@@ -1,7 +1,7 @@
 import React from "react";
 import { PageHeader } from "../shell/PageHeader.jsx";
 import { Button, Checkbox, Dialog, Icon, IconButton, Input, PriorityBadge, Select, StatusBadge, Tabs, Tag, DeleteConfirm } from "../../ds";
-import { EDGE, LAYER, PRIORITY_HINT, count, plain, priorityLabel, productOptions, statusLabel } from "../../lib/words.js";
+import { EDGE, EDGE_INCOMING, LAYER, PRIORITY_HINT, count, plain, priorityLabel, productOptions, statusLabel } from "../../lib/words.js";
 import { Term } from "../shared/Term.jsx";
 import { CapabilityPicker } from "../shared/CapabilityPicker.jsx";
 import { api, ApiError } from "../../lib/api.js";
@@ -11,8 +11,6 @@ import { useParamRestore, writeParams } from "../../lib/url-state.js";
 
 const TABS = new Set(["directory", "graph", "plan"]);
 const EDGE_KINDS = ["DEPENDS_ON", "BLOCKS", "RELATES_TO"];
-// The same edges read from the other end: X DEPENDS_ON this → "needed by X".
-const EDGE_INCOMING = { DEPENDS_ON: "needed by", BLOCKS: "blocked by", RELATES_TO: "related to" };
 
 export default function FeaturesIsland({ canWrite = true }) {
   const [tab, setTab] = React.useState("directory");

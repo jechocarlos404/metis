@@ -1,14 +1,22 @@
 import React from "react";
 import { PageHeader } from "../shell/PageHeader.jsx";
 import { Button, Checkbox, Dialog, Icon, IconButton, Input, PriorityBadge, Select, StatusBadge, Tabs, Tag, DeleteConfirm } from "../../ds";
-import { productOptions } from "../../lib/words.js";
+import { EDGE, LAYER, PRIORITY_HINT, count, plain, priorityLabel, productOptions, statusLabel } from "../../lib/words.js";
+import { Term } from "../shared/Term.jsx";
+import { CapabilityPicker } from "../shared/CapabilityPicker.jsx";
 import { api, ApiError } from "../../lib/api.js";
 import { FeatureGraphView } from "../graph/FeatureGraphView.jsx";
 import { pressable } from "../../lib/pressable.js";
 import { useParamRestore, writeParams } from "../../lib/url-state.js";
 
+const TABS = new Set(["directory", "graph", "plan"]);
+const EDGE_KINDS = ["DEPENDS_ON", "BLOCKS", "RELATES_TO"];
+// The same edges read from the other end: X DEPENDS_ON this → "needed by X".
+const EDGE_INCOMING = { DEPENDS_ON: "needed by", BLOCKS: "blocked by", RELATES_TO: "related to" };
+
 export default function FeaturesIsland({ canWrite = true }) {
   const [tab, setTab] = React.useState("directory");
+  const [loaded, setLoaded] = React.useState(false);
   const [layout, setLayout] = React.useState({ nodes: [], edges: [] });
   const [selected, setSelected] = React.useState(null);
   const [detail, setDetail] = React.useState(null);
@@ -23,30 +31,31 @@ export default function FeaturesIsland({ canWrite = true }) {
   const [goalParent, setGoalParent] = React.useState(new Map()); // goal id -> parent goal id
   const [productFilter, setProductFilter] = React.useState(""); // "" | "unattributed" | product id
 
-  // ?feature=<id>&tab=graph&product=<id>: linkable, and Back restores the previous view.
+  // ?feature=<id>&tab=graph|plan&product=<id>: linkable, and Back restores the previous view.
   useParamRestore("feature", (v) => v && setSelected(v));
-  useParamRestore("tab", (v) => setTab(v === "graph" ? "graph" : "directory"));
+  useParamRestore("tab", (v) => setTab(TABS.has(v) ? v : "directory"));
   useParamRestore("product", (v) => setProductFilter(v ?? ""));
   const selectFeature = React.useCallback((id) => {
     setSelected(id);
     writeParams({ feature: id }, { push: true });
   }, []);
-  const changeTab = (t) => { setTab(t); writeParams({ tab: t === "graph" ? "graph" : "" }, { push: true }); };
+  const changeTab = (t) => { setTab(t); writeParams({ tab: t === "directory" ? "" : t }, { push: true }); };
   const changeProduct = (v) => { setProductFilter(v); writeParams({ product: v }, { push: true }); };
   const [draft, setDraft] = React.useState(EMPTY_DRAFT);
-  const [capQuery, setCapQuery] = React.useState("");
   const [edgeDraft, setEdgeDraft] = React.useState({ kind: "DEPENDS_ON", targetId: "" });
   const [saving, setSaving] = React.useState(false);
   const [confirmingDelete, setConfirmingDelete] = React.useState(false);
   const [error, setError] = React.useState(null);
-  const [cutTargets, setCutTargets] = React.useState([]); // {kind: "feature"|"capability", id}
+  const [cutTarget, setCutTarget] = React.useState("");
   const [cut, setCut] = React.useState(null);
+  const [cutError, setCutError] = React.useState(null);
   const [cutting, setCutting] = React.useState(false);
+  const [showCut, setShowCut] = React.useState(false);
   const [ready, setReady] = React.useState([]);
   const [why, setWhy] = React.useState(null);
   const [cycles, setCycles] = React.useState([]);
   const [topoOrder, setTopoOrder] = React.useState(null);
-  const [topoError, setTopoError] = React.useState(null);
+  const [topoError, setTopoError] = React.useState(null); // null | "cycle" | "failed"
 
   const load = React.useCallback(async () => {
     const [data, caps, edges, productList, readyData, cyclesData] = await Promise.all([
@@ -64,23 +73,28 @@ export default function FeaturesIsland({ canWrite = true }) {
     setProducts(productList);
     setReady(readyData.ready ?? []);
     setCycles(cyclesData.cycles ?? []);
+    setLoaded(true);
     try {
       const topoData = await api("/graph/topo");
       setTopoOrder(topoData.order ?? []);
       setTopoError(null);
     } catch (e) {
       setTopoOrder(null);
-      if (e instanceof ApiError && e.status === 409 && typeof e.detail === "object" && e.detail?.message) {
-        setTopoError(e.detail.message);
-      } else {
-        setTopoError(String(e.message));
-      }
+      setTopoError(e instanceof ApiError && e.status === 409 ? "cycle" : "failed");
     }
     setSelected((sel) => sel && data.nodes.some((n) => n.id === sel) ? sel : data.nodes[0]?.id ?? null);
   }, []);
 
   const capabilityById = React.useMemo(
     () => new Map(capabilities.map((c) => [c.id, c])),
+    [capabilities]
+  );
+  const capabilityByName = React.useMemo(
+    () => new Map(capabilities.map((c) => [c.name.toLowerCase(), c])),
+    [capabilities]
+  );
+  const capabilityOptions = React.useMemo(
+    () => capabilities.map((c) => ({ id: c.id, name: c.name, slug: c.slug })),
     [capabilities]
   );
 
@@ -144,7 +158,7 @@ export default function FeaturesIsland({ canWrite = true }) {
   const directory = (results ?? layout.nodes).filter((n) => matchesProduct(n.id));
 
   // The product filter removes other products' features from the graph and the
-  // panels (fading them was invisible at real scale, so the filter looked broken).
+  // plan (fading them was invisible at real scale, so the filter looked broken).
   const visibleLayout = React.useMemo(() => {
     if (!productFilter) return layout;
     const keep = new Set(layout.nodes.filter((n) => matchesProduct(n.id)).map((n) => n.id));
@@ -167,55 +181,53 @@ export default function FeaturesIsland({ canWrite = true }) {
   }, [detail, nodeById, productById, goalParent]);
   const visibleReady = productFilter ? ready.filter((f) => matchesProduct(f.id)) : ready;
   const visibleTopo = productFilter && topoOrder ? topoOrder.filter((f) => matchesProduct(f.id)) : topoOrder;
+  const visibleCycles = productFilter ? cycles.filter((c) => c.some((f) => matchesProduct(f.id))) : cycles;
 
   const runImpact = async () => {
     if (!selected) return;
-    setImpact(await api(`/graph/impact/${selected}`));
-  };
-
-  // Editing targets invalidates a previous cut — the overlay must never lie.
-  const addCutTarget = (kind, id) => {
-    setCutTargets((ts) => (ts.some((t) => t.kind === kind && t.id === id) ? ts : [...ts, { kind, id }]));
-    setCut(null);
-  };
-  const removeCutTarget = (kind, id) => {
-    setCutTargets((ts) => ts.filter((t) => !(t.kind === kind && t.id === id)));
-    setCut(null);
-  };
-  const clearCut = () => {
-    setCutTargets([]);
-    setCut(null);
-  };
-  const runCut = async () => {
-    setCutting(true);
     setError(null);
     try {
-      setCut(await api("/graph/mvp-cut", {
-        method: "POST",
-        body: {
-          features: cutTargets.filter((t) => t.kind === "feature").map((t) => t.id),
-          capabilities: cutTargets.filter((t) => t.kind === "capability").map((t) => t.id),
-        },
-      }));
+      setImpact(await api(`/graph/impact/${selected}`));
+    } catch {
+      setError("Could not work out what depends on this feature.");
+    }
+  };
+
+  // A new target invalidates the previous cut: the overlay must never lie.
+  const pickCutTarget = (id) => {
+    setCutTarget(id);
+    setCut(null);
+    setCutError(null);
+    setShowCut(false);
+  };
+  const clearCut = () => pickCutTarget("");
+  const runCut = async () => {
+    if (!cutTarget) return;
+    setCutting(true);
+    setCutError(null);
+    try {
+      setCut(await api("/graph/mvp-cut", { method: "POST", body: { features: [cutTarget], capabilities: [] } }));
     } catch (e) {
-      setError(String(e.message));
+      setCut(null);
+      setCutError(e instanceof ApiError && e.status === 409
+        ? "What this feature needs loops back on itself. Break the circular dependency first."
+        : "Could not work out the smallest version. Try again.");
     } finally {
       setCutting(false);
     }
   };
 
   const cutStates = React.useMemo(() => {
-    if (!cut) return null;
+    if (!cut || !showCut) return null;
     const states = new Map();
     for (const f of cut.essential) states.set(f.id, f.is_target ? "target" : "essential");
     for (const f of cut.deferrable) states.set(f.id, "deferrable");
     return states;
-  }, [cut]);
+  }, [cut, showCut]);
 
   const openNew = () => {
     // Start blank: openEdit leaves the last feature in the draft. Keep only the product, as a create does.
     setDraft((d) => ({ ...EMPTY_DRAFT, productId: d.productId }));
-    setCapQuery("");
     setConfirmingDelete(false);
     setError(null);
     setDialog({ mode: "new" });
@@ -233,11 +245,17 @@ export default function FeaturesIsland({ canWrite = true }) {
       priority: detail.priority != null ? String(detail.priority) : "",
       status: detail.status,
     });
-    setCapQuery("");
     setConfirmingDelete(false);
     setError(null);
     setDialog({ mode: "edit" });
   };
+
+  // The shared picker speaks names; the API takes ids.
+  const draftCapabilityNames = draft.capabilityIds.map((id) => capabilityById.get(id)?.name).filter(Boolean);
+  const setDraftCapabilityNames = (names) => setDraft((d) => ({
+    ...d,
+    capabilityIds: names.map((n) => capabilityByName.get(n.toLowerCase())?.id).filter(Boolean),
+  }));
 
   // At least one capability, unless the rest are declared unknown.
   const canSave = Boolean(draft.name.trim()) && (draft.capabilityIds.length > 0 || draft.unknownCapabilities);
@@ -306,7 +324,9 @@ export default function FeaturesIsland({ canWrite = true }) {
       await load();
       await refreshDetail(selected);
     } catch (e) {
-      setError(String(e.message));
+      setError(e instanceof ApiError && e.status === 422 && String(e.message).includes("cycle")
+        ? "That would make a circular dependency, so it was not added."
+        : String(e.message));
     }
   };
 
@@ -323,11 +343,15 @@ export default function FeaturesIsland({ canWrite = true }) {
     }
   };
 
+  const noFeatures = loaded && layout.nodes.length === 0;
+  const filteredProduct = productById.get(productFilter);
+  const cutTargetOptions = visibleLayout.nodes.filter((n) => !n.external);
+
   return (
     <>
       <PageHeader
         title="Features"
-        meta={`${visibleLayout.nodes.length} features · ${visibleLayout.edges.length} edges · ${visibleReady.length} ready${productFilter ? ` · filtered from ${layout.nodes.length}` : ""}`}
+        meta={`${count(visibleLayout.nodes.length, "feature")} · ${visibleReady.length} ready to start${productFilter ? ` · filtered from ${layout.nodes.length}` : ""}`}
         actions={
           <>
             {products.length > 0 && (
@@ -338,7 +362,10 @@ export default function FeaturesIsland({ canWrite = true }) {
             )}
             <Input placeholder="Find features like…" style={{ width: 220 }} inputStyle={{ height: 30 }}
               value={query}
-              onChange={(e) => { setQuery(e.target.value); if (e.target.value.trim()) setTab("directory"); }} />
+              onChange={(e) => {
+                setQuery(e.target.value);
+                if (e.target.value.trim() && tab !== "directory") { setTab("directory"); writeParams({ tab: "" }); }
+              }} />
             {canWrite && (
               <Button size="sm" variant="accent" style={{ gap: 6 }} onClick={openNew}>
                 <Icon name="plus" size={13} />New feature
@@ -348,161 +375,105 @@ export default function FeaturesIsland({ canWrite = true }) {
         }
       />
       <div style={{ padding: "12px 24px 0", flex: "none" }}>
-        <Tabs tabs={[{ value: "directory", label: "Directory", count: directory.length }, { value: "graph", label: "Graph" }]} value={tab} onChange={changeTab} />
+        <Tabs tabs={[{ value: "directory", label: "Directory", count: directory.length }, { value: "graph", label: "Graph" }, { value: "plan", label: "Plan" }]} value={tab} onChange={changeTab} />
       </div>
-      {error && !dialog && <div style={{ padding: "8px 24px", fontSize: "var(--text-sm)", color: "var(--danger-fg)" }}>{error}</div>}
+      {error && !dialog && <div role="alert" style={{ padding: "8px 24px", fontSize: "var(--text-sm)", color: "var(--danger-fg)" }}>{error}</div>}
 
+      {noFeatures ? (
+        <div style={{ margin: 20, padding: 24, background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", display: "flex", flexDirection: "column", gap: 10, alignItems: "flex-start" }}>
+          <div style={{ fontSize: "var(--text-sm)", color: "var(--text-body)" }}>
+            No features yet. Features come in with each product's seed file{canWrite ? "." : ", which an editor loads."}
+          </div>
+          {canWrite && <a href="/home" style={{ fontSize: "var(--text-sm)", color: "var(--text-accent)", textDecoration: "none" }}>Get started</a>}
+        </div>
+      ) : (
       <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
         {tab === "graph" ? (
           <div style={{ flex: 1, position: "relative", margin: 20, background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", overflow: "hidden", minWidth: 0 }}>
             <FeatureGraphView layout={visibleLayout} fitKey={productFilter} selectedId={selected} onSelect={selectFeature} impactIds={impactIds} cutStates={cutStates} />
+            {cutStates && (
+              <div style={{ position: "absolute", bottom: 10, right: 10, display: "flex", alignItems: "center", gap: 8, padding: "6px 8px 6px 12px", background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-sm)", boxShadow: "var(--shadow-card)", fontSize: "var(--text-xs)", color: "var(--text-body)" }}>
+                Smallest version that reaches {nodeById.get(cutTarget)?.name ?? "the target"}
+                <Button size="sm" variant="ghost" onClick={() => setShowCut(false)}>Hide</Button>
+              </div>
+            )}
           </div>
+        ) : tab === "plan" ? (
+          <PlanView
+            hasFeatures={visibleLayout.nodes.length > 0}
+            externalProduct={filteredProduct?.external ? filteredProduct.name : null}
+            ready={visibleReady}
+            cycles={visibleCycles}
+            topoOrder={visibleTopo}
+            topoError={topoError}
+            selectedId={selected}
+            onSelect={selectFeature}
+            canCut={canWrite}
+            cutTargetOptions={cutTargetOptions}
+            cutTarget={cutTarget}
+            onPickCutTarget={pickCutTarget}
+            onRunCut={runCut}
+            onClearCut={clearCut}
+            onShowCut={() => { setShowCut(true); changeTab("graph"); }}
+            cut={cut}
+            cutError={cutError}
+            cutting={cutting}
+            matchesProduct={matchesProduct}
+            productFilter={productFilter}
+          />
         ) : (
         <div style={{ flex: 1, minWidth: 0, overflowY: "auto", padding: 20 }}>
           <div style={{ background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", overflow: "hidden" }}>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 160px 110px 110px 120px", padding: "8px 16px", borderBottom: "1px solid var(--border-hairline)", fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: "var(--tracking-caps)", textTransform: "uppercase", color: "var(--text-secondary)" }}>
-              <span>Feature</span><span>Capability</span><span>Product</span><span>Priority</span><span>Status</span>
+              <span>Feature</span><span>What it does</span><span>Product</span><span>Priority</span><span>Status</span>
             </div>
             {directory.map((n, i) => (
               <div key={n.id} {...pressable(() => selectFeature(n.id))} aria-pressed={selected === n.id} style={{ display: "grid", gridTemplateColumns: "1fr 160px 110px 110px 120px", alignItems: "center", padding: "10px 16px", borderBottom: i < directory.length - 1 ? "1px solid var(--border-hairline)" : "none", cursor: "pointer", fontSize: "var(--text-sm)", background: selected === n.id ? "var(--surface-hover)" : undefined }}>
                 <span style={{ color: "var(--text-heading)", fontWeight: "var(--weight-medium)" }}>{n.name}</span>
                 <span title={(n.capability_ids ?? []).map((c) => capabilityById.get(c)?.name).join(", ")} style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", ...ELLIPSIS }}>{capabilityNames(n.capability_ids, capabilityById)}</span>
-                <span style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", ...ELLIPSIS }}>{(nodeById.get(n.id)?.product_ids ?? []).map((pid) => productById.get(pid)?.name ?? "").filter(Boolean).join(", ") || "—"}</span>
-                <span>{n.priority != null ? <PriorityBadge priority={n.priority} /> : <span style={{ color: "var(--text-secondary)" }}>—</span>}</span>
+                <span style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", ...ELLIPSIS }}>{(nodeById.get(n.id)?.product_ids ?? []).map((pid) => productById.get(pid)?.name ?? "").filter(Boolean).join(", ") || "none"}</span>
+                <span>{n.priority != null ? <PriorityBadge priority={n.priority} /> : <span style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>none</span>}</span>
                 <span><StatusBadge status={n.status} /></span>
               </div>
             ))}
-            {directory.length === 0 && (
+            {loaded && directory.length === 0 && (
               <div style={{ padding: "16px", fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>
-                0 features match{query ? ` "${query}"` : ""}.
+                {query.trim() ? `No feature matches "${query.trim()}".`
+                  : productFilter === "unattributed" ? "Every feature has a product."
+                  : "This product has no features yet."}
               </div>
             )}
           </div>
         </div>
         )}
-          <aside style={{ width: 280, flex: "none", margin: "20px 20px 20px 0", background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", padding: 16, display: "flex", flexDirection: "column", gap: 12, overflowY: "auto" }}>
+          <aside style={{ width: 300, flex: "none", margin: "20px 20px 20px 0", background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", padding: 16, display: "flex", flexDirection: "column", gap: 14, overflowY: "auto" }}>
             {detail ? (
-              <>
-                <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
-                  <div style={{ flex: 1, fontSize: "var(--text-md)", fontWeight: "var(--weight-semibold)", color: "var(--text-heading)" }}>{detail.name}</div>
-                  {canWrite && (
-                    <IconButton size="sm" label="Edit feature" onClick={openEdit}><Icon name="pencil" size={13} /></IconButton>
-                  )}
-                </div>
-                {detail.description && <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", lineHeight: "var(--leading-snug)" }}>{detail.description}</div>}
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  {detail.facets?.layer && <Tag type={detail.facets.layer}>{detail.facets.layer}</Tag>}
-                  <StatusBadge status={detail.status} />
-                </div>
-                {detail.capability_ids.map((cid) => (
-                  <div key={cid} style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-secondary)" }}>
-                    does → {capabilityById.get(cid)?.name ?? "unknown capability"}
-                  </div>
-                ))}
-                {detail.unknown_capabilities && (
-                  <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-secondary)" }}>
-                    does → {detail.capability_ids.length ? "+ " : ""}capabilities not yet identified
-                  </div>
-                )}
-                {products.length > 0 && (
-                  (nodeById.get(detail.id)?.product_ids ?? []).length > 0 ? (
-                    nodeById.get(detail.id).product_ids.map((pid) => (
-                      <div key={pid} style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-secondary)" }}>
-                        product → {productById.get(pid)?.name ?? "unknown product"}{productById.get(pid)?.external ? " · external, not our work" : ""}
-                      </div>
-                    ))
-                  ) : (
-                    <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-secondary)" }}>
-                      no product
-                    </div>
-                  )
-                )}
-                {inJourneys.map((j) => (
-                  <a key={j.id} href={`/journeys?id=${j.id}`} style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-accent)", textDecoration: "none" }}>
-                    in journey → {j.name}
-                  </a>
-                ))}
-                {detail.priority != null && <PriorityBadge priority={detail.priority} rationale={detail.priority_rationale} />}
-                <WhyChainPanel chain={why?.chain} goalParent={goalParent} ownRoots={ownGoalRoots} />
-                <div style={{ borderTop: "1px solid var(--border-hairline)", paddingTop: 12, display: "flex", flexDirection: "column", gap: 6 }}>
-                  <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: "var(--tracking-caps)", textTransform: "uppercase", color: "var(--text-secondary)" }}>Relationships</div>
-                  {detail.outgoing.map((r, i) => (
-                    <div key={`o${i}`} style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                      <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-body)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.kind} → {r.feature.name}</span>
-                      {canWrite && (
-                        <IconButton size="sm" label="Remove edge" onClick={() => removeEdge(detail.id, r.feature.id, r.kind)}><Icon name="x" size={12} /></IconButton>
-                      )}
-                    </div>
-                  ))}
-                  {detail.incoming.map((r, i) => (
-                    <div key={`i${i}`} style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                      <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-body)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.feature.name} → {r.kind}</span>
-                      {canWrite && (
-                        <IconButton size="sm" label="Remove edge" onClick={() => removeEdge(r.feature.id, detail.id, r.kind)}><Icon name="x" size={12} /></IconButton>
-                      )}
-                    </div>
-                  ))}
-                  {detail.outgoing.length + detail.incoming.length === 0 && (
-                    <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-secondary)" }}>no edges</div>
-                  )}
-                  {canWrite && (
-                    <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 4 }}>
-                      <Select value={edgeDraft.kind} onChange={(e) => setEdgeDraft({ ...edgeDraft, kind: e.target.value })}
-                        options={["DEPENDS_ON", "BLOCKS", "RELATES_TO"]} />
-                      <Select value={edgeDraft.targetId} onChange={(e) => setEdgeDraft({ ...edgeDraft, targetId: e.target.value })}
-                        options={[{ value: "", label: "Target feature…" },
-                          ...layout.nodes.filter((n) => n.id !== detail.id).map((n) => ({ value: n.id, label: n.name }))]} />
-                      <Button size="sm" variant="secondary" disabled={!edgeDraft.targetId} onClick={addEdge} style={{ gap: 6 }}>
-                        <Icon name="plus" size={13} />Add edge
-                      </Button>
-                    </div>
-                  )}
-                </div>
-                {impact && (
-                  <div style={{ borderTop: "1px solid var(--border-hairline)", paddingTop: 12, display: "flex", flexDirection: "column", gap: 6 }}>
-                    <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: "var(--tracking-caps)", textTransform: "uppercase", color: "var(--text-secondary)" }}>Impact</div>
-                    <div style={{ fontSize: "var(--text-xs)", color: "var(--text-body)" }}>
-                      {impact.dependents.length} dependent{impact.dependents.length === 1 ? "" : "s"} break if this changes; needs {impact.dependencies.length}.
-                    </div>
-                    {impact.dependents.map((d) => (
-                      <div key={d.id} style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--danger-fg)" }}>{d.name}</div>
-                    ))}
-                  </div>
-                )}
-                <Button size="sm" variant="secondary" style={{ gap: 6 }} onClick={runImpact}>
-                  <Icon name="git-branch" size={13} />Impact query
-                </Button>
-              </>
-            ) : (
-              <div style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>Select a feature.</div>
-            )}
-            <div style={{ borderTop: "1px solid var(--border-hairline)" }} />
-            <ReadyFrontierPanel ready={visibleReady} selectedId={selected} onSelect={selectFeature} />
-            <GraphDiagnosticsPanel
-              cycles={cycles}
-              topoOrder={visibleTopo}
-              topoError={topoError}
-              selectedId={selected}
-              onSelect={selectFeature}
-            />
-            <div style={{ borderTop: "1px solid var(--border-hairline)" }} />
-            {canWrite && (
-              <MVPCutPanel
-                capabilities={capabilities}
-                nodeById={nodeById}
+              <FeaturePanel
+                detail={detail}
+                canWrite={canWrite}
+                onEdit={openEdit}
+                onSelect={selectFeature}
+                productIds={nodeById.get(detail.id)?.product_ids ?? []}
+                productById={productById}
                 capabilityById={capabilityById}
-                selectedId={selected}
-                targets={cutTargets}
-                onAddTarget={addCutTarget}
-                onRemoveTarget={removeCutTarget}
-                onRun={runCut}
-                onClear={clearCut}
-                cut={cut}
-                cutting={cutting}
+                journeys={inJourneys}
+                why={why}
+                goalParent={goalParent}
+                ownGoalRoots={ownGoalRoots}
+                allNodes={layout.nodes}
+                edgeDraft={edgeDraft}
+                onEdgeDraft={setEdgeDraft}
+                onAddEdge={addEdge}
+                onRemoveEdge={removeEdge}
+                impact={impact}
+                onImpact={runImpact}
               />
+            ) : (
+              <div style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>{loaded ? "Select a feature to see what it does and why." : error ? "" : "Loading…"}</div>
             )}
           </aside>
       </div>
+      )}
 
       <Dialog
         open={dialog != null}
@@ -526,17 +497,21 @@ export default function FeaturesIsland({ canWrite = true }) {
           <Input label="Name (what the user gets, verb phrase)" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="Export tickets to Notion" />
           <Input label="Description" value={draft.description} onChange={(e) => setDraft({ ...draft, description: e.target.value })} />
           <Select label="Product" value={draft.productId} onChange={(e) => setDraft({ ...draft, productId: e.target.value })}
-            options={[{ value: "", label: "— none —" }, ...productOptions(products)]} />
-          <CapabilityPicker capabilities={capabilities} selected={draft.capabilityIds} query={capQuery} onQuery={setCapQuery}
-            onChange={(ids) => setDraft({ ...draft, capabilityIds: ids })} />
-          <Checkbox label="Some capabilities are unknown — link only the ones you can name"
-            checked={draft.unknownCapabilities} onChange={(on) => setDraft({ ...draft, unknownCapabilities: on })} />
-          <Select label="Layer" value={draft.layer} onChange={(e) => setDraft({ ...draft, layer: e.target.value })} options={["ui", "service", "integration", "infra"]} />
-          <Select label="Priority (1 hottest)" value={draft.priority} onChange={(e) => setDraft({ ...draft, priority: e.target.value })}
-            options={dialog?.mode === "edit" ? [{ value: "", label: "—" }, "1", "2", "3", "4", "5"] : ["1", "2", "3", "4", "5"]} />
+            options={[{ value: "", label: "No product" }, ...productOptions(products)]} />
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            <span aria-hidden="true" style={{ fontSize: "var(--text-xs)", fontWeight: "var(--weight-medium)", color: "var(--text-heading)" }}>What it does</span>
+            <CapabilityPicker id="feature-capabilities" label="What it does" options={capabilityOptions} value={draftCapabilityNames}
+              onChange={setDraftCapabilityNames} allowNew={false} placeholder="Type a capability…" />
+            <Checkbox label="Some capabilities are unknown. Link only the ones you can name."
+              checked={draft.unknownCapabilities} onChange={(on) => setDraft({ ...draft, unknownCapabilities: on })} />
+          </div>
+          <Select label={`Priority (${PRIORITY_HINT})`} value={draft.priority} onChange={(e) => setDraft({ ...draft, priority: e.target.value })}
+            options={[{ value: "", label: "No priority" }, ...[1, 2, 3, 4, 5].map((p) => ({ value: String(p), label: priorityLabel(p) }))]} />
+          <Select label="Layer" value={draft.layer} onChange={(e) => setDraft({ ...draft, layer: e.target.value })}
+            options={Object.keys(LAYER).map((v) => ({ value: v, label: plain(LAYER, v) }))} />
           {dialog?.mode === "edit" && (
             <Select label="Status" value={draft.status} onChange={(e) => setDraft({ ...draft, status: e.target.value })}
-              options={[{ value: "pending", label: "planned" }, { value: "in_progress", label: "in progress" }, { value: "done", label: "done" }]} />
+              options={["pending", "in_progress", "done"].map((s) => ({ value: s, label: statusLabel(s) }))} />
           )}
         </div>
       </Dialog>
@@ -548,30 +523,7 @@ const EMPTY_DRAFT = { name: "", description: "", capabilityIds: [], unknownCapab
 
 function capabilityNames(ids, capabilityById) {
   const names = (ids ?? []).map((c) => capabilityById.get(c)?.name).filter(Boolean);
-  return names.length ? names.join(", ") : "—";
-}
-
-// Every capability the feature REALIZES. Exact picks only: the inventory is only
-// as accurate as these links, so there is no free-text entry here.
-function CapabilityPicker({ capabilities, selected, query, onQuery, onChange }) {
-  const chosen = new Set(selected);
-  const q = query.trim().toLowerCase();
-  const shown = capabilities.filter((c) => chosen.has(c.id) || !q || c.name.toLowerCase().includes(q));
-  const toggle = (id, on) => onChange(on ? [...selected, id] : selected.filter((x) => x !== id));
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-      <div style={{ ...CAPS_HEADER, color: "var(--text-secondary)" }}>
-        Realizes capabilities · {selected.length} selected
-      </div>
-      <Input value={query} onChange={(e) => onQuery(e.target.value)} placeholder="Filter capabilities" />
-      <div style={{ maxHeight: 180, overflowY: "auto", display: "flex", flexDirection: "column", gap: 6, padding: "8px 10px", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-sm)" }}>
-        {shown.map((c) => (
-          <Checkbox key={c.id} label={c.name} checked={chosen.has(c.id)} onChange={(on) => toggle(c.id, on)} />
-        ))}
-        {shown.length === 0 && <span style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>0 capabilities match.</span>}
-      </div>
-    </div>
-  );
+  return names.length ? names.join(", ") : "none";
 }
 
 const CAPS_HEADER = {
@@ -580,90 +532,150 @@ const CAPS_HEADER = {
 };
 const MONO_ROW = { fontFamily: "var(--font-mono)", fontSize: 11 };
 const ELLIPSIS = { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
+const NOTE = { fontSize: "var(--text-xs)", color: "var(--text-secondary)", lineHeight: "var(--leading-snug)" };
+const LINK = { fontSize: "var(--text-xs)", color: "var(--text-accent)", textDecoration: "none" };
+const SECTION = { borderTop: "1px solid var(--border-hairline)", paddingTop: 12, display: "flex", flexDirection: "column", gap: 6 };
 
-function ReadyFrontierPanel({ ready, selectedId, onSelect }) {
+function Fact({ label, children }) {
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-      <div style={CAPS_HEADER}>Ready now · {ready.length}</div>
-      {ready.length === 0 ? (
-        <div style={{ ...MONO_ROW, color: "var(--text-secondary)" }}>
-          Nothing ready — pending work is blocked or already done.
+    <div style={{ display: "grid", gridTemplateColumns: "64px 1fr", gap: 8, alignItems: "baseline" }}>
+      <span style={NOTE}>{label}</span>
+      <span style={{ display: "flex", flexDirection: "column", gap: 2, fontSize: "var(--text-xs)", color: "var(--text-body)", minWidth: 0 }}>{children}</span>
+    </div>
+  );
+}
+
+// A feature name that selects it, for lists and relationship rows.
+function FeatureLink({ feature, onSelect, active, style }) {
+  return (
+    <button type="button" onClick={() => onSelect(feature.id)}
+      style={{ border: "none", background: active ? "var(--accent-wash)" : "transparent", padding: 0, cursor: "pointer", textAlign: "left", font: "inherit", color: active ? "var(--text-heading)" : "var(--text-body)", minWidth: 0, ...ELLIPSIS, ...style }}>
+      {feature.name}
+    </button>
+  );
+}
+
+function FeaturePanel({ detail, canWrite, onEdit, onSelect, productIds, productById, capabilityById, journeys, why, goalParent, ownGoalRoots, allNodes, edgeDraft, onEdgeDraft, onAddEdge, onRemoveEdge, impact, onImpact }) {
+  const layer = detail.facets?.layer;
+  return (
+    <>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
+          <div style={{ flex: 1, fontSize: "var(--text-md)", fontWeight: "var(--weight-semibold)", color: "var(--text-heading)" }}>{detail.name}</div>
+          {canWrite && (
+            <IconButton size="sm" label="Edit feature" onClick={onEdit}><Icon name="pencil" size={13} /></IconButton>
+          )}
         </div>
-      ) : (
-        ready.map((f) => {
-          const active = f.id === selectedId;
-          return (
-            <button
-              key={f.id}
-              type="button"
-              onClick={() => onSelect(f.id)}
-              style={{
-                display: "flex", alignItems: "center", gap: 6, textAlign: "left",
-                padding: "4px 6px", margin: "0 -6px", border: "none", borderRadius: "var(--radius-sm)",
-                cursor: "pointer", background: active ? "var(--accent-wash)" : "transparent",
-                color: active ? "var(--text-heading)" : "var(--text-body)", ...MONO_ROW,
-              }}
-            >
-              <span style={{ flex: 1, ...ELLIPSIS }}>{f.name}</span>
-              {f.priority != null && <PriorityBadge priority={f.priority} />}
-            </button>
-          );
-        })
-      )}
-    </div>
-  );
-}
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+          <StatusBadge status={detail.status} />
+          {detail.priority != null
+            ? <PriorityBadge priority={detail.priority} rationale={detail.priority_rationale} />
+            : <span style={NOTE}>{priorityLabel(null)}</span>}
+          {detail.priority != null && <span style={NOTE}>{PRIORITY_HINT}</span>}
+        </div>
+      </div>
 
-function GraphDiagnosticsPanel({ cycles, topoOrder, topoError, selectedId, onSelect }) {
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-      <div style={CAPS_HEADER}>Cycles · {cycles.length}</div>
-      {cycles.length === 0 ? (
-        <div style={{ ...MONO_ROW, color: "var(--text-secondary)" }}>no dependency cycles</div>
-      ) : (
-        cycles.map((cycle, i) => (
-          <div key={i} style={{ ...MONO_ROW, color: "var(--danger-fg)", ...ELLIPSIS }}>
-            {cycle.map((f) => f.name).join(" → ")}
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {detail.description && <div style={{ fontSize: "var(--text-xs)", color: "var(--text-body)", lineHeight: "var(--leading-snug)" }}>{detail.description}</div>}
+        {layer && (
+          <Fact label="Layer"><span><Tag type={layer}><Term dict={LAYER} value={layer} /></Tag></span></Fact>
+        )}
+        <Fact label="Product">
+          {productIds.length > 0 ? productIds.map((pid) => (
+            <a key={pid} href={`/products?product=${pid}`} style={LINK}>
+              {productById.get(pid)?.name ?? "Unknown product"}{productById.get(pid)?.external ? " (external)" : ""}
+            </a>
+          )) : <span style={NOTE}>No product</span>}
+        </Fact>
+        {journeys.length > 0 && (
+          <Fact label="Journeys">
+            {journeys.map((j) => <a key={j.id} href={`/journeys?id=${j.id}`} style={LINK}>{j.name}</a>)}
+          </Fact>
+        )}
+      </div>
+
+      <div style={SECTION}>
+        <div style={CAPS_HEADER}>What it does</div>
+        {detail.capability_ids.map((cid) => {
+          const c = capabilityById.get(cid);
+          return c
+            ? <a key={cid} href={`/capabilities/${c.slug}`} style={LINK}>{c.name}</a>
+            : <span key={cid} style={NOTE}>Unknown capability</span>;
+        })}
+        {detail.unknown_capabilities && (
+          <div style={NOTE}>{detail.capability_ids.length ? "Some of its capabilities are not named yet." : "Its capabilities are not named yet."}</div>
+        )}
+        {detail.capability_ids.length === 0 && !detail.unknown_capabilities && (
+          <div style={NOTE}>No capability linked yet.</div>
+        )}
+      </div>
+
+      <WhySection chain={why?.chain} goalParent={goalParent} ownRoots={ownGoalRoots} hasCapabilities={detail.capability_ids.length > 0} />
+
+      <div style={SECTION}>
+        <div style={CAPS_HEADER}>Relationships</div>
+        {detail.outgoing.map((r, i) => (
+          <EdgeRow key={`o${i}`} word={<Term dict={EDGE} value={r.kind} style={{ color: "var(--text-secondary)" }} />}
+            feature={r.feature} onSelect={onSelect}
+            onRemove={canWrite ? () => onRemoveEdge(detail.id, r.feature.id, r.kind) : null} />
+        ))}
+        {detail.incoming.map((r, i) => (
+          <EdgeRow key={`i${i}`} word={<Term dict={EDGE_INCOMING} value={r.kind} style={{ color: "var(--text-secondary)" }} />}
+            feature={r.feature} onSelect={onSelect}
+            onRemove={canWrite ? () => onRemoveEdge(r.feature.id, detail.id, r.kind) : null} />
+        ))}
+        {detail.outgoing.length + detail.incoming.length === 0 && (
+          <div style={NOTE}>No relationships yet.</div>
+        )}
+        {canWrite && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 4 }}>
+            <Select label="This feature" value={edgeDraft.kind} onChange={(e) => onEdgeDraft({ ...edgeDraft, kind: e.target.value })}
+              options={EDGE_KINDS.map((k) => ({ value: k, label: plain(EDGE, k) }))} />
+            <Select value={edgeDraft.targetId} onChange={(e) => onEdgeDraft({ ...edgeDraft, targetId: e.target.value })}
+              options={[{ value: "", label: "Pick a feature…" },
+                ...allNodes.filter((n) => n.id !== detail.id).map((n) => ({ value: n.id, label: n.name }))]} />
+            <Button size="sm" variant="secondary" disabled={!edgeDraft.targetId} onClick={onAddEdge} style={{ gap: 6 }}>
+              <Icon name="plus" size={13} />Add relationship
+            </Button>
           </div>
-        ))
-      )}
-      <div style={{ ...CAPS_HEADER, marginTop: 4 }}>Build order</div>
-      {topoError ? (
-        <div style={{ ...MONO_ROW, color: "var(--danger-fg)" }}>{topoError}</div>
-      ) : topoOrder?.length === 0 ? (
-        <div style={{ ...MONO_ROW, color: "var(--text-secondary)" }}>no features in graph</div>
-      ) : (
-        topoOrder?.slice(0, 12).map((f, i) => {
-          const active = f.id === selectedId;
-          return (
-            <button
-              key={f.id}
-              type="button"
-              onClick={() => onSelect(f.id)}
-              style={{
-                display: "flex", alignItems: "center", gap: 6, textAlign: "left",
-                padding: "2px 6px", margin: "0 -6px", border: "none", borderRadius: "var(--radius-sm)",
-                cursor: "pointer", background: active ? "var(--accent-wash)" : "transparent",
-                color: active ? "var(--text-heading)" : "var(--text-secondary)", ...MONO_ROW,
-              }}
-            >
-              <span style={{ color: "var(--text-secondary)", flex: "none", width: 16 }}>{i + 1}.</span>
-              <span style={{ flex: 1, ...ELLIPSIS }}>{f.name}</span>
-            </button>
-          );
-        })
-      )}
-      {topoOrder && topoOrder.length > 12 && (
-        <div style={{ ...MONO_ROW, color: "var(--text-secondary)" }}>+{topoOrder.length - 12} more</div>
+        )}
+      </div>
+
+      <div style={SECTION}>
+        {impact ? (
+          <>
+            <div style={{ fontSize: "var(--text-xs)", color: "var(--text-body)" }}>
+              {count(impact.dependents.length, "feature")} would be affected if this changes; it needs {impact.dependencies.length}.
+            </div>
+            {impact.dependents.map((d) => (
+              <FeatureLink key={d.id} feature={d} onSelect={onSelect} style={{ fontSize: "var(--text-xs)" }} />
+            ))}
+          </>
+        ) : (
+          <Button size="sm" variant="ghost" style={{ gap: 6, alignSelf: "flex-start" }} onClick={onImpact}>
+            <Icon name="git-branch" size={13} />What depends on this?
+          </Button>
+        )}
+      </div>
+    </>
+  );
+}
+
+function EdgeRow({ word, feature, onSelect, onRemove }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "var(--text-xs)" }}>
+      <span style={{ flex: "none" }}>{word}</span>
+      <FeatureLink feature={feature} onSelect={onSelect} style={{ flex: 1 }} />
+      {onRemove && (
+        <IconButton size="sm" label={`Remove relationship with ${feature.name}`} onClick={onRemove}><Icon name="x" size={12} /></IconButton>
       )}
     </div>
   );
 }
 
-function WhyChainPanel({ chain, ownRoots, goalParent }) {
+function WhySection({ chain, ownRoots, goalParent, hasCapabilities }) {
   if (!chain) return null;
   const goals = chain.filter((s) => s.kind === "goal");
-  const caps = chain.filter((s) => s.kind === "capability");
   // A goal is this feature's own when it sits under the same org goal as the
   // feature's product. Everything else arrived through a shared capability:
   // that is reuse, not motivation.
@@ -675,47 +687,23 @@ function WhyChainPanel({ chain, ownRoots, goalParent }) {
   const classify = ownRoots.size > 0;
   const own = classify ? goals.filter((g) => ownRoots.has(rootOf(g.id))) : goals;
   const shared = classify ? goals.filter((g) => !ownRoots.has(rootOf(g.id))) : [];
-  const steps = chain.filter((s) => s.kind !== "goal");
   const goalRow = (step, i) => (
-    <a key={`goal-${step.id}-${i}`} href="/goals" style={{ textDecoration: "none", color: "inherit" }} title="Open goals">
-      <span style={{ ...MONO_ROW, color: "var(--text-body)", ...ELLIPSIS, display: "block" }}>
-        {step.display_id ? `${step.display_id} ${step.name}` : step.name}
-      </span>
+    <a key={`goal-${step.id}-${i}`} href={`/goals?goal=${step.id}`} style={{ ...LINK, ...ELLIPSIS, display: "block" }}>
+      {step.display_id ? `${step.display_id} ${step.name}` : step.name}
     </a>
   );
   return (
-    <div style={{ borderTop: "1px solid var(--border-hairline)", paddingTop: 12, display: "flex", flexDirection: "column", gap: 6 }}>
+    <div style={SECTION}>
       <div style={CAPS_HEADER}>Why</div>
-      {steps.map((step, i) => {
-        const prefix = step.relation === "REALIZES" ? "realizes → " : step.relation === "PART_OF" ? "part of → " : "";
-        const row = (
-          <span style={{ ...MONO_ROW, color: step.kind === "feature" ? "var(--text-heading)" : "var(--text-body)", ...ELLIPSIS, display: "block" }}>
-            {prefix}{step.name}
-          </span>
-        );
-        return (
-          <div key={`${step.kind}-${step.id}-${i}`}>
-            {step.kind === "capability" ? (
-              <a href="/capabilities" style={{ textDecoration: "none", color: "inherit" }} title="Open capabilities">{row}</a>
-            ) : row}
-          </div>
-        );
-      })}
-      {caps.length === 0 && (
-        <div style={{ ...MONO_ROW, color: "var(--text-secondary)" }}>no capability linked</div>
-      )}
-      {caps.length > 0 && (
-        <>
-          <div style={{ ...CAPS_HEADER, marginTop: 6 }}>Motivated by</div>
-          {own.length > 0 ? own.map(goalRow) : (
-            <div style={{ ...MONO_ROW, color: "var(--text-secondary)" }}>no goal of this product yet</div>
-          )}
-        </>
+      {!hasCapabilities ? (
+        <div style={NOTE}>Goals show up here once it has a capability.</div>
+      ) : own.length > 0 ? own.map(goalRow) : (
+        <div style={NOTE}>No goal of this product yet.</div>
       )}
       {shared.length > 0 && (
         <details>
-          <summary style={{ ...MONO_ROW, color: "var(--text-secondary)", cursor: "pointer" }}>
-            Capability also serves {shared.length} goal{shared.length === 1 ? "" : "s"} of other products
+          <summary style={{ ...NOTE, cursor: "pointer" }}>
+            Also serves {count(shared.length, "goal")} of other products
           </summary>
           <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 6 }}>{shared.map(goalRow)}</div>
         </details>
@@ -724,69 +712,133 @@ function WhyChainPanel({ chain, ownRoots, goalParent }) {
   );
 }
 
-// Schedule-free MVP scoping: pick targets, run the prerequisite closure,
-// read back essential (build order) vs deferrable (priority order).
-function MVPCutPanel({ capabilities, nodeById, capabilityById, selectedId, targets, onAddTarget, onRemoveTarget, onRun, onClear, cut, cutting }) {
-  const selectedTargeted = targets.some((t) => t.kind === "feature" && t.id === selectedId);
+const PLAN_CARD = {
+  background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)",
+  padding: 16, display: "flex", flexDirection: "column", gap: 8, minWidth: 0,
+};
+const PLAN_TITLE = { fontSize: "var(--text-sm)", fontWeight: "var(--weight-semibold)", color: "var(--text-heading)" };
+const SHOWN = 20;
+
+function PlanList({ items, selectedId, onSelect, numbered, limit }) {
+  const [all, setAll] = React.useState(false);
+  const shown = limit && !all ? items.slice(0, limit) : items;
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-      <div style={CAPS_HEADER}>MVP cut</div>
-      {targets.length > 0 && (
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-          {targets.map((t) => {
-            const label = t.kind === "feature"
-              ? nodeById.get(t.id)?.name ?? "unknown feature"
-              : capabilityById.get(t.id)?.name ?? "unknown capability";
-            return <Tag key={`${t.kind}:${t.id}`} onRemove={() => onRemoveTarget(t.kind, t.id)}>{label}</Tag>;
-          })}
+    <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+      {shown.map((f, i) => (
+        <div key={f.id} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "var(--text-xs)" }}>
+          {numbered && <span style={{ ...MONO_ROW, color: "var(--text-secondary)", flex: "none", width: 24, textAlign: "right" }}>{i + 1}.</span>}
+          <FeatureLink feature={f} onSelect={onSelect} active={f.id === selectedId} style={{ flex: 1, padding: "2px 4px", borderRadius: "var(--radius-sm)" }} />
+          {f.is_target && <span style={NOTE}>target</span>}
+          {f.priority != null && <PriorityBadge priority={f.priority} />}
         </div>
+      ))}
+      {limit && items.length > limit && (
+        <button type="button" onClick={() => setAll(!all)}
+          style={{ ...NOTE, border: "none", background: "transparent", padding: "4px 0", cursor: "pointer", textAlign: "left", color: "var(--text-accent)" }}>
+          {all ? "Show fewer" : `Show all ${items.length}`}
+        </button>
       )}
-      <Select value="" onChange={(e) => e.target.value && onAddTarget("capability", e.target.value)}
-        options={[{ value: "", label: "Target a capability…" },
-          ...capabilities.map((c) => ({ value: c.id, label: c.name }))]} />
-      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-        <Button size="sm" variant="secondary" disabled={!selectedId || selectedTargeted}
-          onClick={() => onAddTarget("feature", selectedId)}>Target selected</Button>
-        <Button size="sm" variant="accent" disabled={targets.length === 0 || cutting} onClick={onRun}>
-          {cutting ? "Cutting…" : "Run cut"}
-        </Button>
-        {(targets.length > 0 || cut) && (
-          <Button size="sm" variant="secondary" onClick={onClear}>Clear</Button>
-        )}
+    </div>
+  );
+}
+
+function PlanView({ hasFeatures, externalProduct, ready, cycles, topoOrder, topoError, selectedId, onSelect, canCut, cutTargetOptions, cutTarget, onPickCutTarget, onRunCut, onClearCut, onShowCut, cut, cutError, cutting, matchesProduct, productFilter }) {
+  const body = (content) => (
+    <div style={{ flex: 1, minWidth: 0, overflowY: "auto", padding: 20 }}>{content}</div>
+  );
+  if (!hasFeatures) return body(<div style={{ ...PLAN_CARD, ...NOTE }}>This product has no features to plan yet.</div>);
+  if (externalProduct) return body(<div style={{ ...PLAN_CARD, ...NOTE }}>{externalProduct} is an external product, so none of its features are ours to plan.</div>);
+
+  const canWait = cut ? (productFilter ? cut.deferrable.filter((f) => matchesProduct(f.id)) : cut.deferrable) : [];
+  const neededCaps = cut ? cut.capabilities.filter((c) => c.essential) : [];
+  return body(
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 16, alignItems: "start" }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 16, minWidth: 0 }}>
+        <section style={PLAN_CARD}>
+          <div style={PLAN_TITLE}>Ready to start now · {ready.length}</div>
+          {ready.length === 0
+            ? <div style={NOTE}>No planned feature has everything it needs done yet.</div>
+            : <PlanList items={ready} selectedId={selectedId} onSelect={onSelect} limit={SHOWN} />}
+        </section>
+
+        <section style={PLAN_CARD}>
+          {cycles.length === 0 ? (
+            <div style={NOTE}>No circular dependencies.</div>
+          ) : (
+            <>
+              <div style={{ ...PLAN_TITLE, color: "var(--danger-fg)" }}>Circular dependencies · {cycles.length}</div>
+              {cycles.map((cycle, i) => (
+                <div key={i} style={{ fontSize: "var(--text-xs)", color: "var(--text-body)", lineHeight: "var(--leading-snug)" }}>
+                  {[...cycle, cycle[0]].map((f, j) => (
+                    <React.Fragment key={j}>
+                      {j > 0 && <span style={{ color: "var(--text-secondary)" }}> needs </span>}
+                      <FeatureLink feature={f} onSelect={onSelect} style={{ display: "inline", whiteSpace: "normal" }} />
+                    </React.Fragment>
+                  ))}
+                </div>
+              ))}
+            </>
+          )}
+        </section>
+
+        <section style={PLAN_CARD}>
+          <div style={PLAN_TITLE}>Build order</div>
+          {topoError === "cycle" ? (
+            <div style={NOTE}>There is no build order while features need each other in a loop. Break the circular dependencies first.</div>
+          ) : topoError ? (
+            <div style={NOTE}>Could not load the build order. Reload the page to try again.</div>
+          ) : topoOrder == null ? (
+            <div style={NOTE}>Loading…</div>
+          ) : topoOrder.length === 0 ? (
+            <div style={NOTE}>None of these features are ours to build.</div>
+          ) : (
+            <>
+              <div style={NOTE}>What a feature needs comes before it.</div>
+              <PlanList items={topoOrder} selectedId={selectedId} onSelect={onSelect} numbered limit={50} />
+            </>
+          )}
+        </section>
       </div>
-      {cut && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          <div style={{ fontSize: "var(--text-xs)", color: "var(--text-body)" }}>
-            {cut.essential.length} essential · {cut.deferrable.length} deferrable
+
+      {canCut && (
+        <section style={PLAN_CARD}>
+          <div style={PLAN_TITLE}>Smallest version that reaches a feature</div>
+          <div style={NOTE}>Pick a feature to see what it needs and what can wait.</div>
+          <Select value={cutTarget} onChange={(e) => onPickCutTarget(e.target.value)}
+            options={[{ value: "", label: "Pick a feature…" }, ...cutTargetOptions.map((n) => ({ value: n.id, label: n.name }))]} />
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            <Button size="sm" variant="accent" disabled={!cutTarget || cutting} onClick={onRunCut}>
+              {cutting ? "Working…" : "Run"}
+            </Button>
+            {cut && <Button size="sm" variant="secondary" onClick={onShowCut}>Show on graph</Button>}
+            {(cutTarget || cut) && <Button size="sm" variant="ghost" onClick={onClearCut}>Clear</Button>}
           </div>
-          {cut.capabilities.map((c) => (
-            <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 6, ...MONO_ROW }}>
-              <span style={{ color: "var(--text-body)", flex: 1, ...ELLIPSIS }}>{c.name}</span>
-              <span style={{ color: c.essential ? "var(--ok-fg)" : "var(--text-secondary)", flex: "none" }}>
-                {c.required}/{c.total}
-              </span>
+          {cutError && <div role="alert" style={{ fontSize: "var(--text-xs)", color: "var(--danger-fg)" }}>{cutError}</div>}
+          {cut && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 4 }}>
+              <div style={{ fontSize: "var(--text-xs)", color: "var(--text-body)" }}>
+                {count(cut.essential.length, "feature")} needed · {canWait.length} can wait
+              </div>
+              <div style={CAPS_HEADER}>Needed, in build order</div>
+              <PlanList items={cut.essential} selectedId={selectedId} onSelect={onSelect} numbered />
+              {neededCaps.length > 0 && (
+                <>
+                  <div style={CAPS_HEADER}>Capabilities it uses</div>
+                  {neededCaps.map((c) => (
+                    <div key={c.id} style={{ display: "flex", alignItems: "baseline", gap: 6, fontSize: "var(--text-xs)" }}>
+                      <span style={{ color: "var(--text-body)", flex: 1, ...ELLIPSIS }}>{c.name}</span>
+                      <span style={{ ...NOTE, flex: "none" }}>{c.required} of {count(c.total, "feature")} needed</span>
+                    </div>
+                  ))}
+                </>
+              )}
+              <div style={CAPS_HEADER}>Can wait</div>
+              {canWait.length === 0
+                ? <div style={NOTE}>{productFilter ? "Nothing else in this product can wait." : "Nothing can wait: it needs every other feature."}</div>
+                : <PlanList items={canWait} selectedId={selectedId} onSelect={onSelect} limit={SHOWN} />}
             </div>
-          ))}
-          <div style={{ ...CAPS_HEADER, marginTop: 4 }}>Build order (essential)</div>
-          {cut.essential.map((f, i) => (
-            <div key={f.id} style={{ ...MONO_ROW, ...ELLIPSIS, color: f.is_target ? "var(--text-accent)" : "var(--text-body)" }}>
-              {i + 1}. {f.name}
-            </div>
-          ))}
-          <div style={{ ...CAPS_HEADER, marginTop: 4 }}>Nice to have (deferred)</div>
-          {cut.deferrable.slice(0, 8).map((f) => (
-            <div key={f.id} style={{ display: "flex", alignItems: "center", gap: 6, ...MONO_ROW, color: "var(--text-secondary)" }}>
-              <span style={{ flex: 1, ...ELLIPSIS }}>{f.name}</span>
-              {f.priority != null && <PriorityBadge priority={f.priority} />}
-            </div>
-          ))}
-          {cut.deferrable.length > 8 && (
-            <div style={{ ...MONO_ROW, color: "var(--text-secondary)" }}>+{cut.deferrable.length - 8} more</div>
           )}
-          {cut.deferrable.length === 0 && (
-            <div style={{ ...MONO_ROW, color: "var(--text-secondary)" }}>nothing deferrable — targets need the whole graph</div>
-          )}
-        </div>
+        </section>
       )}
     </div>
   );

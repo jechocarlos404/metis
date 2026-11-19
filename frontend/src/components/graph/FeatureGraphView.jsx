@@ -2,6 +2,8 @@ import React from "react";
 import { Icon, IconButton } from "../../ds";
 import { createForceGraph } from "./forceGraphEngine.js";
 import { buildFeatureGraph, buildAdjacency, edgeStyle, nodeAccentVar, NODE_W, NODE_H, NODE_COLLIDE_R } from "./graph-data.js";
+import { EDGE, LAYER, statusLabel } from "../../lib/words.js";
+import { Term } from "../shared/Term.jsx";
 
 // useLayoutEffect must win in the browser (it runs before paint, so a
 // freshly-mounted node is positioned before the user ever sees a frame at
@@ -191,7 +193,7 @@ export function FeatureGraphView({ layout, selectedId, onSelect, impactIds, cutS
           position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center",
           fontSize: "var(--text-sm)", color: "var(--text-secondary)", pointerEvents: "none",
         }}>
-          No features yet.
+          No features to show.
         </div>
       )}
     </div>
@@ -276,43 +278,69 @@ function GraphToolbar({ onZoomIn, onZoomOut, onFit }) {
   );
 }
 
+function LegendRow({ mark, children, style }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 6, ...style }}>
+      <span style={{ flex: "none", width: 16, display: "flex", justifyContent: "center" }}>{mark}</span>
+      {children}
+    </div>
+  );
+}
+
+const LEGEND_HEAD = { color: "var(--text-heading)", marginTop: 2 };
+const dot = (color) => <span style={{ width: 6, height: 6, borderRadius: "50%", background: color }} />;
+
 function GraphLegend({ cutActive }) {
   const CUT_TIERS = [
     ["target", "var(--accent)", 1],
-    ["essential", "var(--ok-fg)", 1],
-    ["deferrable", "var(--text-secondary)", 0.3],
+    ["needed", "var(--ok-fg)", 1],
+    ["can wait", "var(--text-secondary)", 0.3],
   ];
   return (
-    <div style={{
-      position: "absolute", top: 10, left: 10, display: "flex", flexDirection: "column", gap: 5,
+    <details open style={{
+      position: "absolute", top: 10, left: 10,
       background: "var(--surface-card)", border: "1px solid var(--border-hairline)",
-      borderRadius: "var(--radius-sm)", boxShadow: "var(--shadow-card)", padding: "8px 10px",
+      borderRadius: "var(--radius-sm)", boxShadow: "var(--shadow-card)", padding: "6px 10px",
       fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-secondary)",
     }}>
-      {EDGE_KINDS.map((kind) => {
-        const st = edgeStyle(kind);
-        return (
-          <div key={kind} style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <svg width="16" height="6" style={{ flex: "none" }}>
-              <line x1="0" y1="3" x2="16" y2="3" stroke={`var(${st.colorVar})`} strokeWidth="1.6" strokeDasharray={st.dash || undefined} />
-            </svg>
-            {kind}
-          </div>
-        );
-      })}
-      {cutActive && (
-        <>
-          <div style={{ borderTop: "1px solid var(--border-hairline)", margin: "2px 0" }} />
-          {CUT_TIERS.map(([label, color, opacity]) => (
-            <div key={label} style={{ display: "flex", alignItems: "center", gap: 6, opacity }}>
-              <svg width="16" height="10" style={{ flex: "none" }}>
-                <rect x="2" y="1" width="12" height="8" rx="2" fill="none" stroke={color} strokeWidth="1.5" />
+      <summary style={{ cursor: "pointer", color: "var(--text-heading)" }}>Key</summary>
+      <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 6 }}>
+        <div style={LEGEND_HEAD}>Lines</div>
+        {EDGE_KINDS.map((kind) => {
+          const st = edgeStyle(kind);
+          return (
+            <LegendRow key={kind} mark={
+              <svg width="16" height="6">
+                <line x1="0" y1="3" x2="16" y2="3" stroke={`var(${st.colorVar})`} strokeWidth="1.6" strokeDasharray={st.dash || undefined} />
               </svg>
-              {label}
-            </div>
-          ))}
-        </>
-      )}
-    </div>
+            }>
+              <Term dict={EDGE} value={kind} />
+            </LegendRow>
+          );
+        })}
+        <div style={LEGEND_HEAD}>Dot by the name: layer</div>
+        {Object.keys(LAYER).map((layer) => (
+          <LegendRow key={layer} mark={dot(`var(${nodeAccentVar(layer)})`)}><Term dict={LAYER} value={layer} /></LegendRow>
+        ))}
+        <div style={LEGEND_HEAD}>Corner dot: status</div>
+        {Object.keys(STATUS_DOT).map((status) => (
+          <LegendRow key={status} mark={dot(STATUS_DOT[status])}><span title={status}>{statusLabel(status)}</span></LegendRow>
+        ))}
+        {cutActive && (
+          <>
+            <div style={LEGEND_HEAD}>Smallest version</div>
+            {CUT_TIERS.map(([label, color, opacity]) => (
+              <LegendRow key={label} style={{ opacity }} mark={
+                <svg width="16" height="10">
+                  <rect x="2" y="1" width="12" height="8" rx="2" fill="none" stroke={color} strokeWidth="1.5" />
+                </svg>
+              }>
+                {label}
+              </LegendRow>
+            ))}
+          </>
+        )}
+      </div>
+    </details>
   );
 }

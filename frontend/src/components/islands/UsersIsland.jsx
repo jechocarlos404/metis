@@ -178,7 +178,7 @@ export default function UsersIsland() {
                 )}
               </span>
               <span style={{ color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{u.email || "—"}</span>
-              <span title={roleCan(u.role)}>{u.role ? <Badge tone={ROLE_TONES[u.role]}>{roleLabel(u.role)}</Badge> : <Badge tone="warn">no role</Badge>}</span>
+              <span title={u.role ? roleCan(u.role) : "No role yet, so this person sees nothing until you give them one."}>{u.role ? <Badge tone={ROLE_TONES[u.role]}>{roleLabel(u.role)}</Badge> : <Badge tone="warn">no role</Badge>}</span>
               <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: u.enabled ? "var(--ok-fg)" : "var(--text-secondary)" }}>
                 {u.enabled ? "enabled" : "disabled"}
               </span>
@@ -188,7 +188,7 @@ export default function UsersIsland() {
             </div>
           ))}
           {users.length === 0 && !error && (
-            <div style={{ padding: 16, fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>No users yet.</div>
+            <div style={{ padding: 16, fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>No users yet. Add one with New user above.</div>
           )}
         </div>
       </div>

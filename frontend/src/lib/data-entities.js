@@ -310,7 +310,7 @@ const PRODUCT_BUNDLES = {
   title: (r) => `${r.product_name} includes ${r.capability_name}`,
   columns: [
     { key: "product", label: "Product", width: "minmax(0,1fr)", render: (r) => r.product_name },
-    { key: "includes", label: "", width: "64px", render: () => "includes" },
+    { key: "includes", label: "", width: "80px", render: () => "includes" },
     { key: "capability", label: "Capability", width: "minmax(0,1fr)",
       render: (r) => r.capability_name },
   ],

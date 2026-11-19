@@ -293,6 +293,7 @@ export default function DataIsland() {
                 const raw = c.raw?.(row);
                 return (
                   <span key={c.key} style={c.mono ? CELL_MONO : CELL}
+                    data-raw={raw ?? undefined}
                     title={raw != null && String(raw) !== String(value) ? String(raw) : undefined}>
                     {tone ? <Badge tone={tone}>{value}</Badge> : (value ?? "—")}
                   </span>
@@ -307,7 +308,7 @@ export default function DataIsland() {
             </div>
           ))}
           {rows.length === 0 && (
-            <div style={{ padding: 16, ...MUTED }}>No {ent.label.toLowerCase()} yet.</div>
+            <div style={{ padding: 16, ...MUTED }}>No {ent.label.toLowerCase()} yet. Add one with New {ent.singular} above.</div>
           )}
         </div>
       </div>

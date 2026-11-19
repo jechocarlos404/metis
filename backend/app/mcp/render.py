@@ -374,14 +374,20 @@ def product_score(score: dict) -> str:
         f"{missing} missing a capability.",
         "",
     ]
+    report = score.get("report")
+    short = [
+        f["name"]
+        for f in (report["features"] if report else [])
+        if f["existing"] < f["total"] and f["name"] not in score["unknown_features"]
+    ]
     for label, names in (
         ("Buildable — every capability known and ours", buildable),
-        ("Partly known — every named capability ours, but the list is incomplete", partly),
+        ("Partly known (known_covered) — every named capability ours, list incomplete", partly),
         ("Not described — capability list incomplete and not covered", not_described),
+        ("Missing a capability — fully described, needs one we don't have", short),
     ):
         if names:
             lines.append(f"{label} ({len(names)}): {', '.join(names)}")
-    report = score.get("report")
     if report:
         lines.append(
             f"Across its named capabilities: {report['existing']}/{report['needed']} ours, "

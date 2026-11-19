@@ -442,6 +442,7 @@ async def test_product_score_groups_sum_to_the_total(api):
     )
     assert "Partly known" in text and "Rival map" in text
     assert "Not described" in text and "Rival social" in text
+    assert "Missing a capability — fully described, needs one we don't have (1): Rival weather" in text
     assert "Lower bound" in text
     assert text.endswith(f"Open: /products?product={w['rival'].id}")
     by_id = await server._dispatch("product_score", {"product": str(w["climb"].id)})
@@ -520,6 +521,16 @@ async def test_inventory_tools_take_ids_only_in_the_shape_of_ids(name, args):
     fires before any request is made."""
     with pytest.raises(ValueError):
         await server._dispatch(name, args)
+
+
+async def test_an_api_refusal_is_rendered_not_raised(api):
+    """A 404 from the API comes back as text the agent can quote."""
+    await _world(*api)
+    result = await server.call_tool(
+        "feature_why", {"feature": "16ce952e-44cd-4317-9176-b3c7de518d9f"}
+    )
+    text = result[0].text if isinstance(result, list) else result.content[0].text
+    assert text.startswith("Refused (404)")
 
 
 @pytest.mark.parametrize("path", ["/api/stacks/metis/recommend", "/api/capabilities/coverage"])

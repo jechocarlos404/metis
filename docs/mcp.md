@@ -27,10 +27,19 @@ The inventory tools answer the portfolio questions:
 | `journeys` | Lists journeys. Given a journey id, it returns each step's verdict (`buildable`, `known_covered`, `missing`, `unknown`) and whether a user can do the step today. | `GET /api/journeys`, `GET /api/journeys/{id}/analysis` |
 | `ready_features` | Our pending features whose dependencies are all done. Optionally limited to one product. | `GET /api/graph/ready` |
 
-The technology and buy tools: `tech_search`, `capability_supply`,
-`tech_blast_radius`, `tech_exposure`, `stack_redundancy`, `tech_encounters`,
-`stack_recommend`, and `propose_binding`. `propose_binding` writes nothing. It
-returns a proposal and a link.
+The technology and buy tools, which stay hidden on the desktop until there is
+data for them:
+
+| Tool | What it answers |
+|---|---|
+| `tech_search` | Searches the technology catalog. It returns the slugs the other technology tools take. |
+| `capability_supply` | What can answer a capability, with fit, stance and ops cost, plus the features that realize it. |
+| `tech_blast_radius` | Which products use a technology, and whether each use is required or `off_stack`. |
+| `tech_exposure` | What is dying and whether it matters: expiring release lines, stances being abandoned, a bus factor of one. |
+| `stack_redundancy` | Capabilities a product answers more than once. They are reported, never resolved. |
+| `tech_encounters` | Who here has touched a technology, deepest and most recent first. |
+| `stack_recommend` | Ranked bindings for a product's stack, the offers pruned and why, and slots left unresolved. |
+| `propose_binding` | Writes nothing. It checks the slot's offers and returns a proposal with a desktop link. |
 
 Resources: `metis://ontology/model`, `metis://policy/adoptions`,
 `metis://tech/{slug}`, `metis://stacks/{product}`. Prompts:
@@ -50,6 +59,12 @@ answer.
    `/api/capabilities/coverage`, which is a read that takes a body. That exact
    path is on the backend's read-by-POST list (`_READS_BY_POST` in
    `backend/app/auth/deps.py`). When `AUTH_ENABLED=false`, no token is fetched.
+
+   **When the backend runs with `AUTH_ENABLED=false`, the surface check is off.**
+   Every request, MCP included, is treated as the dev desktop admin, so the
+   backend would accept a write. MCP stays read-only in that mode only because
+   the server has no tool that writes. Keep backend auth on wherever the MCP
+   server is exposed to anything but your own agent.
 2. **Agent → MCP server.** This token applies to SSE only. A listening port
    would otherwise lend the server's API token to anyone who can reach it, so
    the server refuses to start SSE without `MCP_SSE_TOKEN`. Callers send
@@ -93,6 +108,7 @@ Or check this into the project as `.mcp.json`:
 {
   "mcpServers": {
     "metis": {
+      "type": "stdio",
       "command": "/path/to/metis/backend/.venv/bin/python",
       "args": ["-m", "app.mcp"],
       "env": {
@@ -106,6 +122,12 @@ Or check this into the project as `.mcp.json`:
 
 With the default `AUTH_ENABLED=true`, the server needs Keycloak at
 `KEYCLOAK_INTERNAL_URL`. `docker compose up` publishes it on `localhost:8080`.
+
+Settings come from the environment and from a `.env` file in the process's
+working directory. Claude Code starts stdio servers in the project directory,
+so when the project is the metis checkout, the root `.env` applies. For
+example, its `AUTH_ENABLED=false` overrides the defaults above. Set anything
+that must not change in `env` explicitly.
 
 ## SSE (compose profile `mcp`)
 
@@ -154,5 +176,10 @@ Or in `.mcp.json`:
   }
 }
 ```
+
+`.mcp.json` is usually committed, so it refers to the token as
+`${METIS_MCP_SSE_TOKEN}`, which Claude Code expands from the environment, and
+never contains the token itself. `claude mcp add` with the double-quoted
+header above writes the expanded token into your local config instead.
 
 A request without the bearer token gets `401 {"error": "unauthorized"}`.

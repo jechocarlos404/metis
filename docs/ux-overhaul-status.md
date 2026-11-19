@@ -63,7 +63,7 @@ on the Docker frontend against `metis_verify`, a copy of the real database.
 | Health badges only on failure | S1 | done | browser: hidden while healthy; failure row not exercised |
 | Settings hub (seed files, Users, AI models, Raw data) | S1 | done | browser |
 | A · Home (idea check, portfolio scores, most reused) | S2 | done | browser: picked, checked, saved an idea |
-| B · Get started (empty instance only) | S2 | done | build only: this instance isn't empty |
+| B · Get started (empty instance only) | S2 | done | browser on an empty database: admin sees 5 steps, viewer a short note |
 | C · Product profile + on-demand Plan | S3 | done | browser (admin + viewer) |
 | D · Ideas & journeys | S6 | done | browser: saved idea renders with shared vocabulary |
 | E · Capability page merged; list = tree / most reused / needs attention | S5 | done | browser |

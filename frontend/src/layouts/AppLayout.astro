@@ -11,21 +11,18 @@ const canWrite = ["editor", "admin"].includes(user?.role);
 // Technology and Stacks stay out of the nav until they hold data. On any
 // failure (timeout, 401, backend down) the item stays hidden.
 const backend = (process.env.API_INTERNAL_URL || "http://localhost:8000").replace(/\/$/, "");
-const hasData = async (route, count) => {
-  try {
-    const res = await fetch(`${backend}${route}`, {
-      headers: { authorization: `Bearer ${Astro.locals.accessToken}` },
-      signal: AbortSignal.timeout(1500),
-    });
-    return res.ok && count(await res.json()) > 0;
-  } catch {
-    return false;
-  }
-};
-const [hasTech, hasStacks] = await Promise.all([
-  hasData("/api/tech?limit=1", (b) => b?.total ?? 0),
-  hasData("/api/stacks", (b) => (Array.isArray(b) ? b.length : 0)),
-]);
+let presence = {};
+try {
+  const res = await fetch(`${backend}/api/tech/presence`, {
+    headers: { authorization: `Bearer ${Astro.locals.accessToken}` },
+    signal: AbortSignal.timeout(1500),
+  });
+  if (res.ok) presence = await res.json();
+} catch {
+  // stay hidden
+}
+const hasTech = presence?.technologies === true;
+const hasStacks = presence?.stacks === true;
 
 const path = Astro.url.pathname;
 const under = (href) => path === href || path.startsWith(href + "/");
@@ -46,6 +43,11 @@ const groups = [
   },
   {
     label: "Build & buy",
+    // Closed by default; open when the current page is inside it. Decided by
+    // path, not by the items, so a page under /tech opens it even if the
+    // presence call failed.
+    collapsible: true,
+    open: ["/features", "/tech", "/stacks"].some(under),
     items: [
       { href: "/features", label: "Features", icon: "network" },
       hasTech && { href: "/tech", label: "Technology", icon: "circuit-board" },
@@ -104,7 +106,19 @@ const initials =
         <nav aria-label="Main" style="display:flex; flex-direction:column; gap:2px; padding:0 10px;">
           {top.map((item) => <NavLink {...withActive(item)} />)}
           {
-            groups.map((group) => (
+            groups.map((group) => group.collapsible ? (
+              <details class="nav-group" open={group.open} style="margin-top:14px;">
+                <summary aria-label={group.label} title={group.label}>
+                  <span class="rail-hide">{group.label}</span>
+                  <svg class="nav-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="m9 18 6-6-6-6" />
+                  </svg>
+                </summary>
+                <div role="group" aria-label={group.label} style="display:flex; flex-direction:column; gap:2px; padding-top:2px;">
+                  {group.items.map((item) => <NavLink {...withActive(item)} />)}
+                </div>
+              </details>
+            ) : (
               <div role="group" aria-label={group.label} style="display:flex; flex-direction:column; gap:2px; margin-top:14px;">
                 <div
                   class="rail-hide"

@@ -34,6 +34,19 @@ main:focus { outline: none; }
 /* DS Checkbox, Switch and Radio hide the native input; show its focus on the drawn control. */
 [data-ds-control]:focus-visible + span { outline: 2px solid var(--border-focus); outline-offset: 2px; }
 
+/* Collapsible nav group (AppLayout). Summary matches the plain group label. */
+.nav-group > summary {
+  display: flex; align-items: center; justify-content: space-between; gap: 6px;
+  padding: 0 10px 4px; list-style: none; cursor: pointer;
+  font-size: var(--text-2xs); color: var(--text-secondary); font-weight: var(--weight-medium);
+  border-radius: var(--radius-sm);
+}
+.nav-group > summary::-webkit-details-marker { display: none; }
+.nav-group > summary:hover { color: var(--text-heading); }
+.nav-group > summary:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 2px; }
+.nav-group .nav-chevron { flex: none; transition: transform 120ms ease; }
+.nav-group[open] .nav-chevron { transform: rotate(90deg); }
+
 /* Narrow screens: the sidebar becomes an icon rail so content keeps its width. */
 @media (max-width: 960px) {
   .app-sidebar { width: 56px !important; }
@@ -44,6 +57,7 @@ main:focus { outline: none; }
   .app-sidebar > div:first-child span:first-child { font-size: 0 !important; }
   .app-sidebar > div:first-child span:first-child::before { content: "m"; font-size: 20px; }
   .sidebar-user { flex-direction: column; padding: 10px 0 !important; }
+  .app-sidebar .nav-group > summary { justify-content: center; padding: 4px 0; }
 }
 
 /* Rows and cards made operable with lib/pressable.js */

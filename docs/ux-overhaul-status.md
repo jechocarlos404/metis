@@ -52,33 +52,49 @@ private). Branch `feat/ux-overhaul`. Decisions from the owner, 2026-11-19:
 
 ## Item status
 
-Legend: todo · doing · done (verified how) · partial · skipped (why)
+Legend: done (how verified) · partial · deferred. "Browser" = clicked through
+on the Docker frontend against `metis_verify`, a copy of the real database.
 
 | Item | Owner | Status | Verified |
 |---|---|---|---|
-| Foundation: words, Term, coverage, SeedFiles, CapabilityPicker, PRODUCT.md | me | done | astro build |
-| Nav: 6 core + 2 optional + Settings + Guide | S1 | todo | |
-| Tech / Stacks hidden until data | S1 | todo | |
-| Health badges only on failure | S1 | todo | |
-| Settings hub (Users, AI models, Data, Seed files) | S1 | todo | |
-| A · Home | S2 | todo | |
-| B · Get started | S2 | todo | |
-| C · Product profile + on-demand Plan | S3 | todo | |
-| D · Ideas & journeys | S6 | todo | |
-| E · Capability page merged | S5 | todo | |
-| F · Features Plan view | S4 | todo | |
-| Agent MCP inventory tools | S8 | todo | |
-| Fix 1 onCandidate no-op | foundation + S3 | todo | |
-| Fix 2 parent pre-fill | S5 | todo | |
-| Fix 3 dead-end empty states | S2, S3, S7 | todo | |
-| Fix 4 Chat examples | S7 | todo | |
-| Fix 5 journeys "pending" | S6 | todo | |
-| Fix 6 Features empty copy | S4 | todo | |
-| Fix 7 Exposure empty copy | S7 | todo | |
-| Fix 8 Goals dialog default | S5 | todo | |
-| Fix 9 supply note dismissal | S5 | todo | |
-| Fix 10 health badges | S1 | todo | |
-| Fix 11 toggle + delete patterns | S6, S7 | todo | |
-| Fix 12 Stacks picker (verify first) | S7 | todo | |
-| Guide + README rewrite | me | todo | |
-| Unverified tech guesses | — | deferred → proposal | |
+| Foundation: words, Term, coverage, SeedFiles, CapabilityPicker, PRODUCT.md | me | done | build, browser |
+| Nav: Home, Chat · Portfolio (Products, Ideas & journeys, Capabilities, Goals) · Build & buy (Features, Technology*, Stacks*) · Settings, Guide | S1 | done | browser (admin + viewer) |
+| Tech / Stacks hidden until data | S1 | done | browser: hidden with 0 technologies, 0 stacks |
+| Health badges only on failure | S1 | done | browser: hidden while healthy; failure row not exercised |
+| Settings hub (seed files, Users, AI models, Raw data) | S1 | done | browser |
+| A · Home (idea check, portfolio scores, most reused) | S2 | done | browser: picked, checked, saved an idea |
+| B · Get started (empty instance only) | S2 | done | build only: this instance isn't empty |
+| C · Product profile + on-demand Plan | S3 | done | browser (admin + viewer) |
+| D · Ideas & journeys | S6 | done | browser: saved idea renders with shared vocabulary |
+| E · Capability page merged; list = tree / most reused / needs attention | S5 | done | browser |
+| F · Features Plan view | S4 | done | browser: tabs render; cut not exercised |
+| Agent MCP: 8 inventory tools (16 total) | S8 | done | 238 backend tests; stdio lists tools, clean exit |
+| Fix 1 onCandidate no-op | foundation + S3 | done | code: links when no handler |
+| Fix 2 parent pre-fill | S5 | done | code |
+| Fix 3 dead-end empty states | S2, S3, S7 | done | browser (viewer Plan tab) |
+| Fix 4 Chat examples | S7 | done | browser |
+| Fix 5 journeys "pending" | S6 | done | code |
+| Fix 6 Features empty copy | S4 | done | code |
+| Fix 7 Exposure empty copy | S7 | done | code |
+| Fix 8 Goals dialog default | S5 | done | code |
+| Fix 9 supply note dismissal | S5 | done | note removed |
+| Fix 10 health badges | S1 | done | browser |
+| Fix 11 toggle + delete patterns | S6, S7 | done | code |
+| Fix 12 Stacks picker | S7 | done | code (bug was real) |
+| Viewers can run the MVP cut (read-by-POST) | me | done | tests |
+| Guide + README | me | done | browser (Guide) |
+| Unverified tech guesses | — | deferred | proposal: docs/proposal-unverified-tech.md |
+
+\* shown only when data exists.
+
+## Open follow-ups
+
+- Labels streams defined locally that could move into `lib/words.js`: chat agent
+  names and proposal statuses (ChatIsland), stack flags (StacksIsland), incoming
+  edge words (FeaturesIsland), role words (components/shell/roles.js).
+- The nav presence check makes two backend calls per page render; a cheap count
+  endpoint would be better.
+- `unlinked_feature` health findings (a feature with no capability) have no home
+  in the UI yet.
+- Deleting a capability that has sub-capabilities moves them to the top level
+  without a warning.

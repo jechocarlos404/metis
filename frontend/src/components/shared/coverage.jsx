@@ -71,14 +71,14 @@ export function CoverageReport({ report, onCandidate }) {
           To build: {report.missing.join(", ")}
         </div>
       )}
-      {report.features.map((f) => (
-        <div key={f.name} style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      {report.features.map((f, i) => (
+        <div key={`${i}:${f.name}`} style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           <div style={{ display: "flex", gap: 8, alignItems: "baseline" }}>
             <span style={{ fontSize: "var(--text-sm)", fontWeight: "var(--weight-medium)", color: "var(--text-heading)" }}>{f.name}</span>
             <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>{f.existing} of {f.total} ours</span>
           </div>
-          {f.capabilities.map((need) => (
-            <NeedRow key={need.name} need={need} onCandidate={onCandidate} />
+          {f.capabilities.map((need, j) => (
+            <NeedRow key={`${j}:${need.name}`} need={need} onCandidate={onCandidate} />
           ))}
         </div>
       ))}

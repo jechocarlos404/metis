@@ -85,7 +85,7 @@ export const VERDICT = {
 /** Where one capability need stands against the inventory. */
 export const NEED = {
   ours: { label: "ours", tone: "ok", hint: "one of our features realizes it" },
-  elsewhere: { label: "only elsewhere", tone: "warn", hint: "only external products have it — not ours" },
+  elsewhere: { label: "only elsewhere", tone: "warn", hint: "only products we don't own have it, so it isn't ours" },
   none: { label: "missing", tone: "danger", hint: "no product in metis has it" },
 };
 
@@ -94,3 +94,7 @@ export function plain(dict, value) {
   if (value == null) return "";
   return dict[value] ?? String(value).replace(/_/g, " ").toLowerCase();
 }
+
+/** The backend's slug rule (services/slugs.py): lowercase kebab. Capability
+ *  identity is the slug, so "Route Import" and "route import" are one name. */
+export const slugify = (value) => String(value ?? "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");

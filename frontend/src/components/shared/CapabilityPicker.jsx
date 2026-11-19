@@ -1,4 +1,5 @@
 import React from "react";
+import { slugify } from "../../lib/words.js";
 
 /**
  * Pick capabilities by exact name — recognition, not recall, and never a fuzzy
@@ -14,16 +15,16 @@ export function CapabilityPicker({ id = "capability-picker", options, value, onC
   const [query, setQuery] = React.useState("");
   const [active, setActive] = React.useState(0);
   const [open, setOpen] = React.useState(false);
-  const picked = new Set(value.map((v) => v.toLowerCase()));
+  const picked = new Set(value.map(slugify));
   const q = query.trim().toLowerCase();
   const matches = q
     ? options
-        .filter((o) => !picked.has(o.name.toLowerCase()) && o.name.toLowerCase().includes(q))
+        .filter((o) => !picked.has(slugify(o.name)) && o.name.toLowerCase().includes(q))
         .sort((a, b) => Number(!a.name.toLowerCase().startsWith(q)) - Number(!b.name.toLowerCase().startsWith(q)) || a.name.localeCompare(b.name))
         .slice(0, 8)
     : [];
-  const exact = options.some((o) => o.name.toLowerCase() === q);
-  const canAddNew = allowNew && q && !exact && !picked.has(q);
+  const exact = options.some((o) => slugify(o.name) === slugify(q));
+  const canAddNew = allowNew && slugify(q) && !exact && !picked.has(slugify(q));
 
   const add = (name) => {
     onChange([...value, name]);
@@ -31,7 +32,7 @@ export function CapabilityPicker({ id = "capability-picker", options, value, onC
     setActive(0);
   };
   const remove = (name) => onChange(value.filter((v) => v !== name));
-  const known = new Set(options.map((o) => o.name.toLowerCase()));
+  const known = new Set(options.map((o) => slugify(o.name)));
 
   const onKeyDown = (e) => {
     if (e.key === "ArrowDown") { e.preventDefault(); setActive((a) => Math.min(a + 1, Math.max(matches.length - 1, 0))); setOpen(true); }
@@ -54,7 +55,7 @@ export function CapabilityPicker({ id = "capability-picker", options, value, onC
       <label htmlFor={id} style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)" }}>{label}</label>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center", border: "1px solid var(--border-control)", borderRadius: "var(--radius-md)", padding: "6px 8px", background: "var(--surface-card)" }}>
         {value.map((name) => {
-          const isKnown = known.has(name.toLowerCase());
+          const isKnown = known.has(slugify(name));
           return (
             <span key={name} title={isKnown ? undefined : "No product in metis has a capability by this exact name"}
               style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: "var(--text-xs)", padding: "2px 4px 2px 9px", borderRadius: "var(--radius-pill)", background: isKnown ? "var(--accent-wash)" : "var(--danger-bg)", color: isKnown ? "var(--text-accent)" : "var(--danger-fg)" }}>

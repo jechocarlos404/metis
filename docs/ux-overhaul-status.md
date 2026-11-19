@@ -70,17 +70,17 @@ on the Docker frontend against `metis_verify`, a copy of the real database.
 | F · Features Plan view | S4 | done | browser: ran the smallest-version cut for one feature |
 | Agent MCP: 8 inventory tools (16 total) | S8 | done | 238 backend tests; stdio lists tools, clean exit |
 | Fix 1 onCandidate no-op | foundation + S3 | done | code: links when no handler |
-| Fix 2 parent pre-fill | S5 | done | code |
+| Fix 2 parent pre-fill | S5 | done | browser: New starts top level; Edit pre-fills its real parent |
 | Fix 3 dead-end empty states | S2, S3, S7 | done | browser (viewer Plan tab) |
 | Fix 4 Chat examples | S7 | done | browser |
-| Fix 5 journeys "pending" | S6 | done | code |
-| Fix 6 Features empty copy | S4 | done | code |
-| Fix 7 Exposure empty copy | S7 | done | code |
-| Fix 8 Goals dialog default | S5 | done | code |
+| Fix 5 journeys "pending" | S6 | done | browser: steps read "not built" |
+| Fix 6 Features empty copy | S4 | done | browser: "No feature matches …"; empty-instance copy by code |
+| Fix 7 Exposure empty copy | S7 | done | browser: "No technologies recorded, so nothing to check." |
+| Fix 8 Goals dialog default | S5 | done | browser: product goal when org goals exist; org when none (code) |
 | Fix 9 supply note dismissal | S5 | done | note removed |
 | Fix 10 health badges | S1 | done | browser |
-| Fix 11 toggle + delete patterns | S6, S7 | done | code |
-| Fix 12 Stacks picker | S7 | done | code (bug was real) |
+| Fix 11 toggle + delete patterns | S6, S7 | done | browser: journey delete is inline Keep / Delete; Tech uses Tabs |
+| Fix 12 Stacks picker | S7 | done | browser: picker and panel name the same product |
 | Viewers can run the MVP cut (read-by-POST) | me | done | tests |
 | Guide + README | me | done | browser (Guide, on real data) |
 | Unverified tech guesses | — | deferred | proposal: docs/proposal-unverified-tech.md |
@@ -105,7 +105,6 @@ on the Docker frontend against `metis_verify`, a copy of the real database.
 | Journey 7 · Chat | done | examples, readable steps, plain statuses (browser) |
 | Journey 8 · read-only viewer | done in UI | browser as viewer; the stack runs with `AUTH_ENABLED=false`, so backend refusals are covered by unit tests, not end to end |
 
-Marked "code" above: implemented and read, not clicked through.
 
 ## Open follow-ups
 

@@ -41,7 +41,10 @@ const STEP_W = 176;
 const STEP_H = 92;
 const GAP = 44;
 const CAP_H = 26;
-const CAP_Y = STEP_H + 120;
+const CAP_GAP = 120; // from the steps' foot to the first row of capabilities
+// A card's text, measured: its name in full, then where it lives and its status.
+const LABEL_TOP = 24;
+const TEXT_GAP = 6;
 
 export default function JourneysIsland({ canWrite }) {
   const [journeys, setJourneys] = React.useState(null);
@@ -367,6 +370,28 @@ function JourneyMap({ steps }) {
   const stepsWidth = stepX(steps.length - 1) + STEP_W + 16;
   const width = Math.max(stepsWidth, 640);
 
+  // Every card is as tall as the one with the most text, so no name, product
+  // or status is cut short. Measured, not guessed: the font is proportional
+  // and loads late, and an edit changes the text without remounting the map.
+  const labelEls = React.useRef([]);
+  const whereEls = React.useRef([]);
+  const [text, setText] = React.useState({ label: 32, where: 14 });
+  React.useEffect(() => {
+    const tallest = (els, fallback) => Math.max(0, ...els.filter(Boolean).map((el) => el.offsetHeight)) || fallback;
+    const measure = () => {
+      const next = { label: tallest(labelEls.current, 32), where: tallest(whereEls.current, 14) };
+      setText((t) => (t.label === next.label && t.where === next.where ? t : next));
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") return undefined;
+    const observer = new ResizeObserver(measure);
+    for (const el of [...labelEls.current, ...whereEls.current]) if (el) observer.observe(el);
+    return () => observer.disconnect();
+  }, [steps]);
+  const whereY = LABEL_TOP + text.label + TEXT_GAP;
+  const stepH = Math.max(STEP_H, whereY + text.where + 12);
+  const capY = stepH + CAP_GAP;
+
   // Capability chips: packed left-to-right along the bottom, each as close as
   // it can get to the centre of the steps that use it, wrapping onto another
   // row rather than running past the steps where nobody would scroll to them.
@@ -381,10 +406,10 @@ function JourneyMap({ steps }) {
       row += 1;
       x = Math.min(Math.max(16, ideal), width - 16 - w);
     }
-    placed.push({ ...c, x, w, y: CAP_Y + row * (CAP_H + 10) });
+    placed.push({ ...c, x, w, y: capY + row * (CAP_H + 10) });
     cursor = x + w + 10;
   }
-  const height = CAP_Y + (row + 1) * (CAP_H + 10) + 14;
+  const height = capY + (row + 1) * (CAP_H + 10) + 14;
 
   // Steps and capabilities that run past the panel: say so instead of a silent scroll.
   const scrollRef = React.useRef(null);
@@ -428,11 +453,15 @@ function JourneyMap({ steps }) {
     },
   });
 
+  // A step or capability is lit when it is the traced one or touches it.
   const active = (stepIdx, capKey) => {
     if (!hover) return true;
     if (hover.kind === "step") return stepIdx === hover.key || (capKey && placed.find((c) => c.key === capKey)?.steps.includes(hover.key));
     return capKey === hover.key || (stepIdx != null && placed.find((c) => c.key === hover.key)?.steps.includes(stepIdx));
   };
+  // A link only when one of its own ends is the traced one: a lit step's link
+  // to a capability it isn't tracing would point at a dimmed pill.
+  const linkActive = (stepIdx, capKey) => !hover || (hover.kind === "step" ? stepIdx === hover.key : capKey === hover.key);
 
   const hoveredCap = hover?.kind === "cap" ? placed.find((c) => c.key === hover.key) : null;
   const hoveredStep = hover?.kind === "step" ? steps[hover.key] : null;
@@ -481,25 +510,26 @@ function JourneyMap({ steps }) {
           </defs>
           {/* path between steps */}
           {steps.slice(1).map((_, i) => (
-            <line key={`a${i}`} x1={stepX(i) + STEP_W + 4} y1={STEP_H / 2} x2={stepX(i + 1) - 6} y2={STEP_H / 2}
+            <line key={`a${i}`} x1={stepX(i) + STEP_W + 4} y1={stepH / 2} x2={stepX(i + 1) - 6} y2={stepH / 2}
               stroke="var(--text-secondary)" strokeWidth="1.5" markerEnd="url(#jarrow)" />
           ))}
           {/* step → capability links */}
           {placed.flatMap((c) => c.steps.map((i) => {
-            const on = active(i, c.key);
+            const on = linkActive(i, c.key);
             const kind = needKind(c.need);
             const x1 = stepX(i) + STEP_W / 2;
             const x2 = c.x + c.w / 2;
             return (
               <path key={`${c.key}-${i}`}
-                d={`M${x1},${STEP_H} C${x1},${STEP_H + 60} ${x2},${c.y - 60} ${x2},${c.y}`}
+                d={`M${x1},${stepH} C${x1},${stepH + 60} ${x2},${c.y - 60} ${x2},${c.y}`}
                 fill="none" stroke={on && hover ? TONE[NEED[kind].tone].fg : "var(--border-default)"}
                 strokeWidth={on && hover ? 1.8 : 1} strokeDasharray={kind === "none" ? "3,3" : undefined}
                 opacity={on ? 1 : 0.15} />
             );
           }))}
           {steps.map((s, i) => (
-            <StepCard key={i} step={s} x={stepX(i)} dim={!active(i, null)}
+            <StepCard key={i} step={s} x={stepX(i)} dim={!active(i, null)} h={stepH} text={text} whereY={whereY}
+              labelRef={(el) => { labelEls.current[i] = el; }} whereRef={(el) => { whereEls.current[i] = el; }}
               onEnter={() => setHover({ kind: "step", key: i })} onLeave={leave} tap={tapToTrace({ kind: "step", key: i })} />
           ))}
           {placed.map((c) => {
@@ -537,35 +567,33 @@ function truncate(text, n) {
   return text.length > n ? `${text.slice(0, Math.max(1, n - 1))}…` : text;
 }
 
-// "Hanko: Coffee… · in progress": shorten the product, never the status.
-function fitWhere(where, n) {
-  const i = where.lastIndexOf(" · ");
-  if (i < 0 || where.length <= n) return truncate(where, n);
-  const tail = where.slice(i);
-  return `${truncate(where.slice(0, i), Math.max(4, n - tail.length))}${tail}`;
-}
-
-function StepCard({ step, x, dim, onEnter, onLeave, tap }) {
+// h: the shared card height; text: the tallest name and "where" lines, which
+// labelRef and whereRef measure; whereY: where the "where" line starts.
+function StepCard({ step, x, dim, h, text, whereY, labelRef, whereRef, onEnter, onLeave, tap }) {
   const v = verdictOf(stepKind(step), stepMatches(step));
   const t = TONE[v.tone];
   const f = step.feature;
   const where = stepWhere(step);
+  const cut = where.lastIndexOf(" · "); // the status after it wraps as one piece: "in progress"
   const card = (
     <g transform={`translate(${x},0)`} opacity={dim ? 0.3 : 1} onMouseEnter={onEnter} onMouseLeave={onLeave}
       style={{ cursor: f ? "pointer" : "default" }}>
       <title>{`${step.label}\n${where}\n${v.label}: ${v.hint}${step.note ? `\n${step.note}` : ""}`}</title>
-      <rect width={STEP_W} height={STEP_H} rx="8" fill="var(--surface-card)" stroke="var(--border-default)"
+      <rect width={STEP_W} height={h} rx="8" fill="var(--surface-card)" stroke="var(--border-default)"
         strokeDasharray={f ? undefined : "4,3"} />
-      <rect width="4" height={STEP_H - 16} x="0" y="8" rx="2" fill={t.fg} />
+      <rect width="4" height={h - 16} x="0" y="8" rx="2" fill={t.fg} />
       <text x="14" y="18" fontSize="10" fill="var(--text-secondary)" fontFamily="var(--font-mono)">{String(step.position + 1).padStart(2, "0")}</text>
       <text x={STEP_W - 10} y="18" fontSize="10" textAnchor="end" fill={t.fg}>{v.label}</text>
-      <foreignObject x="12" y="24" width={STEP_W - 22} height="40">
-        <div xmlns="http://www.w3.org/1999/xhtml" style={{
-          fontSize: 12, lineHeight: "16px", color: "var(--text-heading)", fontWeight: 500,
-          overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical",
+      <foreignObject x="12" y={LABEL_TOP} width={STEP_W - 22} height={text.label}>
+        <div ref={labelRef} xmlns="http://www.w3.org/1999/xhtml" style={{
+          fontSize: 12, lineHeight: "16px", color: "var(--text-heading)", fontWeight: 500, overflowWrap: "anywhere",
         }}>{step.label}</div>
       </foreignObject>
-      <text x="14" y={STEP_H - 12} fontSize="10.5" fill="var(--text-secondary)">{fitWhere(where, 28)}</text>
+      <foreignObject x="14" y={whereY} width={STEP_W - 24} height={text.where}>
+        <div ref={whereRef} xmlns="http://www.w3.org/1999/xhtml" style={{
+          fontSize: 10.5, lineHeight: "14px", color: "var(--text-secondary)", overflowWrap: "anywhere",
+        }}>{cut < 0 ? where : <>{where.slice(0, cut)} · <span style={{ whiteSpace: "nowrap" }}>{where.slice(cut + 3)}</span></>}</div>
+      </foreignObject>
     </g>
   );
   return f

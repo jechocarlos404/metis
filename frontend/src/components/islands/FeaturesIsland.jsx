@@ -230,7 +230,11 @@ export default function FeaturesIsland({ canWrite = true }) {
   const plannedShown = hasPlanned(visibleLayout.nodes);
   const canPlan = productFilter ? plannedShown : hasPlanned(layout.nodes);
   const shownTab = tab === "plan" && !canPlan ? "directory" : tab;
-  const visibleTopo = activeProduct && topoOrder ? topoOrder.filter((f) => matchesProduct(f.id)) : topoOrder;
+  // Build order answers "what to build next", so finished work stays out; the
+  // note under it says how much was left out.
+  const shownTopo = activeProduct && topoOrder ? topoOrder.filter((f) => matchesProduct(f.id)) : topoOrder;
+  const visibleTopo = shownTopo && shownTopo.filter((f) => f.status !== "done");
+  const topoDone = shownTopo ? shownTopo.length - visibleTopo.length : 0;
   // A cycle anywhere stops the build order, so show every cycle when it does.
   const visibleCycles = activeProduct && topoError !== "cycle" ? cycles.filter((c) => c.some((f) => matchesProduct(f.id))) : cycles;
 
@@ -501,6 +505,7 @@ export default function FeaturesIsland({ canWrite = true }) {
             ready={visibleReady}
             cycles={visibleCycles}
             topoOrder={visibleTopo}
+            topoDone={topoDone}
             topoError={topoError}
             selectedId={selected}
             onSelect={selectFeature}
@@ -954,7 +959,7 @@ function PlanList({ items, selectedId, onSelect, numbered, limit }) {
 }
 
 // Shown only while a feature of ours is planned (see canPlan).
-function PlanView({ ready, cycles, topoOrder, topoError, selectedId, onSelect, canCut, cutTargetOptions, cutTarget, onPickCutTarget, onRunCut, onClearCut, onShowCut, cut, cutError, cutting, matchesProduct, productFilter }) {
+function PlanView({ ready, cycles, topoOrder, topoDone, topoError, selectedId, onSelect, canCut, cutTargetOptions, cutTarget, onPickCutTarget, onRunCut, onClearCut, onShowCut, cut, cutError, cutting, matchesProduct, productFilter }) {
   const body = (content) => (
     <div style={{ flex: 1, minWidth: 0, overflowY: "auto", padding: 20 }}>{content}</div>
   );
@@ -999,10 +1004,13 @@ function PlanView({ ready, cycles, topoOrder, topoError, selectedId, onSelect, c
           ) : topoOrder == null ? (
             <div style={NOTE}>Loading…</div>
           ) : topoOrder.length === 0 ? (
-            <div style={NOTE}>None of these features are ours to build.</div>
+            <div style={NOTE}>{topoDone > 0 ? `Nothing left to build: ${count(topoDone, "feature")}, all done.` : "None of these features are ours to build."}</div>
           ) : (
             <>
-              <div style={NOTE}>What a feature needs comes before it.</div>
+              <div style={NOTE}>
+                What a feature needs comes before it.
+                {topoDone > 0 && ` Unfinished work only: ${count(topoDone, "done feature")} left out.`}
+              </div>
               <PlanList items={topoOrder} selectedId={selectedId} onSelect={onSelect} numbered limit={50} />
             </>
           )}

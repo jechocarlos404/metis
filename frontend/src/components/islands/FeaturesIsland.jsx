@@ -50,6 +50,15 @@ export default function FeaturesIsland({ canWrite = true }) {
     setPanelOpen(true);
     writeParams({ feature: id }, { push: true });
   }, []);
+  // Picked from the keyboard, a row hands focus to its details, so they are
+  // one Tab away rather than after every row of the list.
+  const panelRef = React.useRef(null);
+  const focusPanelFor = React.useRef(null);
+  React.useEffect(() => {
+    if (!detail || focusPanelFor.current !== detail.id) return;
+    focusPanelFor.current = null;
+    panelRef.current?.focus();
+  }, [detail]);
   // On a phone, changing the view closes the panel so the change shows.
   const changeTab = (t) => { setTab(t); setPanelOpen(false); writeParams({ tab: t === "directory" ? "" : t }, { push: true }); };
   const changeProduct = (v) => { setProductFilter(v); setPanelOpen(false); writeParams({ product: v }, { push: true }); };
@@ -552,7 +561,9 @@ export default function FeaturesIsland({ canWrite = true }) {
               const capabilitiesTitle = (n.capability_ids ?? []).map((c) => capabilityById.get(c)?.name).join(", ");
               const productNames = (nodeById.get(n.id)?.product_ids ?? []).map((pid) => productById.get(pid)?.name ?? "").filter(Boolean).join(", ");
               return (
-              <div key={n.id} {...pressable(() => selectFeature(n.id))} aria-pressed={selected === n.id} style={{ display: "grid", gridTemplateColumns: compactRows ? "minmax(0, 1fr) auto" : COLUMNS, columnGap: 12, alignItems: "center", padding: "10px 16px", borderBottom: i < directory.length - 1 ? "1px solid var(--border-hairline)" : "none", cursor: "pointer", fontSize: "var(--text-sm)", background: selected === n.id ? "var(--surface-hover)" : undefined }}>
+              <div key={n.id} {...pressable((e) => { selectFeature(n.id); if (e.type === "keydown") focusPanelFor.current = n.id; })} aria-pressed={selected === n.id} style={{ display: "grid", gridTemplateColumns: compactRows ? "minmax(0, 1fr) auto" : COLUMNS, columnGap: 12, alignItems: "center", padding: "10px 16px", borderBottom: i < directory.length - 1 ? "1px solid var(--border-hairline)" : "none", cursor: "pointer", fontSize: "var(--text-sm)",
+                // Selected: inset surface (muted text 4.98:1, priority bars still show) and an accent edge.
+                background: selected === n.id ? "var(--surface-inset)" : undefined, boxShadow: selected === n.id ? "inset 3px 0 0 var(--accent)" : undefined }}>
                 {compactRows ? (
                   // Narrow: the name, then product and capabilities on one line; badges on the right.
                   <>
@@ -590,7 +601,7 @@ export default function FeaturesIsland({ canWrite = true }) {
         </div>
         )}
           {(!phone || panelShown) && (
-          <aside style={{ ...(phone ? { flex: 1, minWidth: 0, margin: 16 } : { width: 300, flex: "none", margin: "20px 20px 20px 0" }), background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", padding: 16, display: "flex", flexDirection: "column", gap: 14, overflowY: "auto" }}>
+          <aside ref={panelRef} tabIndex={-1} aria-label="Feature details" style={{ ...(phone ? { flex: 1, minWidth: 0, margin: 16 } : { width: 300, flex: "none", margin: "20px 20px 20px 0" }), background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", padding: 16, display: "flex", flexDirection: "column", gap: 14, overflowY: "auto" }}>
             {phone && (
               <Button size="sm" variant="ghost" style={{ alignSelf: "flex-start", gap: 6 }} onClick={() => { setPanelOpen(false); writeParams({ feature: "" }, { push: true }); }}>
                 <span style={{ display: "inline-flex", transform: "rotate(180deg)" }}><Icon name="chevron-right" size={13} /></span>Back

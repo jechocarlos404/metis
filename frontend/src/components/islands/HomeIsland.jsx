@@ -96,7 +96,7 @@ function IdeaChecker({ inventory, canWrite }) {
   const [skipped, setSkipped] = React.useState(0); // named features left out of the last check
 
   const options = React.useMemo(() => inventory.map((c) => ({
-    id: c.id, name: c.name, slug: c.slug,
+    id: c.id, name: c.name, slug: c.slug, need: needKey(c),
     hint: c.ours ? (c.products.length ? `in ${count(c.products.length, "product")}` : "ours, in no product") : NEED[needKey(c)].label,
   })), [inventory]);
 

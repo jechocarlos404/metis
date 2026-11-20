@@ -584,7 +584,7 @@ function JourneyEditor({ base, draft: start, features, productById, inventory, o
   const byId = React.useMemo(() => new Map(inventory.map((c) => [c.id, c])), [inventory]);
   const bySlug = React.useMemo(() => new Map(inventory.map((c) => [c.slug, c])), [inventory]);
   const options = React.useMemo(() => inventory.map((c) => ({
-    id: c.id, name: c.name, slug: c.slug, hint: NEED[needKey(c)].label,
+    id: c.id, name: c.name, slug: c.slug, need: needKey(c), hint: NEED[needKey(c)].label,
   })), [inventory]);
   const dirty = JSON.stringify(draft) !== JSON.stringify(base);
 

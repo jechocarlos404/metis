@@ -414,6 +414,27 @@ def quoted(value):
     return json.dumps(value, ensure_ascii=False)
 
 
+def text_change(before, after, limit=60):
+    """Two versions of a text, trimmed to show where they differ, the way the
+    in-app importer shows them: '"Plans." → "Plans in phases."'."""
+    a = " ".join(str(before or "").split())
+    b = " ".join(str(after or "").split())
+    same = 0
+    while same < len(a) and same < len(b) and a[same] == b[same]:
+        same += 1
+    start = a.rfind(" ", 0, same - 19) + 1 if same > 30 else 0
+
+    def cut(text):
+        if not text:
+            return "empty"
+        rest = text[start:]
+        if len(rest) > limit:
+            rest = rest[: limit - 1] + "…"
+        return quoted(("…" if start > 0 else "") + rest)
+
+    return f"{cut(a)} → {cut(b)}"
+
+
 def capability_resolver(instance):
     """Find the instance capability a seed capability names. A slug match wins:
     the explicit slug, then the one its name derives. A rename keeps the old
@@ -683,7 +704,7 @@ class Loader:
             changes.append(f"status {current.get('status')} → {f['status']}")
         if f.get("description") is not None and f["description"] != current.get("description"):
             payload["description"] = f["description"]
-            changes.append("description changed")
+            changes.append(f"description {text_change(current.get('description'), f['description'])}")
         flag = f.get("unknown_capabilities")
         if flag is not None and flag != (current.get("unknown_capabilities") is True):
             payload["unknown_capabilities"] = flag

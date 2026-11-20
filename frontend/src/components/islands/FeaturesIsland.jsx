@@ -24,6 +24,7 @@ export default function FeaturesIsland({ canWrite = true }) {
   const [loaded, setLoaded] = React.useState(false);
   const [layout, setLayout] = React.useState({ nodes: [], edges: [] });
   const [selected, setSelected] = React.useState(null);
+  const [panelOpen, setPanelOpen] = React.useState(false); // phones: the panel replaces the list until Back
   const [detail, setDetail] = React.useState(null);
   const [inJourneys, setInJourneys] = React.useState([]);
   const [recheck, setRecheck] = React.useState(null);
@@ -40,19 +41,39 @@ export default function FeaturesIsland({ canWrite = true }) {
   const goalParent = React.useMemo(() => new Map((goals || []).map((g) => [g.id, g.parent_goal_id])), [goals]);
 
   // ?feature=<id>&tab=graph|plan&product=<id>&group=capability|goal: linkable, and Back restores the previous view.
-  useParamRestore("feature", (v) => v && setSelected(v));
+  useParamRestore("feature", (v) => { if (v) setSelected(v); setPanelOpen(Boolean(v)); });
   useParamRestore("tab", (v) => setTab(TABS.has(v) ? v : "directory"));
   useParamRestore("product", (v) => setProductFilter(v ?? ""));
   useParamRestore("group", (v) => setGroup(GROUPS.some((g) => g.value === v) ? v : "order"));
   const changeGroup = (g) => { setGroup(g); writeParams({ group: g === "order" ? "" : g }, { push: true }); };
   const selectFeature = React.useCallback((id) => {
     setSelected(id);
+    setPanelOpen(true);
     writeParams({ feature: id }, { push: true });
   }, []);
-  const changeTab = (t) => { setTab(t); writeParams({ tab: t === "directory" ? "" : t }, { push: true }); };
-  const changeProduct = (v) => { setProductFilter(v); writeParams({ product: v }, { push: true }); };
+  // On a phone, changing the view closes the panel so the change shows.
+  const changeTab = (t) => { setTab(t); setPanelOpen(false); writeParams({ tab: t === "directory" ? "" : t }, { push: true }); };
+  const changeProduct = (v) => { setProductFilter(v); setPanelOpen(false); writeParams({ product: v }, { push: true }); };
   const [draft, setDraft] = React.useState(EMPTY_DRAFT);
   const [edgeDraft, setEdgeDraft] = React.useState({ kind: "DEPENDS_ON", targetId: "" });
+  const [edgeError, setEdgeError] = React.useState(null); // shown under the relationship picker
+
+  // Layout follows the width this page really has (the sidebar folds at
+  // 960px), measured after mount: the island is server-rendered.
+  const [widthEl, setWidthEl] = React.useState(null);
+  const [pageWidth, setPageWidth] = React.useState(null);
+  React.useEffect(() => {
+    if (!widthEl) return;
+    const observer = new ResizeObserver(() => setPageWidth(widthEl.offsetWidth));
+    observer.observe(widthEl);
+    return () => observer.disconnect();
+  }, [widthEl]);
+  const phone = pageWidth != null && pageWidth < 640;
+  // The table needs about 760px beside the 300px panel; narrower, each row stacks.
+  const compactRows = phone || (pageWidth != null && pageWidth - 360 < 760);
+  // A narrow graph folds its key (FeatureGraphView); the group buttons sit
+  // beside it, or at the foot of a phone's graph, where the top has no room.
+  const narrowGraph = pageWidth != null && pageWidth - (phone ? 40 : 360) < 560;
   const [saving, setSaving] = React.useState(false);
   const [confirmingDelete, setConfirmingDelete] = React.useState(false);
   const [error, setError] = React.useState(null);
@@ -93,7 +114,7 @@ export default function FeaturesIsland({ canWrite = true }) {
       setTopoOrder(null);
       setTopoError(e instanceof ApiError && e.status === 409 ? "cycle" : "failed");
     }
-    setSelected((sel) => sel && data.nodes.some((n) => n.id === sel) ? sel : data.nodes[0]?.id ?? null);
+    setSelected((sel) => sel && data.nodes.some((n) => n.id === sel) ? sel : null);
   }, []);
 
   const capabilityById = React.useMemo(
@@ -137,6 +158,7 @@ export default function FeaturesIsland({ canWrite = true }) {
 
   React.useEffect(() => {
     setRecheck(null);
+    setEdgeError(null);
     refreshDetail(selected);
   }, [selected, refreshDetail]);
 
@@ -223,6 +245,15 @@ export default function FeaturesIsland({ canWrite = true }) {
   // A cycle anywhere stops the build order, so show every cycle when it does.
   const visibleCycles = activeProduct && topoError !== "cycle" ? cycles.filter((c) => c.some((f) => matchesProduct(f.id))) : cycles;
 
+  // The panel only shows a feature the current product filter and search
+  // show too. Nothing picked yet: open the first one in view.
+  const inView = (id) => shownTab === "directory" ? directory.some((n) => n.id === id) : matchesProduct(id);
+  const firstInView = (shownTab === "directory" ? directory : visibleLayout.nodes)[0]?.id;
+  const panelShown = phone && panelOpen && Boolean(selected) && inView(selected);
+  React.useEffect(() => {
+    if (loaded && !selected && firstInView) setSelected(firstInView);
+  }, [loaded, selected, firstInView]);
+
   const runRecheck = async () => {
     if (!selected) return;
     setError(null);
@@ -266,8 +297,10 @@ export default function FeaturesIsland({ canWrite = true }) {
   }, [cut, showCut]);
 
   const openNew = () => {
-    // Start blank: openEdit leaves the last feature in the draft. Keep only the product, as a create does.
-    setDraft((d) => ({ ...EMPTY_DRAFT, productId: d.productId }));
+    // Start blank: openEdit leaves the last feature in the draft. The product
+    // is the one on screen; with every product shown, the last one used.
+    const onScreen = productById.has(activeProduct) ? activeProduct : "";
+    setDraft((d) => ({ ...EMPTY_DRAFT, productId: activeProduct ? onScreen : d.productId }));
     setConfirmingDelete(false);
     setError(null);
     setDialog({ mode: "new" });
@@ -348,6 +381,7 @@ export default function FeaturesIsland({ canWrite = true }) {
       await api(`/features/${detail.id}`, { method: "DELETE" });
       setDialog(null);
       setSelected(null);
+      setPanelOpen(false);
       await load();
     } catch (e) {
       setError(String(e.message));
@@ -359,7 +393,7 @@ export default function FeaturesIsland({ canWrite = true }) {
 
   const addEdge = async () => {
     if (!selected || !edgeDraft.targetId) return;
-    setError(null);
+    setEdgeError(null);
     try {
       await api("/features/edges", {
         method: "POST",
@@ -369,47 +403,56 @@ export default function FeaturesIsland({ canWrite = true }) {
       await load();
       await refreshDetail(selected);
     } catch (e) {
-      setError(e instanceof ApiError && e.status === 422 && String(e.message).includes("cycle")
-        ? "That would make a circular dependency, so it was not added."
-        : String(e.message));
+      // A refused loop says, in plain words, which chain it would close.
+      setEdgeError(String(e.message));
     }
   };
 
   const removeEdge = async (srcId, dstId, kind) => {
     const edge = edgeList.find((e) => e.src_id === srcId && e.dst_id === dstId && e.kind === kind);
     if (!edge) return;
-    setError(null);
+    setEdgeError(null);
     try {
       await api(`/features/edges/${edge.id}`, { method: "DELETE" });
       await load();
       await refreshDetail(selected);
     } catch (e) {
-      setError(String(e.message));
+      setEdgeError(String(e.message));
     }
   };
 
   const noFeatures = loaded && layout.nodes.length === 0;
+  // Search narrows the directory only; the header says by how much.
+  const searching = results != null && shownTab === "directory";
   const cutTargetOptions = visibleLayout.nodes.filter((n) => !n.external);
+
+  // Beside the title on wider screens, a row of their own on a phone.
+  const filters = (
+    <>
+      {products.length > 0 && (
+        <Select aria-label="Product" value={activeProduct} onChange={(e) => changeProduct(e.target.value)} style={phone ? { flex: 1, minWidth: 0 } : { width: 200, minWidth: 160 }}
+          options={[tab === "graph" ? { value: "", label: "All products: the graph draws one at a time", disabled: true } : { value: "", label: "All products" },
+            ...productOptions(products),
+            { value: "unattributed", label: "No product" }]} />
+      )}
+      <Input aria-label="Find features" placeholder="Find features like…" style={phone ? { flex: 1, minWidth: 0 } : { width: 220 }} inputStyle={{ height: 30 }}
+        value={query}
+        onChange={(e) => {
+          setQuery(e.target.value);
+          setPanelOpen(false);
+          if (e.target.value.trim() && tab !== "directory") { setTab("directory"); writeParams({ tab: "" }); }
+        }} />
+    </>
+  );
 
   return (
     <>
       <PageHeader
         title="Features"
-        meta={`${count(visibleLayout.nodes.length, "feature")}${plannedShown ? ` · ${visibleReady.length} ready to start` : ""}${activeProduct ? ` · filtered from ${layout.nodes.length}` : ""}`}
+        meta={`${searching ? `${directory.length} of ` : ""}${count(visibleLayout.nodes.length, "feature")}${searching ? " match" : ""}${plannedShown ? ` · ${visibleReady.length} ready to start` : ""}${activeProduct ? ` · filtered from ${layout.nodes.length}` : ""}`}
         actions={
           <>
-            {products.length > 0 && (
-              <Select value={activeProduct} onChange={(e) => changeProduct(e.target.value)} style={{ width: 200 }}
-                options={[...(tab === "graph" ? [] : [{ value: "", label: "All products" }]),
-                  ...productOptions(products),
-                  { value: "unattributed", label: "No product" }]} />
-            )}
-            <Input placeholder="Find features like…" style={{ width: 220 }} inputStyle={{ height: 30 }}
-              value={query}
-              onChange={(e) => {
-                setQuery(e.target.value);
-                if (e.target.value.trim() && tab !== "directory") { setTab("directory"); writeParams({ tab: "" }); }
-              }} />
+            {!phone && filters}
             {canWrite && (
               <Button size="sm" variant="accent" style={{ gap: 6 }} onClick={openNew}>
                 <Icon name="plus" size={13} />New feature
@@ -418,7 +461,8 @@ export default function FeaturesIsland({ canWrite = true }) {
           </>
         }
       />
-      <div style={{ padding: "12px 24px 0", flex: "none" }}>
+      <div ref={setWidthEl} style={{ padding: phone ? "12px 16px 0" : "12px 24px 0", flex: "none" }}>
+        {phone && <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>{filters}</div>}
         <Tabs tabs={[{ value: "directory", label: "Directory", count: directory.length }, { value: "graph", label: "Graph" }, ...(canPlan ? [{ value: "plan", label: "Plan" }] : [])]} value={shownTab} onChange={changeTab} />
       </div>
       {error && !dialog && <div role="alert" style={{ padding: "8px 24px", fontSize: "var(--text-sm)", color: "var(--danger-fg)" }}>{error}</div>}
@@ -432,7 +476,7 @@ export default function FeaturesIsland({ canWrite = true }) {
         </div>
       ) : (
       <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
-        {tab === "graph" ? (
+        {panelShown ? null : tab === "graph" ? (
           <div style={{ flex: 1, position: "relative", margin: 20, background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", overflow: "hidden", minWidth: 0 }}>
             {group !== "order" && !hubs ? (
               <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>
@@ -442,12 +486,12 @@ export default function FeaturesIsland({ canWrite = true }) {
               // A fresh graph per grouping and product: pins and hubs from another one would not fit this one.
               <FeatureGraphView key={`${group}:${activeProduct}`}layout={visibleLayout} hubs={hubs} fitKey={activeProduct} selectedId={selected} onSelect={selectFeature} recheckStates={cutStates ? null : recheckStates} fadedIds={!cutStates && recheckStates ? new Set(visibleLayout.nodes.filter((n) => n.id !== selected && !recheckStates.has(n.id)).map((n) => n.id)) : null} cutStates={cutStates} />
             )}
-            <div role="group" aria-label="Group by" style={{ position: "absolute", top: 10, left: "50%", transform: "translateX(-50%)", display: "flex", alignItems: "center", gap: 8, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-secondary)" }}>
-              Group by
+            <div role="group" aria-label="Group by" style={{ position: "absolute", ...(phone ? { bottom: 48, left: 10 } : narrowGraph ? { top: 10, left: 64 } : { top: 10, left: "50%", transform: "translateX(-50%)" }), display: "flex", alignItems: "center", gap: 8, fontFamily: "var(--font-mono)", fontSize: "var(--text-2xs)", color: "var(--text-secondary)" }}>
+              {!narrowGraph && "Group by"}
               <div style={{ display: "inline-flex", border: "1px solid var(--border-control)", borderRadius: "var(--radius-sm)", overflow: "hidden", boxShadow: "var(--shadow-card)" }}>
                 {GROUPS.map((g, i) => (
                   <button key={g.value} type="button" aria-pressed={group === g.value} onClick={() => changeGroup(g.value)}
-                    style={{ height: 26, padding: "0 10px", font: "inherit", fontFamily: "var(--font-body)", fontSize: "var(--text-xs)", cursor: "pointer", border: "none",
+                    style={{ height: 26, padding: narrowGraph ? "0 7px" : "0 10px", whiteSpace: "nowrap", font: "inherit", fontFamily: "var(--font-body)", fontSize: "var(--text-xs)", cursor: "pointer", border: "none",
                       borderLeft: i ? "1px solid var(--border-control)" : "none",
                       background: group === g.value ? "var(--accent-wash)" : "var(--surface-card)",
                       color: group === g.value ? "var(--text-accent)" : "var(--text-body)" }}>
@@ -487,18 +531,40 @@ export default function FeaturesIsland({ canWrite = true }) {
         ) : (
         <div style={{ flex: 1, minWidth: 0, overflowY: "auto", padding: 20 }}>
           <div style={{ background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", overflow: "hidden" }}>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 160px 110px 110px 120px", padding: "8px 16px", borderBottom: "1px solid var(--border-hairline)", fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: "var(--tracking-caps)", textTransform: "uppercase", color: "var(--text-secondary)" }}>
+            {!compactRows && <div style={{ display: "grid", gridTemplateColumns: COLUMNS, columnGap: 12, padding: "8px 16px", borderBottom: "1px solid var(--border-hairline)", fontFamily: "var(--font-mono)", fontSize: "var(--text-2xs)", letterSpacing: "var(--tracking-caps)", textTransform: "uppercase", color: "var(--text-secondary)" }}>
               <span>Feature</span><span>What it does</span><span>Product</span><span>Priority</span><span>Status</span>
-            </div>
-            {directory.map((n, i) => (
-              <div key={n.id} {...pressable(() => selectFeature(n.id))} aria-pressed={selected === n.id} style={{ display: "grid", gridTemplateColumns: "1fr 160px 110px 110px 120px", alignItems: "center", padding: "10px 16px", borderBottom: i < directory.length - 1 ? "1px solid var(--border-hairline)" : "none", cursor: "pointer", fontSize: "var(--text-sm)", background: selected === n.id ? "var(--surface-hover)" : undefined }}>
-                <span style={{ color: "var(--text-heading)", fontWeight: "var(--weight-medium)" }}>{n.name}</span>
-                <span title={(n.capability_ids ?? []).map((c) => capabilityById.get(c)?.name).join(", ")} style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", ...ELLIPSIS }}>{capabilityNames(n.capability_ids, capabilityById)}</span>
-                <span style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", ...ELLIPSIS }}>{(nodeById.get(n.id)?.product_ids ?? []).map((pid) => productById.get(pid)?.name ?? "").filter(Boolean).join(", ") || "none"}</span>
-                <span>{n.priority != null ? <PriorityBadge priority={n.priority} /> : <span style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>none</span>}</span>
-                <span><StatusBadge status={n.status} /></span>
+            </div>}
+            {directory.map((n, i) => {
+              const capabilitiesTitle = (n.capability_ids ?? []).map((c) => capabilityById.get(c)?.name).join(", ");
+              const productNames = (nodeById.get(n.id)?.product_ids ?? []).map((pid) => productById.get(pid)?.name ?? "").filter(Boolean).join(", ");
+              return (
+              <div key={n.id} {...pressable(() => selectFeature(n.id))} aria-pressed={selected === n.id} style={{ display: "grid", gridTemplateColumns: compactRows ? "minmax(0, 1fr) auto" : COLUMNS, columnGap: 12, alignItems: "center", padding: "10px 16px", borderBottom: i < directory.length - 1 ? "1px solid var(--border-hairline)" : "none", cursor: "pointer", fontSize: "var(--text-sm)", background: selected === n.id ? "var(--surface-hover)" : undefined }}>
+                {compactRows ? (
+                  // Narrow: the name, then product and capabilities on one line; badges on the right.
+                  <>
+                    <span style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
+                      <span style={{ color: "var(--text-heading)", fontWeight: "var(--weight-medium)" }}>{n.name}</span>
+                      <span title={capabilitiesTitle} style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", ...ELLIPSIS }}>
+                        {[productNames, capabilitiesTitle].filter(Boolean).join(" · ")}
+                      </span>
+                    </span>
+                    <span style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
+                      <StatusBadge status={n.status} />
+                      {n.priority != null && <PriorityBadge priority={n.priority} />}
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <span style={{ color: "var(--text-heading)", fontWeight: "var(--weight-medium)" }}>{n.name}</span>
+                    <span title={capabilitiesTitle} style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", ...ELLIPSIS }}>{capabilityNames(n.capability_ids, capabilityById)}</span>
+                    <span style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", ...ELLIPSIS }}>{productNames || "none"}</span>
+                    <span>{n.priority != null ? <PriorityBadge priority={n.priority} /> : <span style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>none</span>}</span>
+                    <span><StatusBadge status={n.status} /></span>
+                  </>
+                )}
               </div>
-            ))}
+              );
+            })}
             {loaded && directory.length === 0 && (
               <div style={{ padding: "16px", fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>
                 {query.trim() ? `No feature matches "${query.trim()}".`
@@ -509,8 +575,14 @@ export default function FeaturesIsland({ canWrite = true }) {
           </div>
         </div>
         )}
-          <aside style={{ width: 300, flex: "none", margin: "20px 20px 20px 0", background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", padding: 16, display: "flex", flexDirection: "column", gap: 14, overflowY: "auto" }}>
-            {detail ? (
+          {(!phone || panelShown) && (
+          <aside style={{ ...(phone ? { flex: 1, minWidth: 0, margin: 16 } : { width: 300, flex: "none", margin: "20px 20px 20px 0" }), background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", padding: 16, display: "flex", flexDirection: "column", gap: 14, overflowY: "auto" }}>
+            {phone && (
+              <Button size="sm" variant="ghost" style={{ alignSelf: "flex-start", gap: 6 }} onClick={() => { setPanelOpen(false); writeParams({ feature: "" }, { push: true }); }}>
+                <span style={{ display: "inline-flex", transform: "rotate(180deg)" }}><Icon name="chevron-right" size={13} /></span>Back
+              </Button>
+            )}
+            {detail && inView(detail.id) ? (
               <FeaturePanel
                 detail={detail}
                 canWrite={canWrite}
@@ -526,7 +598,8 @@ export default function FeaturesIsland({ canWrite = true }) {
                 ownGoalRoots={ownGoalRoots}
                 allNodes={layout.nodes}
                 edgeDraft={edgeDraft}
-                onEdgeDraft={setEdgeDraft}
+                onEdgeDraft={(d) => { setEdgeDraft(d); setEdgeError(null); }}
+                edgeError={edgeError}
                 onAddEdge={addEdge}
                 onRemoveEdge={removeEdge}
                 recheck={recheck}
@@ -537,6 +610,7 @@ export default function FeaturesIsland({ canWrite = true }) {
               <div style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>{loaded ? "Select a feature to see what it does and why." : error ? "" : "Loading…"}</div>
             )}
           </aside>
+          )}
       </div>
       )}
 
@@ -586,16 +660,39 @@ export default function FeaturesIsland({ canWrite = true }) {
 
 const EMPTY_DRAFT = { name: "", description: "", capabilityIds: [], unknownCapabilities: false, productId: "", layer: "service", priority: "3", status: "pending" };
 
+// The relationship picker, one group per product: this feature's own first,
+// then the rest by name, "No product" last; features by name inside each.
+function pickerGroups(nodes, selfId, ownProduct, productById) {
+  const groups = new Map();
+  for (const n of nodes) {
+    if (n.id === selfId) continue;
+    const pid = n.product_ids[0] ?? "";
+    if (!groups.has(pid)) groups.set(pid, []);
+    groups.get(pid).push(n);
+  }
+  const label = (pid) => {
+    const p = productById.get(pid);
+    const name = p ? `${p.name}${p.external ? " (external)" : ""}` : "No product";
+    return pid === ownProduct && p ? `${name} (this product)` : name;
+  };
+  const rank = (pid) => (pid === ownProduct ? 0 : pid === "" ? 2 : 1);
+  return [...groups]
+    .map(([pid, ns]) => [pid, label(pid), ns.sort((a, b) => a.name.localeCompare(b.name))])
+    .sort((a, b) => rank(a[0]) - rank(b[0]) || a[1].localeCompare(b[1]));
+}
+
 function capabilityNames(ids, capabilityById) {
   const names = (ids ?? []).map((c) => capabilityById.get(c)?.name).filter(Boolean);
   return names.length ? names.join(", ") : "none";
 }
 
 const CAPS_HEADER = {
-  fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: "var(--tracking-caps)",
+  fontFamily: "var(--font-mono)", fontSize: "var(--text-2xs)", letterSpacing: "var(--tracking-caps)",
   textTransform: "uppercase", color: "var(--text-secondary)",
 };
 const MONO_ROW = { fontFamily: "var(--font-mono)", fontSize: 11 };
+// Feature, what it does, product, priority, status.
+const COLUMNS = "minmax(0, 1fr) 160px 110px 110px 120px";
 const ELLIPSIS = { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
 const NOTE = { fontSize: "var(--text-xs)", color: "var(--text-secondary)", lineHeight: "var(--leading-snug)" };
 const LINK = { fontSize: "var(--text-xs)", color: "var(--text-accent)", textDecoration: "none" };
@@ -620,7 +717,7 @@ function FeatureLink({ feature, onSelect, active, style }) {
   );
 }
 
-function FeaturePanel({ detail, canWrite, onEdit, onGuessConfirmed, onSelect, productIds, productById, capabilityById, journeys, why, goalParent, ownGoalRoots, allNodes, edgeDraft, onEdgeDraft, onAddEdge, onRemoveEdge, recheck, onRecheck, onClearRecheck }) {
+function FeaturePanel({ detail, canWrite, onEdit, onGuessConfirmed, onSelect, productIds, productById, capabilityById, journeys, why, goalParent, ownGoalRoots, allNodes, edgeDraft, onEdgeDraft, edgeError, onAddEdge, onRemoveEdge, recheck, onRecheck, onClearRecheck }) {
   const layer = detail.facets?.layer;
   return (
     <>
@@ -697,12 +794,18 @@ function FeaturePanel({ detail, canWrite, onEdit, onGuessConfirmed, onSelect, pr
           <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 4 }}>
             <Select label="This feature" value={edgeDraft.kind} onChange={(e) => onEdgeDraft({ ...edgeDraft, kind: e.target.value })}
               options={EDGE_KINDS.map((k) => ({ value: k, label: plain(EDGE, k) }))} />
-            <Select value={edgeDraft.targetId} onChange={(e) => onEdgeDraft({ ...edgeDraft, targetId: e.target.value })}
-              options={[{ value: "", label: "Pick a feature…" },
-                ...allNodes.filter((n) => n.id !== detail.id).map((n) => ({ value: n.id, label: n.name }))]} />
+            <Select aria-label="Other feature" value={edgeDraft.targetId} onChange={(e) => onEdgeDraft({ ...edgeDraft, targetId: e.target.value })}>
+              <option value="">Pick a feature…</option>
+              {pickerGroups(allNodes, detail.id, productIds[0] ?? "", productById).map(([pid, label, nodes]) => (
+                <optgroup key={pid} label={label}>
+                  {nodes.map((n) => <option key={n.id} value={n.id}>{n.name}</option>)}
+                </optgroup>
+              ))}
+            </Select>
             <Button size="sm" variant="secondary" disabled={!edgeDraft.targetId} onClick={onAddEdge} style={{ gap: 6 }}>
               <Icon name="plus" size={13} />Add relationship
             </Button>
+            {edgeError && <div role="alert" style={{ ...NOTE, color: "var(--danger-fg)" }}>{edgeError}</div>}
           </div>
         )}
       </div>
@@ -763,7 +866,7 @@ function RecheckList({ recheck, onSelect, onClear }) {
       )}
       {broad.map((c) => (
         <div key={c.id} style={SMALL_NOTE}>
-          Also built on {c.name}, used by {count(c.features, "other feature")} here. Retest those only if the change touches it.
+          Also built on {c.name}, used by {count(c.features - 1, "other feature")} here. Retest those only if the change touches it.
         </div>
       ))}
       {elsewhere.length > 0 && (
@@ -914,7 +1017,7 @@ function PlanView({ ready, cycles, topoOrder, topoError, selectedId, onSelect, c
         <section style={PLAN_CARD}>
           <div style={PLAN_TITLE}>Smallest version that reaches a feature</div>
           <div style={NOTE}>Pick a feature to see what it needs and what can wait.</div>
-          <Select value={cutTarget} onChange={(e) => onPickCutTarget(e.target.value)}
+          <Select aria-label="Feature to reach" value={cutTarget} onChange={(e) => onPickCutTarget(e.target.value)}
             options={[{ value: "", label: "Pick a feature…" }, ...cutTargetOptions.map((n) => ({ value: n.id, label: n.name }))]} />
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
             <Button size="sm" variant="accent" disabled={!cutTarget || cutting} onClick={onRunCut}>

@@ -1,23 +1,42 @@
 import React from "react";
-import { Button } from "../../ds";
+import { Button, Select } from "../../ds";
 import { api } from "../../lib/api.js";
+import { productOptions } from "../../lib/words.js";
 
 // Seed files: how a repo gets into metis (a coding agent describes it as a
 // metis-seed/v1 JSON file), and how a project moves between instances.
 // Inline panels, not dialogs — they live on Get started and Settings.
 
+// The importer's collections and actions in people's words; the raw key
+// stays one hover away.
+const COLLECTION_WORDS = {
+  goals: "goals",
+  capabilities: "capabilities",
+  motivations: "goal links",
+  features: "features",
+  edges: "links between features",
+  products: "products",
+  bundles: "capabilities added by hand",
+  decompositions: "plan documents",
+  technologies: "technologies",
+  tech_usage: "technologies in use",
+  satisfactions: "technology links",
+  guesses: "guesses",
+};
+const ACTION_WORDS = { reused: "already in metis", absent: "not in metis" };
+
 function formatCounts(collection, counts) {
-  if (!counts) return null;
-  const detail = Object.entries(counts)
-    .filter(([, value]) => value > 0)
-    .map(([action, value]) => `${value} ${action}`)
-    .join(", ");
-  return detail ? `${collection}: ${detail}` : null;
+  const entries = Object.entries(counts || {}).filter(([, value]) => value > 0);
+  if (entries.length === 0) return null;
+  return {
+    key: collection,
+    text: `${COLLECTION_WORDS[collection]}: ${entries.map(([action, value]) => `${value} ${ACTION_WORDS[action] ?? action}`).join(", ")}`,
+    raw: `${collection}: ${entries.map(([action, value]) => `${value} ${action}`).join(", ")}`,
+  };
 }
 
 export const summarizeCounts = (counts) =>
-  ["goals", "capabilities", "motivations", "features", "edges", "products", "bundles", "decompositions",
-    "technologies", "tech_usage", "satisfactions", "guesses"]
+  Object.keys(COLLECTION_WORDS)
     .map((k) => formatCounts(k, counts?.[k]))
     .filter(Boolean);
 
@@ -33,7 +52,12 @@ function ResultBox({ title, result, tone }) {
     <div role="status" style={{ border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", background: "var(--surface-inset)", padding: 12, display: "flex", flexDirection: "column", gap: 8 }}>
       <div style={{ fontSize: "var(--text-sm)", fontWeight: "var(--weight-semibold)", color: tone === "danger" ? "var(--danger-fg)" : "var(--text-heading)" }}>{title}</div>
       {result.counts && (
-        <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>{summarizeCounts(result.counts).join(" · ") || "Nothing would change."}</div>
+        <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>
+          {summarizeCounts(result.counts).map((c, i) => (
+            <React.Fragment key={c.key}>{i > 0 && " · "}<span title={c.raw}>{c.text}</span></React.Fragment>
+          ))}
+          {summarizeCounts(result.counts).length === 0 && "Nothing would change."}
+        </div>
       )}
       {(result.notes || []).map((note, i) => (
         <div key={`n${i}`} style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>{note}</div>
@@ -161,6 +185,55 @@ export function SeedImportPanel({ onImported }) {
       </div>
       {error && <div role="alert" style={{ fontSize: "var(--text-xs)", color: "var(--danger-fg)" }}>{error}</div>}
       {result && <ResultBox title={result.dryRun ? "Check passed. This is what the import would do:" : "Imported"} result={result} />}
+      <SeedExport />
+    </div>
+  );
+}
+
+/** Export sits beside import: download one product as a seed file, to keep a
+ * copy or import it into another metis. Hidden until there is a product. */
+function SeedExport() {
+  const [products, setProducts] = React.useState([]);
+  const [productId, setProductId] = React.useState("");
+  const [busy, setBusy] = React.useState(false);
+  const [status, setStatus] = React.useState(null); // { tone, text }
+
+  React.useEffect(() => {
+    api("/products").then(setProducts).catch(() => setProducts([]));
+  }, []);
+  if (products.length === 0) return null;
+
+  const download = async () => {
+    setBusy(true);
+    setStatus(null);
+    try {
+      const filename = await exportSeedFile(productId);
+      setStatus({ tone: "ok", text: `Downloaded ${filename}.` });
+    } catch (e) {
+      setStatus({ tone: "danger", text: `The export failed: ${e.message}` });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8, borderTop: "1px solid var(--border-hairline)", paddingTop: 12 }}>
+      <div style={{ fontSize: "var(--text-sm)", color: "var(--text-body)" }}>
+        Or download a product as a seed file, to keep a copy or import it into another metis.
+      </div>
+      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+        <Select aria-label="Product to download" value={productId} onChange={(e) => { setProductId(e.target.value); setStatus(null); }}
+          style={{ flex: "1 1 200px", maxWidth: 320 }}
+          options={[{ value: "", label: "Choose a product" }, ...productOptions(products)]} />
+        <Button size="sm" variant="secondary" disabled={busy || !productId} onClick={download}>
+          {busy ? "Downloading…" : "Download seed file"}
+        </Button>
+      </div>
+      {status && (
+        <div role={status.tone === "danger" ? "alert" : "status"} style={{ fontSize: "var(--text-xs)", color: status.tone === "danger" ? "var(--danger-fg)" : "var(--text-secondary)" }}>
+          {status.text}
+        </div>
+      )}
     </div>
   );
 }
@@ -199,7 +272,7 @@ export function UnseedPanel({ onRemoved }) {
         </Button>
       </div>
       <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>
-        Capabilities and goals other products still use are kept, and reported as warnings.
+        Anything another product still uses is kept, and the preview says why.
       </div>
       {error && <div role="alert" style={{ fontSize: "var(--text-xs)", color: "var(--danger-fg)" }}>{error}</div>}
       {result && <ResultBox title={result.dryRun ? "Preview: this is what would be removed" : "Removed"} result={result} tone={result.warnings?.length ? "danger" : undefined} />}

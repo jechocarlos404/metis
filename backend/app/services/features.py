@@ -148,11 +148,17 @@ async def create_edge(session: AsyncSession, data: EdgeCreate, graph=None) -> Fe
     # would close a cycle — the invariant lives here, not at topo time.
     if graph is not None and data.kind != EdgeKind.RELATES_TO:
         await graph.ensure_fresh()
-        if graph.would_create_cycle(data.src_id, data.dst_id, data.kind):
+        chain = graph.would_create_cycle(data.src_id, data.dst_id, data.kind)
+        if chain:
+            # Name the chain it would close, in plain words: people and agents
+            # both need to know which link to remove.
+            rows = await session.scalars(select(Feature).where(Feature.id.in_(chain)))
+            names = {f.id: f"“{f.name}”" for f in rows}
+            through = f" through {', '.join(names[n] for n in chain[1:-1])}" if len(chain) > 2 else ""
             raise HTTPException(
                 422,
-                f"{data.kind} edge would create a dependency cycle — "
-                "break the existing chain first (see /api/graph/cycles).",
+                f"That would make a circular dependency: {names[chain[0]]} already needs "
+                f"{names[chain[-1]]}{through}. Remove a link in that chain first.",
             )
     existing = await session.scalar(
         select(FeatureEdge).where(

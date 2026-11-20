@@ -1,5 +1,7 @@
 export const prerender = false;
 
+import { EDGE, statusLabel } from "../../../lib/words.js";
+
 const backend = () =>
   (process.env.API_INTERNAL_URL || "http://localhost:8000").replace(/\/$/, "");
 
@@ -26,6 +28,22 @@ function techSlug(tech) {
 
 /** A capability's identity, the same rule: "Keyword search" is "Keyword Search". */
 const capSlug = techSlug;
+
+/** Two versions of a text, trimmed to show where they differ:
+ * `"Plans." → "Plans in phases."`, or `"…the end of a long one." → "…the end of a longer one."`. */
+function textChange(before, after, max = 60) {
+  const squash = (text) => String(text ?? "").replace(/\s+/g, " ").trim();
+  const [a, b] = [squash(before), squash(after)];
+  let same = 0;
+  while (same < a.length && same < b.length && a[same] === b[same]) same += 1;
+  const from = same > 30 ? a.lastIndexOf(" ", same - 20) + 1 : 0;
+  const cut = (text) => {
+    if (!text) return "empty";
+    const rest = text.slice(from);
+    return JSON.stringify(`${from > 0 ? "…" : ""}${rest.length > max ? `${rest.slice(0, max - 1)}…` : rest}`);
+  };
+  return `${cut(a)} → ${cut(b)}`;
+}
 
 /** Finds the instance capability a seed capability names. A slug match wins:
  * the explicit slug, then the one its name derives. A rename keeps the old
@@ -491,6 +509,12 @@ class Loader {
     this.counts[key] = (this.counts[key] || 0) + 1;
   }
 
+  /** The name a file's ref stands for, quoted, for a line a person reads. */
+  named(collection, ref) {
+    const item = (this.doc[collection] || []).find((row) => row.ref === ref);
+    return JSON.stringify(item?.name ?? ref);
+  }
+
   count(collection) {
     return Object.fromEntries(
       Object.entries(this.counts)
@@ -582,7 +606,7 @@ class Loader {
     this.capIds.set(capability.ref, row.id);
     this.note("capabilities", "reused");
     if (row.name !== capability.name) {
-      this.notes.push(`capability ${JSON.stringify(capability.name)} is the existing ${JSON.stringify(row.name)} (slug ${row.slug}); reused as it is`);
+      this.notes.push(`capability ${JSON.stringify(capability.name)} is the existing ${JSON.stringify(row.name)}; reused as it is`);
     }
   }
 
@@ -660,16 +684,16 @@ class Loader {
     if (missing.length > 0) payload.capability_ids = [...have, ...missing];
     if (feature.status != null && feature.status !== current.status) {
       payload.status = feature.status;
-      changes.push(`status ${current.status} → ${feature.status}`);
+      changes.push(`status ${statusLabel(current.status)} → ${statusLabel(feature.status)}`);
     }
     if (feature.description != null && feature.description !== (current.description ?? null)) {
       payload.description = feature.description;
-      changes.push("description changed");
+      changes.push(`description ${textChange(current.description, feature.description)}`);
     }
     const flag = feature.unknown_capabilities;
     if (typeof flag === "boolean" && flag !== (current.unknown_capabilities === true)) {
       payload.unknown_capabilities = flag;
-      changes.push(`unknown_capabilities ${!flag} → ${flag}`);
+      changes.push(flag ? "now says some of its capabilities are unknown" : "no longer says some of its capabilities are unknown");
     }
     if (Object.keys(payload).length === 0) return new Set(have);
     const overwrites = changes.length > 0 ? `feature ${JSON.stringify(feature.name)}: ${changes.join("; ")}` : null;
@@ -680,7 +704,7 @@ class Loader {
     }
     const { status, body } = await this.api.patch(`/api/features/${current.id}`, payload);
     if (status !== 200) {
-      this.warnings.push(`feature ${feature.ref} rejected (${status}): ${JSON.stringify(body)}`);
+      this.warnings.push(`feature ${JSON.stringify(feature.name)} rejected (${status}): ${JSON.stringify(body)}`);
       this.note("features", "rejected");
       return new Set(have);
     }
@@ -764,7 +788,7 @@ class Loader {
       const featureId = this.featureIds.get(feature.ref);
       for (const guess of feature.capability_guesses || []) {
         const capabilityId = this.capIds.get(guess.capability_ref);
-        const label = `${feature.ref} ~> ${guess.capability_ref}`;
+        const label = `${JSON.stringify(feature.name)} → ${this.named("capabilities", guess.capability_ref)}`;
         if ((this.featureCaps.get(feature.ref) || new Set()).has(capabilityId)) {
           this.notes.push(`guess ${label} skipped: the link is already confirmed`);
           this.note("guesses", "skipped");
@@ -842,7 +866,7 @@ class Loader {
       const techId = this.techIds.get(tech.ref);
       for (const link of tech.satisfies || []) {
         const capabilityId = this.capIds.get(link.capability_ref);
-        const label = `${tech.ref} satisfies ${link.capability_ref}`;
+        const label = `${JSON.stringify(tech.name)} satisfies ${this.named("capabilities", link.capability_ref)}`;
         const known = confirmed.has(`${techId}:${capabilityId}`);
         if (link.confidence != null) {
           if (known) {
@@ -889,7 +913,7 @@ class Loader {
       const src = this.featureIds.get(edge.src_ref);
       const dst = this.featureIds.get(edge.dst_ref);
       const key = `${src}:${dst}:${kind}`;
-      const label = `${edge.src_ref} -${kind}-> ${edge.dst_ref}`;
+      const label = `${this.named("features", edge.src_ref)} ${EDGE[kind] ?? kind} ${this.named("features", edge.dst_ref)}`;
       if (existing.has(key)) {
         this.note("edges", "reused");
         continue;
@@ -906,7 +930,7 @@ class Loader {
       if (status === 201) {
         this.note("edges", "created");
       } else {
-        this.warnings.push(`edge ${label} rejected (${status}): ${JSON.stringify(body)}`);
+        this.warnings.push(`link ${label} rejected (${status}): ${JSON.stringify(body)}`);
         this.note("edges", "rejected");
       }
     }
@@ -990,7 +1014,7 @@ class Loader {
       }
       if ((await this.api.get(`/api/products/${productId}/decompositions`)).length > 0) {
         this.notes.push(
-          `product "${product.name}" already has a PRD; left as-is (the importer never stacks a second decomposition)`,
+          `product "${product.name}" already has a plan document; left as it is (an import never adds a second one)`,
         );
         this.note("decompositions", "skipped");
         continue;

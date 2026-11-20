@@ -909,7 +909,7 @@ function WhySection({ chain, goals, product, hasCapabilities }) {
           <a href={`/goals?goal=${goal.id}`} style={LINK}>{goal.display_id} {goal.title}</a>.
         </div>
       ) : (
-        <div style={NOTE}>No goal of this product yet.</div>
+        <div style={NOTE}>{product ? "No goal of this product yet." : "No product, so no goal of its own."}</div>
       )}
       {shared.length > 0 && !theirs && (
         <details>

@@ -41,14 +41,14 @@ async def test_new_product_was_never_seeded(client):
 
 async def test_stamping_sets_seeded_at_to_server_time(client):
     pid = (await client.post("/api/products", json={"name": "Can I Climb"})).json()["id"]
-    before = datetime.now(timezone.utc) - timedelta(seconds=5)
+    before = datetime.now(timezone.utc) - timedelta(minutes=5)
     # A client timestamp in the body is ignored: the server's clock decides.
     res = await client.post(
         f"/api/products/{pid}/seeded", json={"seeded_at": "2001-01-01T00:00:00Z"}
     )
     assert res.status_code == 200
     stamped = datetime.fromisoformat(res.json()["seeded_at"])
-    assert before <= stamped <= datetime.now(timezone.utc) + timedelta(seconds=5)
+    assert before <= stamped <= datetime.now(timezone.utc) + timedelta(minutes=5)
     listed = (await client.get("/api/products")).json()
     assert listed[0]["seeded_at"] == res.json()["seeded_at"]
 

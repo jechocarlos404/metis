@@ -725,9 +725,18 @@ describe("removing a seeded product names every row it deletes or keeps", () => 
   test("keeping a shared capability is information, not a warning", async () => {
     use(probe());
     const { body } = await unseed(probeSeed());
-    assert.ok(body.notes.includes('kept capability "Shared Cap": 1 feature outside the seed realizes it'));
+    assert.ok(body.notes.includes('kept capability "Shared Cap": 1 feature outside the seed realizes it directly'));
     assert.deepEqual(body.counts.capabilities, { kept: 1, "would delete": 1 });
     assert.deepEqual(body.warnings, []);
+  });
+
+  test("a capability a technology satisfies outside the seed names the technology", async () => {
+    use(probe());
+    const [cap] = metis.capabilities;
+    metis.techs.push({ id: "tech-r", slug: "redis", name: "Redis" });
+    metis.sats.push({ id: "sat-r", tech_id: "tech-r", capability_id: cap.id, fit: "native", cost: {} });
+    const { body } = await unseed(probeSeed());
+    assert.ok(body.notes.includes('kept capability "Probe Cap": technology "Redis" satisfies it, a link the seed does not have'), body.notes.join("\n"));
   });
 
   test("an account that can't read guesses gets 'can't tell', never a false 'would delete'", async () => {

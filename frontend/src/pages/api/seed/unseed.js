@@ -414,9 +414,11 @@ class Unseeder {
     // capability): neither holds a capability back.
     const holds = (link) =>
       !deadTechs.has(link.tech_id) && !this.declared.has(`${link.tech_id}:${link.capability_id}`);
+    // Capability id -> the technologies whose link holds it, by name.
+    const techNames = new Map(this.instTechs.map((tech) => [tech.id, tech.name]));
     const satsOf = new Map();
     for (const sat of this.instSats.filter(holds)) {
-      satsOf.set(sat.capability_id, (satsOf.get(sat.capability_id) || 0) + 1);
+      satsOf.set(sat.capability_id, [...(satsOf.get(sat.capability_id) || []), techNames.get(sat.tech_id) ?? sat.tech_id]);
     }
     const guessesOf = new Map();
     for (const guess of this.instGuesses) {
@@ -447,11 +449,16 @@ class Unseeder {
       );
       if (foreignFeatures.length > 0) {
         const n = foreignFeatures.length;
-        reasons.push(`${count(n, "feature")} outside the seed ${agree(n, "realizes", "realize")} it`);
+        // Direct links, of any product: what deleting the capability would cut.
+        reasons.push(`${count(n, "feature")} outside the seed ${agree(n, "realizes", "realize")} it directly`);
       }
       if (satsOf.has(cap.id)) {
-        const n = satsOf.get(cap.id);
-        reasons.push(`${count(n, "technology", "technologies")} ${agree(n, "satisfies", "satisfy")} it, which the seed does not say`);
+        const techs = satsOf.get(cap.id);
+        const n = techs.length;
+        reasons.push(
+          `${agree(n, "technology", "technologies")} ${andList(techs.map((name) => JSON.stringify(name)))} ` +
+            `${agree(n, "satisfies", "satisfy")} it, ${agree(n, "a link", "links")} the seed does not have`,
+        );
       }
       if (guessesOf.has(cap.id)) {
         const n = guessesOf.get(cap.id);

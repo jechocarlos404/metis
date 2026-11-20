@@ -86,7 +86,13 @@ def capability_supply(envelope: dict) -> str:
     if ours:
         # Any status: a feature in progress realizes it without making it ours.
         done = sum(1 for f in ours if f["status"] == "done")
-        lines += ["", f"Build side — {len(ours)} feature(s) of ours realize it, any status ({done} done):"]
+        # The count rolls up the submap, as `capability` labels it.
+        through = sum(1 for f in ours if f.get("via"))
+        via = f" ({through} only through its sub-capabilities)" if through else ""
+        lines += [
+            "",
+            f"Build side — {len(ours)} feature(s) of ours{via} realize it, any status ({done} done):",
+        ]
         lines += _table(
             [
                 [f["feature"], f["status"], f"{f['tickets']} ticket(s)", f["product"] or ""]
@@ -96,8 +102,7 @@ def capability_supply(envelope: dict) -> str:
     if theirs:
         lines += ["", f"External products — {len(theirs)} feature(s), not ours:"]
         lines += _table([[f["feature"], f["status"], f["product"] or ""] for f in theirs])
-    if rows:
-        lines.append("")
+    lines.append("")
     return _tail(envelope, lines)
 
 
@@ -368,6 +373,13 @@ def products(rows: list[dict]) -> str:
     return _end(lines, "/products")
 
 
+def _through(entry: dict) -> str:
+    """The feature count rolls up the submap; say how much of it is a
+    sub-capability's link, as `capability` does."""
+    through = entry["features"] - entry.get("direct_features", entry["features"])
+    return f" ({through} only through its sub-capabilities)" if through else ""
+
+
 def capability_inventory(rows: list[dict], query: str | None, limit: int = 50) -> str:
     """The endpoint has no filter, so filter here — in arrival order, which is
     already most reused first."""
@@ -398,7 +410,7 @@ def capability_inventory(rows: list[dict], query: str | None, limit: int = 50) -
                 r["slug"],
                 f'"{r["name"]}"',
                 r["maturity"] if r["ours"] else "—",
-                f"{r['features']} feature(s)",
+                f"{r['features']} feature(s){_through(r)}",
                 f"our products, any status: {_names(r['products'])}"
                 if r["products"]
                 else "our products: —",

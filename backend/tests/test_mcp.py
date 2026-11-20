@@ -221,6 +221,28 @@ def test_unresolved_rows_are_printed_not_dropped():
     assert text.startswith("0 offer(s)")
 
 
+def test_supply_labels_its_rollup_and_sets_unresolved_apart():
+    """The build side counts the submap, so it says how many arrive only
+    through a sub-capability, as `capability` does; and the Unresolved line
+    follows a blank one, as every other section does."""
+    text = render.capability_supply(
+        {**SUPPLY, "answer": [], "realizations": [
+            {"feature": "Sign in", "product": "metis", "external": False, "via": None,
+             "status": "done", "tickets": 0},
+            {"feature": "Use an authenticator", "product": "metis", "external": False,
+             "via": "Multi-Factor Authentication", "status": "in_progress", "tickets": 0},
+        ], "unresolved": [{"subject": "user-authentication",
+                           "reason": "no technology satisfies this capability", "blocked_by": []}]}
+    )
+    lines = text.splitlines()
+    assert (
+        "Build side — 2 feature(s) of ours (1 only through its sub-capabilities) realize it, "
+        "any status (1 done):"
+    ) in lines
+    unresolved = lines.index("Unresolved — user-authentication: no technology satisfies this capability")
+    assert lines[unresolved - 1] == "" and lines[unresolved - 2].startswith("Use an authenticator")
+
+
 def test_encounters_appends_the_ordering_hint():
     text = render.tech_encounters(
         envelope(
@@ -702,6 +724,29 @@ async def test_exposure_for_one_product_is_about_that_product(api):
     assert "Unresolved" not in text
 
 
+async def test_redundancy_says_when_there_is_nothing_to_compare(api):
+    """Redundancy compares the technologies a product records using. With
+    none recorded, 0 is no finding, and it says why, as stack_recommend does."""
+    w = await _world(*api)
+    _, db = api
+    text = await server._dispatch("stack_redundancy", {"product": "can-i-climb"})
+    _conventions(text)
+    assert text.startswith("0 capabilit(ies) answered more than once in can-i-climb.")
+    assert (
+        "Unresolved — can-i-climb: no technology is recorded as used by this product, so "
+        "nothing can answer one of its capabilities twice. A seed file's technologies, or "
+        "the API, record one."
+    ) in text.splitlines()
+
+    async with db() as s:
+        quiet = await tech_service.create_technology(
+            s, TechnologyCreate(slug="redis", name="Redis", kind=TechKind.service)
+        )
+        await stack_service.record_usage(s, w["climb"].id, ProductTechnologyWrite(tech_id=quiet.id))
+    text = await server._dispatch("stack_redundancy", {"product": "can-i-climb"})
+    assert "Unresolved" not in text
+
+
 async def test_own_products_are_not_scored(api):
     """As on the desktop: an own product's features make its capabilities ours,
     so its score would only measure itself."""
@@ -1014,6 +1059,15 @@ async def test_capability_says_how_many_come_only_through_a_sub_capability(api):
         "3 feature(s) of ours (1 only through its sub-capabilities), at any status, "
         "realize strava-import across 1 product(s); maturity ga."
     )
+    # The inventory and the supply count the same features, labelled the same way.
+    text = await server._dispatch("capability_inventory", {"q": "strava"})
+    assert "3 feature(s) (1 only through its sub-capabilities)" in row(text, "strava-import")
+    assert "1 feature(s)  " in row(text, "strava-webhooks") and "only through" not in row(text, "strava-webhooks")
+    text = await server._dispatch("capability_supply", {"capability": "strava-import"})
+    assert (
+        "Build side — 3 feature(s) of ours (1 only through its sub-capabilities) realize it, "
+        "any status (1 done):"
+    ) in text.splitlines()
 
 
 async def test_an_empty_answer_says_what_would_fill_it(api):

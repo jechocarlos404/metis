@@ -78,6 +78,10 @@ async def test_delete_capability_with_features_conflicts(db):
         with pytest.raises(HTTPException) as err:
             await capability_service.delete_capability(session, capability.id)
         assert err.value.status_code == 409
+        # It counts direct links, of any product: not the inventory's rollup.
+        assert err.value.detail.startswith(
+            "1 feature(s) realize this capability directly, of any product and at any status"
+        )
 
 
 @pytest.mark.asyncio

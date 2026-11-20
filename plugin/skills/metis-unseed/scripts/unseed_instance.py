@@ -418,6 +418,7 @@ class Unseeder:
         matched_ids = {c["id"] for c in self.caps.values()}
         matched_feat_ids = {f["id"] for f in self.feats.values()}
         dead_techs = self._dead("techs")
+        tech_names = {t["id"]: t["name"] for t in self.inst_techs}
         foreign = self.foreign_feature_counts()
         dead_prods = {p["id"] for p in self.prods.values() if p["id"] not in foreign}
         children, feats_of, sats_of, guesses_of = {}, {}, {}, {}
@@ -450,13 +451,12 @@ class Unseeder:
                 f for f in feats_of.get(cid, []) if f["id"] not in matched_feat_ids
             ]
             if foreign_feats:
-                reasons.append(f"{len(foreign_feats)} feature(s) outside the seed realize it")
+                # Direct links, of any product: what deleting the capability would cut.
+                reasons.append(f"{len(foreign_feats)} feature(s) outside the seed realize it directly")
             sats = sats_of.get(cid, [])
             if sats:
-                reasons.append(
-                    f"{len(sats)} technolog(ies) satisfy it — remove the satisfactions "
-                    "first if you really mean to drop it"
-                )
+                techs = _and([repr(tech_names.get(s["tech_id"], s["tech_id"])) for s in sats])
+                reasons.append(f"technolog(ies) {techs} satisfy it, link(s) the seed does not have")
             guesses = guesses_of.get(cid, [])
             if guesses:
                 reasons.append(f"{len(guesses)} guessed link(s) from outside the seed point at it")

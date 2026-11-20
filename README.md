@@ -145,13 +145,16 @@ A product can be someone else's (`external`): you know its features as a user an
 map them to the capabilities they need, declaring `unknown_capabilities` where you
 can't tell. External products show what exists in the world; they never count as what
 *we* can do — a capability is ours only when a finished (`done`) feature of one of
-our own products realizes it, and coverage of an idea counts only those. `GET /api/products/{id}/coverage` scores an existing product the same way: which of
-its features we could build from what we have — a lower bound, since a feature with
+our own products realizes it, and coverage of an idea counts only those.
+`GET /api/products/{id}/coverage` scores someone else's product the same way (the
+desktop and MCP score only external products: an own product's features are what make
+its capabilities ours): which of its features we could build from what we have — a lower bound, since a feature with
 unknown capabilities never counts as buildable. Every feature lands in exactly one
 group: `buildable`, `partly` (every *named* capability is ours, but the list is
 incomplete), `missing` (needs a capability that isn't ours) or `not_described` (no
 capability named yet). `missing_capabilities` ranks what's missing by how many
-features it would complete, and `closest_products` names our nearest products.
+features it would complete, and `closest_products` names the three of our products
+that have built the most of what it names (a tie at third place is kept whole).
 
 **Journeys** (`/journeys`, `/api/journeys`) are ordered paths of features a person moves
 through — inside one product or across several, ours or external. A step can also be one

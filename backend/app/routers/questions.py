@@ -452,6 +452,8 @@ def _inventory_block(entries) -> str:
             "name": _clean(e.name, 120),
             "ours": e.ours,
             "maturity": str(e.maturity) if e.ours else None,
+            # Our products working on it, at any status: can be above 0 while
+            # `ours` is false (nothing of ours finished yet).
             "our_products": len(e.products),
             "part_of": _clean(by_id[e.parent_id].name, 120) if e.parent_id in by_id else None,
             "description": _clean(e.description, 140) or None,

@@ -197,9 +197,10 @@ TOOLS = [
         name="capability_inventory",
         description=(
             "What we can already do, most reused first: each capability's "
-            "slug and exact name, its maturity, our products, our feature count, "
-            "and external products that have it. Ours first, then external only, "
-            "then not built yet."
+            "slug and exact name, its maturity when ours, our products and "
+            "feature count (any status), and external products that have it. "
+            "Ours (a finished feature of ours realizes it) first, then external "
+            "only, then not built yet (realized by no finished feature)."
         ),
         inputSchema={
             "type": "object",
@@ -214,8 +215,7 @@ TOOLS = [
         description=(
             "How much of a product idea we already have. Give features, each "
             "with the capability names it needs. Each need comes back ours, "
-            "external only, not built yet (named, but not ours and in no "
-            "external product), or "
+            "external only, not built yet (no finished feature realizes it), or "
             "no match with near names as candidates. Exact "
             "names only: a candidate is never counted as a match. Ends with an "
             "Open: link that pre-fills Home's idea check; it saves nothing."

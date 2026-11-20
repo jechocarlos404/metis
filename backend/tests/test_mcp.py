@@ -462,6 +462,10 @@ async def test_products_lists_ours_and_external(api):
     assert rows == {"can-i-climb": "2026-11-01T12:00:00Z", "rival": "never"}
 
 
+def row(text, slug):
+    return next(line for line in text.splitlines() if line.startswith(slug + " "))
+
+
 async def test_inventory_is_most_reused_first_and_filters_in_order(api):
     await _world(*api)
     text = await server._dispatch("capability_inventory", {})
@@ -472,6 +476,9 @@ async def test_inventory_is_most_reused_first_and_filters_in_order(api):
     assert rows[-2:] == ["weather-forecast", "route-planner"]
     assert "external only — not ours" in text
     assert "not built yet — not ours" in text
+    # Maturity only for what is ours; route-planner is planned and unbuilt.
+    assert row(text, "route-planner").split()[3] == "—"
+    assert row(text, "strava-import").split()[3] == "ga"
     # Slug and exact name both: a seed file reuses a capability by its name.
     route = next(line for line in text.splitlines() if line.startswith("route-planner"))
     assert route.split("  ")[0:1] == ["route-planner"] and '"Route planner"' in route
@@ -512,7 +519,7 @@ async def test_check_idea_never_counts_a_near_name(api):
     assert unbuilt.startswith("0/1 distinct capabilit(ies) are ours")
     assert (
         "  not built yet  Route planner → route-planner "
-        "(no finished feature of ours realizes it) — not ours"
+        "(no finished feature realizes it) — not ours"
         in unbuilt.splitlines()
     )
 
@@ -543,8 +550,8 @@ async def test_product_score_groups_sum_to_the_total(api):
     assert "Not ours (1), most useful first." in text
     assert "  weather-forecast  needed by 1  only_gap 1  elsewhere: none" in text.splitlines()
     assert (
-        "Closest of our products, by how many of the 2 named capabilities each has: "
-        "can-i-climb 1"
+        "Closest of our products, by how many of the 2 named capabilities each has built: "
+        "1 can-i-climb"
     ) in text
     assert "Lower bound" in text
     assert text.endswith(f"Open: /products?product={w['rival'].id}")
@@ -553,6 +560,24 @@ async def test_product_score_groups_sum_to_the_total(api):
     assert (await server._dispatch("product_score", {"product": "Rival"})).startswith(
         "0 products have id or slug 'Rival'"
     )
+
+
+def test_tied_closest_products_share_one_group():
+    """Ties at the cut are kept whole, so more than three can come back."""
+    score = {
+        "product": {"id": "p", "slug": "strava"}, "total_features": 1,
+        "buildable": [], "partly": [], "not_described": [], "missing": ["Kudos"],
+        "missing_incomplete": [], "missing_capabilities": [],
+        "report": {"existing": 2, "needed": 9, "mature": 1},
+        "closest_products": [
+            {"product": {"slug": s}, "capabilities": n}
+            for s, n in (("hanko", 7), ("kida", 3), ("magpie", 3), ("steps", 3))
+        ],
+    }
+    assert (
+        "Closest of our products, by how many of the 9 named capabilities each has built: "
+        "7 hanko; 3 kida, magpie, steps"
+    ) in render.product_score(score).splitlines()
 
 
 async def test_own_products_are_not_scored(api):
@@ -572,7 +597,8 @@ async def test_capability_says_who_why_and_how_far(api):
     text = await server._dispatch("capability", {"slug": "strava-import"})
     _conventions(text)
     assert text.startswith(
-        "2 feature(s) of ours realize strava-import across 1 product(s); maturity ga."
+        "2 feature(s) of ours, at any status, realize strava-import across 1 product(s); "
+        "maturity ga."
     )
     assert "Rollup: 2 total — 1 pending, 0 in_progress, 1 done." in text
     assert "Our products: can-i-climb" in text
@@ -582,6 +608,10 @@ async def test_capability_says_who_why_and_how_far(api):
 
     weather = await server._dispatch("capability", {"slug": "weather-forecast"})
     assert "Not ours: no finished feature of ours realizes it." in weather
+    # Maturity describes our implementation: none shown for what isn't ours.
+    assert weather.startswith(
+        "0 feature(s) of ours, at any status, realize weather-forecast across 0 product(s)."
+    )
     assert "External products that have it: rival" in weather
     assert "No goal motivates it directly" in weather
 

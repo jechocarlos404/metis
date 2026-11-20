@@ -280,18 +280,16 @@ def _end(lines: list[str], href: str) -> str:
     return "\n".join(lines)
 
 
-def _not_ours(c: dict) -> str:
-    """`ours` false means one of two things; external_products tells which."""
+def _standing(c: dict) -> str:
+    """Maturity describes our implementation, so it shows only when ours.
+    `ours` false means one of two things; external_products tells which."""
     if c["ours"]:
-        return ""
-    return ", external only" if c["external_products"] else ", not built yet"
+        return c["maturity"]
+    return "external only" if c["external_products"] else "not built yet"
 
 
 def _candidates(candidates: list[dict]) -> str:
-    return ", ".join(
-        f"{c['slug']} \"{c['name']}\" ({c['maturity']}{_not_ours(c)})"
-        for c in candidates
-    )
+    return ", ".join(f"{c['slug']} \"{c['name']}\" ({_standing(c)})" for c in candidates)
 
 
 def products(rows: list[dict]) -> str:
@@ -338,14 +336,16 @@ def capability_inventory(rows: list[dict], query: str | None, limit: int = 50) -
         "",
     ]
     # The exact name rides along: a seed file reuses a capability by its name.
+    # Maturity describes our implementation, so it shows only when ours; the
+    # feature count and our products are our work on it at any status.
     lines += _table(
         [
             [
                 r["slug"],
                 f'"{r["name"]}"',
-                r["maturity"],
+                r["maturity"] if r["ours"] else "—",
                 f"{r['features']} feature(s)",
-                f"ours in: {_names(r['products'])}" if r["products"] else "ours in: —",
+                f"our products: {_names(r['products'])}" if r["products"] else "our products: —",
                 f"external: {_names(r['external_products'])}" if r["external_products"] else "",
                 ""
                 if r["ours"]
@@ -380,7 +380,7 @@ def _need(need: dict) -> list[str]:
     if match:
         return [
             f"  not built yet  {need['name']} → {match['slug']} "
-            "(no finished feature of ours realizes it) — not ours"
+            "(no finished feature realizes it) — not ours"
         ]
     lines = [f"  no match       {need['name']}"]
     if need["candidates"]:
@@ -479,10 +479,14 @@ def product_score(score: dict) -> str:
             )
         closest = score["closest_products"]
         if closest:
+            # A tie is kept whole, so products with the same count share one group.
+            tied: dict[int, list[str]] = {}
+            for c in closest:
+                tied.setdefault(c["capabilities"], []).append(c["product"]["slug"])
             lines.append(
                 f"Closest of our products, by how many of the {report['needed']} named "
-                "capabilities each has: "
-                + ", ".join(f"{c['product']['slug']} {c['capabilities']}" for c in closest)
+                "capabilities each has built: "
+                + "; ".join(f"{n} {', '.join(slugs)}" for n, slugs in tied.items())
             )
     else:
         lines.append("No capability is named on any of its features, so nothing can be scored.")
@@ -520,16 +524,19 @@ def capability(
     capability's submap — the same set the rollup counts."""
     slug = entry["slug"]
     by_id = {p["id"]: p["slug"] for p in products}
+    # The count is our work on it at any status; whether it is ours takes a
+    # finished one. Maturity describes our implementation, so only when ours.
+    maturity = f"; maturity {entry['maturity']}" if entry["ours"] else ""
     lines = [
-        f"{entry['features']} feature(s) of ours realize {slug} across "
-        f"{len(entry['products'])} product(s); maturity {entry['maturity']}.",
+        f"{entry['features']} feature(s) of ours, at any status, realize {slug} across "
+        f"{len(entry['products'])} product(s){maturity}.",
     ]
     if not entry["ours"] and entry["external_products"]:
         lines.append(
             "Not ours: no finished feature of ours realizes it. External products have it."
         )
     elif not entry["ours"]:
-        lines.append("Not built yet: no finished feature of ours realizes it, so it isn't ours.")
+        lines.append("Not built yet: no finished feature realizes it, so it isn't ours.")
     description = entry.get("description")
     lines.append(entry["name"] + (f" — {description}" if description else ""))
     lines += [

@@ -429,6 +429,10 @@ class UpstreamApi {
   async put(route, payload) {
     return this.request("PUT", route, payload);
   }
+
+  async patch(route, payload) {
+    return this.request("PATCH", route, payload);
+  }
 }
 
 const isDry = (id) => String(id).startsWith("dry-run:");
@@ -561,19 +565,47 @@ class Loader {
     }
   }
 
+  /** Additive on reuse: add the file's confirmed links the feature lacks,
+   * never remove one. `unknown_capabilities` follows the file when the file
+   * states it. Returns the feature's confirmed links afterwards. */
+  async linkReusedFeature(feature, current) {
+    const have = [...(current.capability_ids || [])];
+    const missing = [...new Set(featureCapabilityRefs(feature).map((ref) => this.capIds.get(ref)))]
+      .filter((id) => !have.includes(id));
+    const payload = {};
+    if (missing.length > 0) payload.capability_ids = [...have, ...missing];
+    const flag = feature.unknown_capabilities;
+    if (typeof flag === "boolean" && flag !== (current.unknown_capabilities === true)) {
+      payload.unknown_capabilities = flag;
+    }
+    if (Object.keys(payload).length === 0) return new Set(have);
+    if (this.dryRun) {
+      this.note("features", missing.length > 0 ? "would link" : "would update");
+      return new Set([...have, ...missing]);
+    }
+    const { status, body } = await this.api.patch(`/api/features/${current.id}`, payload);
+    if (status !== 200) {
+      this.warnings.push(`feature ${feature.ref} rejected (${status}): ${JSON.stringify(body)}`);
+      this.note("features", "rejected");
+      return new Set(have);
+    }
+    this.note("features", missing.length > 0 ? "linked" : "updated");
+    return new Set(body.capability_ids);
+  }
+
   async loadFeatures() {
-    // Add-only: an existing feature keeps its capability links as they are —
-    // the importer never rewrites a row. Identity is (product, name): another
-    // product's "Sign in" is a different feature, not a reuse.
+    // Additive on reuse: an existing feature gains the file's confirmed links
+    // it lacks and never loses one; nothing else on it changes. Identity is
+    // (product, name): another product's "Sign in" is a different feature.
     const instance = await this.api.get("/api/features");
-    const existing = new Map(instance.map((feature) => [featureKey(feature.product_id, feature.name), feature.id]));
-    const capsOf = new Map(instance.map((feature) => [feature.id, new Set(feature.capability_ids || [])]));
+    const existing = new Map(instance.map((feature) => [featureKey(feature.product_id, feature.name), feature]));
     for (const feature of this.doc.features || []) {
       const key = featureKey(this.productIds.get(feature.product_ref), feature.name);
       if (existing.has(key)) {
-        this.featureIds.set(feature.ref, existing.get(key));
-        this.featureCaps.set(feature.ref, capsOf.get(existing.get(key)) || new Set());
+        const current = existing.get(key);
+        this.featureIds.set(feature.ref, current.id);
         this.note("features", "reused");
+        this.featureCaps.set(feature.ref, await this.linkReusedFeature(feature, current));
         continue;
       }
       this.featureCaps.set(feature.ref, new Set(featureCapabilityRefs(feature).map((ref) => this.capIds.get(ref))));

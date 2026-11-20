@@ -101,6 +101,18 @@ async def test_a_guess_cannot_shadow_a_confirmed_link(client, world):
     assert res.status_code == 409
 
 
+async def test_linking_by_patch_retires_the_matching_guess_only(client, world):
+    await _guess(client, world)
+    other = (await client.post("/api/capabilities", json={"name": "Audit Log"})).json()["id"]
+    kept = await _guess(client, {**world, "cap": other})
+    res = await client.patch(f"/api/features/{world['feature']}", json={
+        "capability_ids": [world["cap"]], "unknown_capabilities": False})
+    assert res.status_code == 200, res.text
+    assert res.json()["capability_ids"] == [world["cap"]]
+    # A fact and a guess about the same link never coexist; other guesses stay.
+    assert [g["id"] for g in (await client.get("/api/guesses")).json()] == [kept["id"]]
+
+
 async def test_reject_deletes_it(client, world):
     guess = await _guess(client, world)
     assert (await client.delete(f"/api/guesses/{guess['id']}")).status_code == 204

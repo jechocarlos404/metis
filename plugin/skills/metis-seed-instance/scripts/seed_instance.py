@@ -5,8 +5,10 @@ Stdlib only, no dependencies. Idempotent and add-only: existing entities are
 matched (goals by type+title; capabilities and products by name; features by
 (product, name); technologies by slug; edges by src+dst+kind; motivations,
 product technologies and satisfactions by pair) and reused rather than
-duplicated, so re-running the same file is safe. Nothing is deleted; the one
-update is a guess's confidence and basis when the same guess already exists.
+duplicated, so re-running the same file is safe. Nothing is deleted. Two
+updates: a reused feature gains the file's confirmed capability links it lacks
+(never loses one; unknown_capabilities follows the file when stated), and an
+existing guess takes the file's confidence and basis.
 
 Usage:
     python3 seed_instance.py metis-seed.json [--base-url http://localhost:8000] [--dry-run]
@@ -431,6 +433,9 @@ class Api:
     def put(self, path, payload):
         return self.request("PUT", path, payload)
 
+    def patch(self, path, payload):
+        return self.request("PATCH", path, payload)
+
 
 class Loader:
     def __init__(self, api, doc, dry_run):
@@ -533,20 +538,48 @@ class Loader:
                         )
                     self.note("motivations", "created")
 
+    def link_reused_feature(self, f, current):
+        """Additive on reuse: add the file's confirmed links the feature lacks,
+        never remove one. `unknown_capabilities` follows the file when the
+        file states it. Returns the feature's confirmed links afterwards."""
+        have = list(current.get("capability_ids") or [])
+        missing = [
+            cid
+            for cid in dict.fromkeys(self.cap_ids[r] for r in feature_capability_refs(f))
+            if cid not in have
+        ]
+        payload = {}
+        if missing:
+            payload["capability_ids"] = have + missing
+        flag = f.get("unknown_capabilities")
+        if flag is not None and flag != current.get("unknown_capabilities"):
+            payload["unknown_capabilities"] = flag
+        if not payload:
+            return set(have)
+        if self.dry_run:
+            self.note("features", "would link" if missing else "would update")
+            return set(have + missing)
+        status, body = self.api.patch(f"/api/features/{current['id']}", payload)
+        if status != 200:
+            self.warnings.append(f"feature {f['ref']} rejected ({status}): {body}")
+            self.note("features", "rejected")
+            return set(have)
+        self.note("features", "linked" if missing else "updated")
+        return set(body["capability_ids"])
+
     def load_features(self):
-        # Add-only: an existing feature keeps its capability links as they
-        # are — the seeder never rewrites a row. Identity is (product, name):
-        # features belong to their product, so another product's "Sign in" is
-        # a different feature, not a reuse.
+        # Additive on reuse: an existing feature gains the file's confirmed
+        # links it lacks and never loses one; nothing else on it changes.
+        # Identity is (product, name): features belong to their product, so
+        # another product's "Sign in" is a different feature, not a reuse.
         instance = self.api.get("/api/features")
-        existing = {(f.get("product_id"), f["name"]): f["id"] for f in instance}
-        caps_of = {f["id"]: set(f.get("capability_ids") or []) for f in instance}
+        existing = {(f.get("product_id"), f["name"]): f for f in instance}
         for f in self.doc.get("features") or []:
             key = (self.prod_ids.get(f.get("product_ref")), f["name"])
             if key in existing:
-                self.feat_ids[f["ref"]] = existing[key]
-                self.feat_caps[f["ref"]] = caps_of.get(existing[key], set())
+                self.feat_ids[f["ref"]] = existing[key]["id"]
                 self.note("features", "reused")
+                self.feat_caps[f["ref"]] = self.link_reused_feature(f, existing[key])
                 continue
             self.feat_caps[f["ref"]] = {self.cap_ids[r] for r in feature_capability_refs(f)}
             self.feat_ids[f["ref"]] = self.create(

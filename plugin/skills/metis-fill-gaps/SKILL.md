@@ -16,8 +16,9 @@ skill's directory). Read its "Guesses" section before writing.
 **Facts and guesses.** A link you can see in code is real data, not a guess.
 When the loader reuses a feature metis already has, it adds every
 `capability_refs` entry the feature lacks (never removing one), takes the
-file's `unknown_capabilities`, and loads its `capability_guesses`; a confirmed
-link deletes any guess about the same pair. So:
+file's `unknown_capabilities` (and its `status` and `description`, when the
+file states them), and loads its `capability_guesses`; a confirmed link
+deletes any guess about the same pair. So:
 - links the code confirms go in the feature's `capability_refs`;
 - links the code leaves ambiguous go in `capability_guesses`.
 
@@ -26,9 +27,11 @@ The loader does not update a capability metis already has, so the
 summary instead (step 7).
 
 The commands below read the API at `METIS_API_URL` (default
-`http://localhost:8000`). If the API has auth on, set `METIS_API_TOKEN`; the
-script sends it, and you add `-H "Authorization: Bearer $METIS_API_TOKEN"` to
-each `curl`.
+`http://localhost:8000`). If the API has auth on, set `METIS_API_TOKEN` (or
+`METIS_TOKEN`, or pass `--token`); the script sends it, and you add
+`-H "Authorization: Bearer $METIS_API_TOKEN"` to each `curl`. Any valid token
+reads, including the read-only `metis-mcp` one; the `metis-seed-instance`
+skill's "With auth on" shows how to get it.
 
 ## Steps
 
@@ -90,6 +93,8 @@ each `curl`.
      - `unknown_capabilities`: `false` only when the confirmed links account
        for everything the feature is built on (no guesses, nothing unknown),
        else `true`. The loader takes this value, so `false` clears the gap.
+     - no `status` or `description`: the loader would replace metis's values
+       with them, and the description `find_gaps.py` prints is cut short.
    - `source`:
 
      ```json

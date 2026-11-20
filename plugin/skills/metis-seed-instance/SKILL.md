@@ -33,7 +33,7 @@ real data.
   work items), read `references/seed-format.md` and author a seed file yourself —
   write it to a temp location, show the user a short summary of what it contains,
   then load it. Follow the ontology rules in the reference strictly: capabilities
-  are durable nouns shared across products by exact name (check
+  are durable nouns shared across products by name (check
   `GET /api/capabilities/inventory` and reuse existing names), features are
   user-facing verb phrases listing every capability they realize in
   `capability_refs` and naming their product in `product_ref`, goals motivate
@@ -54,25 +54,63 @@ python3 <this skill's directory>/scripts/seed_instance.py <seed-file>
 The script is stdlib-only (no venv needed) and defaults to
 `--base-url http://localhost:8000`.
 
-Loading is **idempotent and add-only**: existing entities are matched (goals by
-type+title; capabilities and products by name; features by product+name;
-technologies by slug; edges by src+dst+kind; motivations, product technologies
-and satisfactions by pair) and reused, never duplicated or deleted. Two
-updates: a reused feature gains the file's confirmed links it lacks, and a guess
-that already exists for the same pair takes the file's confidence and basis. Because
-names are identity, a seed entity whose name matches an existing one is reused
-instead of created. For capabilities that is intended — a shared name is how two
-products show they use the same ability — but a feature or product name that
-matches an unrelated entity is silently reused too, so check the dry-run counts
-("reused" vs "would create") against your expectations before the real run. A
-reused feature keeps every link it has and gains each `capability_refs` entry it
-lacks ("linked", or "would link" in a dry run); adding a link deletes any guess
-about that same pair. `unknown_capabilities` follows the file when the file
-states it. Nothing else on the feature changes, and its `capability_guesses` are
-still loaded (skipped when the link is already confirmed). Technologies load after features: the technology,
-its use by each listed product, confirmed satisfactions, then guesses
-(`POST /api/guesses`, editor or admin on the desktop). Legacy files with a single
-`capability_ref` per feature still load.
+Loading is **idempotent and never deletes**: existing entities are matched
+(goals by type+title; capabilities by slug; products by name; features by
+product+name; technologies by slug; edges by src+dst+kind; motivations, product
+technologies and satisfactions by pair) and reused, never duplicated or
+deleted. Two updates: a reused feature gains the file's confirmed links it
+lacks and takes the `status`, `description` and `unknown_capabilities` the file
+states, and a guess that already exists for the same pair takes the file's
+confidence and basis. Because names are identity, a seed entity whose name
+matches an existing one is reused instead of created. For capabilities that is
+intended — a shared name is how two products show they use the same ability,
+and a name differing only in case or punctuation is the same capability
+("note: capability "Keyword search" is the existing "Keyword Search" …") — but
+a feature or product name that matches an unrelated entity is reused too, so
+check the dry-run counts ("reused" vs "would create") against your expectations
+before the real run. Every capability the file would create is listed by name
+("note: new capability "Vector search"; nearest existing: "Keyword Search"");
+check each for a near-duplicate. A reused feature keeps every link it has and
+gains each `capability_refs` entry it lacks ("linked", or "would link" in a dry
+run); adding a link deletes any guess about that same pair. When the file's
+`status`, `description` or `unknown_capabilities` differs from the feature's,
+the file wins, since a product's own seed is the authority on its features.
+That can overwrite a hand edit, so each overwrite is listed per feature
+("note: feature "Export a PRD": status in_progress → done; description
+changed"): show those lines to the user before the real run. Fields the file
+leaves out, and the feature's priority, are left alone, and its
+`capability_guesses` are still loaded (skipped when the link is already
+confirmed). Technologies load after features: the technology, its use by each
+listed product, confirmed satisfactions, then guesses (`POST /api/guesses`,
+editor or admin on the desktop). Legacy files with a single `capability_ref`
+per feature still load.
+
+### With auth on
+
+An instance with `AUTH_ENABLED=false` needs no token. With auth on, the API
+checks a token's role and also which client it was issued to, and **only a
+person's browser session on the desktop may write**. No script can get such a
+token: Keycloak issues one only to the web app's browser login, and the app
+keeps it in an encrypted cookie. So:
+
+- **Dry run**: works with any valid token. Pass `--token`, or set
+  `METIS_TOKEN` (`METIS_API_TOKEN`, the plugin hooks' variable, also works).
+  The simplest is the read-only `metis-mcp` service account, whose secret is
+  `METIS_MCP_CLIENT_SECRET` in metis's `.env` (`dev-mcp-secret` by default):
+
+  ```sh
+  export METIS_TOKEN=$(curl -s -d grant_type=client_credentials -d client_id=metis-mcp \
+    -d client_secret=dev-mcp-secret \
+    http://localhost:8080/realms/metis/protocol/openid-connect/token \
+    | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')
+  ```
+
+  Tokens last 5 minutes. That account cannot read guesses (editors only), so
+  guess counts assume none exist yet, and the dry run says so.
+- **The real load**: not from a script. Tell the user to import the file in
+  the app, at Settings → Seed files → "Add a product from its repo": "Check
+  file" shows the same counts and notes as the dry run, then "Import". The
+  script stops with that advice on a 401 or 403.
 
 ## Verify
 

@@ -348,25 +348,35 @@ DB-backed and editable in Settings → AI models.
 Metis supports both **in-app** and **skill-driven** seed round-trips (seed file format:
 `backend/app/ontology/seed-format.md`):
 
-- In the **Products** page, admins/editors can:
-  - **Export seed**: download the selected Spec as a `metis-seed/v1` JSON file,
-    including its attributed goals, capabilities, features, edges, and optional PRD.
-  - **Import seed**: paste or upload a `metis-seed.json`, run a dry-run validation,
-    then import it with the same **idempotent, add-only** identity rules as the
-    seed loader.
+- Admins/editors can:
+  - **Export seed** (on the **Products** page): download the selected Spec as a
+    `metis-seed/v1` JSON file, including its attributed goals, capabilities,
+    features, edges, and optional PRD.
+  - **Import seed** (in **Settings → Seed files**, and on Get started): paste or
+    upload a `metis-seed.json`, check it with a dry run, then import it with the
+    same **idempotent, never-deleting** identity rules as the seed loader.
 - Imports validate the seed shape before writing anything, show reuse/create counts,
-  and surface expected notes/warnings such as "product already has a PRD".
+  and surface expected notes/warnings such as "product already has a PRD". A
+  re-import updates the status and description of the product's existing
+  features to the file's, and the dry run lists each such overwrite and each
+  capability it would create.
 
 ### Claude Code skills
 
 The metis Claude Code plugin (`plugin/`) ships three skills for seeding an
-instance from real codebases (using the same seed format and add-only semantics
+instance from real codebases (using the same seed format and identity rules
 as the in-app flow):
 
 - `plugin/skills/metis-seed-instance` loads a `metis-seed.json` into the running
-  instance via the API: idempotent, add-only. `plugin/skills/metis-unseed`
-  removes what a seed file created. With auth enabled, either use a browser session through the UI, set
-  `AUTH_ENABLED=false`, or pass a bearer token.
+  instance via the API: idempotent, never deletes. `plugin/skills/metis-unseed`
+  removes what a seed file created. Against an instance with `AUTH_ENABLED=false`
+  the scripts need no token. With auth on, only a person's browser session on
+  the desktop may write, and no script can get that token (Keycloak issues it
+  only to the web app's login, which keeps it in an encrypted cookie). So with
+  auth on, the scripts' `--dry-run` works with any valid token (`--token`, or
+  `METIS_TOKEN`; the read-only `metis-mcp` service account's is enough, see
+  the skill's "With auth on"), and the real import or removal happens in the
+  app, in Settings → Seed files. On a 401 or 403 the scripts say so.
 - `plugin/skills/metis-export` analyzes *any* repository and writes a `metis-seed.json`.
   To use it from other repos, symlink it into your global skills once per machine:
 

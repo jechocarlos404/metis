@@ -6,10 +6,12 @@ loaded by the `metis-seed-instance` skill in the metis repo.
 
 This is the canonical copy, at `backend/app/ontology/seed-format.md` in the
 metis repo, so the backend can serve it (`GET /api/ontology/seed-format`) and
-embed it in the prompt metis gives coding agents. `skills/metis-export/references/`
-and the `metis-seed-instance` skill read it through relative symlinks, and the
-global install (`scripts/install-skills.sh`) symlinks the whole export skill into
-`~/.claude/skills/metis-export`, so there is exactly one file to edit.
+embed it in the prompt metis gives coding agents. The skills in the metis
+Claude Code plugin carry byte-identical plain copies, so they still work when
+the plugin is installed outside this repo:
+`plugin/skills/metis-export/references/seed-format.md` and
+`plugin/skills/metis-seed-instance/references/seed-format.md`. Edit this file,
+then copy it over both.
 
 ## Top-level shape
 
@@ -22,7 +24,8 @@ global install (`scripts/install-skills.sh`) symlinks the whole export skill int
   "motivations": [],
   "features": [],
   "edges": [],
-  "products": []
+  "products": [],
+  "technologies": []
 }
 ```
 
@@ -46,6 +49,8 @@ global install (`scripts/install-skills.sh`) symlinks the whole export skill int
   all — a missing link understates reuse, an invented one overstates it. When you
   genuinely cannot tell (typical for an external product), set
   `"unknown_capabilities": true` and list only the ones you can name — possibly none.
+  A link you can only infer goes in `capability_guesses` (see "Guesses" below),
+  never in `capability_refs`.
 - **Products** are the unit of a project: one product per exported project. Each
   feature names its product with `product_ref`. A product can be someone else's
   (`"external": true`) — known only from the outside, as a user. Its features say
@@ -60,6 +65,16 @@ global install (`scripts/install-skills.sh`) symlinks the whole export skill int
   B's way* (≈ B depends on A). The precedence graph — `DEPENDS_ON` plus reversed
   `BLOCKS` — must be **acyclic**; metis rejects cycle-closing edges at write time.
   `RELATES_TO` is annotation only and never constrains ordering.
+- **Guesses are the one exception to "only real data".** A link is a guess when
+  nothing confirms it: no access to the feature itself, no confirmation from the
+  user, no access to the codebase, nothing on the product's marketing site or
+  docs that states it. A guess says only "this is most likely built from (or
+  satisfies) this capability", with a `confidence` of `low`, `medium` or `high`.
+  Metis shows guesses to editors and admins only, never counts them in any
+  score, coverage or reuse number, and keeps them as guesses until a person
+  confirms them on the desktop. A guess still names one exact capability `ref`
+  in the file: metis never fuzzy-matches names. Entities themselves (features,
+  capabilities, technologies, products) are never guessed; only links are.
 - Tickets are sized to fit one Claude session. `context_budget` is `S`, `M`, or `L`;
   PRD approval in metis rejects any `L` ticket, so split those instead of exporting
   them.
@@ -110,6 +125,13 @@ Goal MOTIVATES capability. One object per pair:
   "ref": "feat-impact",
   "capability_refs": ["cap-graph", "cap-search"],  // required, ≥1: every capability this REALIZES
   "unknown_capabilities": false,   // optional: true = the list is incomplete (may then be empty)
+  "capability_guesses": [          // optional: inferred links, never counted until confirmed
+    {
+      "capability_ref": "cap-notify",   // required; a capabilities[] ref, not also in capability_refs
+      "confidence": "medium",           // required: "low" | "medium" | "high"
+      "basis": "The help centre describes email alerts but shows no screen for them."
+    }
+  ],
   "product_ref": "prod-export",    // optional: whose feature this is (a products[] ref)
   "name": "Traverse blast radius from a changed feature",  // required; user-facing verb phrase
   "description": "…",
@@ -123,10 +145,32 @@ Goal MOTIVATES capability. One object per pair:
 A legacy single `"capability_ref": "cap-graph"` is still accepted and read as
 `["cap-graph"]`; new files should use `capability_refs`.
 
+### Guesses
+
+`capability_guesses` on a feature (and `satisfies` entries with a `confidence`
+on a technology, below) are links metis stores as marked guesses:
+
+- Each `capability_ref` must be a capability declared in this file, may appear
+  once per feature, and must not also be in that feature's `capability_refs`
+  (a link is either confirmed or guessed, not both).
+- A feature with no `capability_refs` and only guesses must set
+  `"unknown_capabilities": true`.
+- `confidence` is how strong the outside evidence is:
+  - `high`: strong public evidence, such as a docs or help page that names the
+    behaviour the capability provides.
+  - `medium`: the behaviour is described (marketing copy, a changelog, a talk)
+    but not shown.
+  - `low`: plausible from the product's category alone.
+- `basis` is optional: one sentence saying why, so the person confirming the
+  guess can check it.
+- In a repository you can read, trace the code instead: a link you can see is
+  confirmed and goes in `capability_refs`.
+
 For an **external** product: no evidence anchors (there is no code to point at),
 leave capability `maturity` unset — it describes *our* implementation, and an
-external-only capability's maturity is ignored anyway — and declare
-`unknown_capabilities` rather than guessing a link.
+external-only capability's maturity is ignored anyway. Put only the links you
+can confirm in `capability_refs`; anything inferred goes in
+`capability_guesses`, with `unknown_capabilities: true`.
 
 ### edges
 
@@ -184,19 +228,65 @@ snapshots of the taxonomy, never a second hierarchy.
 }
 ```
 
+### technologies
+
+The technologies a product is built with, and which capabilities each one
+satisfies. A technology is shared across products, like a capability.
+
+```json
+{
+  "ref": "tech-postgres",
+  "name": "PostgreSQL",            // required
+  "slug": "postgresql",            // optional; default: the name lowercased, each run of
+                                   // characters outside a-z and 0-9 turned into one "-", ends trimmed
+  "kind": "service",               // required: "language" | "framework" | "library" | "runtime"
+                                   //   | "service" | "model" | "protocol"
+  "layer": "data",                 // optional: "data" | "api" | "web" | "agent" | "infra" | "ops"
+  "products": ["prod-export"],     // optional: products[] refs that use it
+  "satisfies": [                   // optional
+    { "capability_ref": "cap-store", "fit": "native" },
+    { "capability_ref": "cap-search", "fit": "partial",
+      "confidence": "medium", "basis": "Imported by the search module, next to a second index." }
+  ]
+}
+```
+
+- `products` is real data, never a guess: list a product only when its
+  lockfile, package manifest, Dockerfile or compose file names the technology.
+- A `satisfies` entry **without** `confidence` is a confirmed link. Omit
+  `confidence` only when you observed the link in code (the capability's own
+  code is built on this technology), never when you inferred it. An inferred
+  link always carries a `confidence` (the scale under "Guesses") and is stored
+  as a guess.
+- `fit` is `"native"`, `"partial"` or `"workaround"`. It is required on a
+  confirmed entry and optional on a guess. `basis` is optional, one sentence.
+- Each `capability_ref` is a capabilities[] ref and appears once per technology.
+- Slugs are identity: the loader reuses an existing technology with the same
+  slug. Each technology's slug (given or derived) must be non-empty and unique
+  within the file; give one explicitly when the name has no letters or digits.
+- Adoption stances and stack slots are human decisions and are never in a seed file.
+
 ## Loader behavior (what you can rely on)
 
-- **Idempotent, add-only.** The loader matches existing entities — goals by
-  (goal_type, title); capabilities, features, and products by name; edges by
-  (src, dst, kind); motivations by pair — and reuses them instead of duplicating.
-  It never deletes or updates anything. Re-running the same file is safe.
+- **Idempotent, add-only.** The loader matches existing entities (goals by
+  (goal_type, title); capabilities and products by name; features by
+  (product, name); technologies by slug; edges by (src, dst, kind); motivations,
+  product technologies and satisfactions by pair) and reuses them instead of
+  duplicating. It never deletes anything and updates only one thing: a guess
+  that already exists for the same (capability, feature) or (capability,
+  technology) pair takes the file's `confidence` and `basis`. Re-running the
+  same file is safe.
 - Names are therefore identity: reuse the exact same name across runs to mean the
   same entity. For capabilities, also reuse the exact name another product already
   uses for the same ability (read `GET /api/capabilities/inventory` first) — that
   shared name is what links projects. Only features and products need names that
   stay distinct across projects.
 - An existing feature (matched by name) is reused as-is: its capability links and
-  product are not rewritten.
+  product are not rewritten. Its `capability_guesses` are still loaded, so a
+  product's next export can add guesses to features metis already has.
+- A guess is skipped when the instance already has that link confirmed (the
+  feature already realizes the capability, or the technology already satisfies
+  it). An existing technology keeps its name, kind and layer.
 - Products load before features, so `product_ref` always resolves.
 - A product that already has any PRD is left untouched (the loader won't stack a
   second decomposition version).

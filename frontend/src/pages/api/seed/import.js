@@ -8,6 +8,28 @@ const WORK_STATUSES = new Set(["pending", "in_progress", "done"]);
 const MATURITIES = new Set(["planned", "alpha", "beta", "ga", "deprecated", "retired"]);
 const EDGE_KINDS = new Set(["DEPENDS_ON", "BLOCKS", "RELATES_TO"]);
 const CONTEXT_BUDGETS = new Set(["S", "M", "L"]);
+const CONFIDENCES = new Set(["low", "medium", "high"]);
+const TECH_KINDS = new Set(["language", "framework", "library", "runtime", "service", "model", "protocol"]);
+const TECH_LAYERS = new Set(["data", "api", "web", "agent", "infra", "ops"]);
+const TECH_FITS = new Set(["native", "partial", "workaround"]);
+
+/** The backend's slug rule: lowercase kebab, "" when nothing survives. */
+function slugify(value) {
+  return String(value).trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+}
+
+/** A technology's identity: its explicit slug, else one derived from its name. */
+function techSlug(tech) {
+  if (tech.slug != null) return tech.slug;
+  return typeof tech.name === "string" ? slugify(tech.name) : "";
+}
+
+const sorted = (set) => JSON.stringify([...set].sort());
+
+function checkGuess(errors, where, item) {
+  if (!CONFIDENCES.has(item.confidence)) errors.push(`${where}: confidence must be one of ${sorted(CONFIDENCES)}`);
+  if (item.basis != null && typeof item.basis !== "string") errors.push(`${where}: basis must be a string`);
+}
 
 function prune(payload) {
   return Object.fromEntries(
@@ -148,12 +170,85 @@ function validateSeed(doc) {
         errors.push(`${where}: capability_refs lists a capability twice`);
       }
     }
+    const guesses = feature.capability_guesses;
+    if (guesses != null && !Array.isArray(guesses)) {
+      errors.push(`${where}: capability_guesses must be a list`);
+    } else if (guesses) {
+      const confirmed = new Set(Array.isArray(refs) ? refs.map(String) : []);
+      const guessed = new Set();
+      for (const [j, guess] of guesses.entries()) {
+        const gwhere = `${where}.capability_guesses[${j}]`;
+        if (guess === null || typeof guess !== "object" || Array.isArray(guess)) {
+          errors.push(`${gwhere}: must be an object`);
+          continue;
+        }
+        const ref = guess.capability_ref;
+        if (typeof ref !== "string" || !capRefs.has(ref)) {
+          errors.push(`${gwhere}: capability_ref ${JSON.stringify(ref ?? null)} does not match a capability`);
+        } else if (confirmed.has(ref)) {
+          errors.push(`${gwhere}: ${JSON.stringify(ref)} is also in capability_refs (a link is confirmed or guessed, not both)`);
+        } else if (guessed.has(ref)) {
+          errors.push(`${gwhere}: ${JSON.stringify(ref)} is guessed twice`);
+        }
+        guessed.add(ref);
+        checkGuess(errors, gwhere, guess);
+      }
+    }
     if (feature.product_ref != null && !productRefs.has(feature.product_ref)) {
       errors.push(`${where}: unknown product_ref ${JSON.stringify(feature.product_ref)}`);
     }
     checkPriority(errors, where, feature);
     checkStatus(errors, where, feature);
     checkFacets(errors, where, feature);
+  }
+
+  checkRefs("technologies");
+  const seenSlugs = new Set();
+  for (const [i, tech] of (doc.technologies || []).entries()) {
+    const where = `technologies[${i}] (${tech.ref})`;
+    if (typeof tech.name !== "string" || !tech.name) errors.push(`${where}: 'name' is required`);
+    const slug = techSlug(tech);
+    if (typeof slug !== "string" || !slug) {
+      errors.push(`${where}: slug must be a non-empty string (give one when the name yields none)`);
+    } else if (seenSlugs.has(slug)) {
+      errors.push(`${where}: duplicate technology slug ${JSON.stringify(slug)}`);
+    } else {
+      seenSlugs.add(slug);
+    }
+    if (!TECH_KINDS.has(tech.kind)) errors.push(`${where}: kind must be one of ${sorted(TECH_KINDS)}`);
+    if (tech.layer != null && !TECH_LAYERS.has(tech.layer)) errors.push(`${where}: layer must be one of ${sorted(TECH_LAYERS)}`);
+    const products = tech.products;
+    if (products != null && (!Array.isArray(products) || products.some((ref) => typeof ref !== "string" || !productRefs.has(ref)))) {
+      errors.push(`${where}: products must be product refs`);
+    }
+    const satisfies = tech.satisfies;
+    if (satisfies != null && !Array.isArray(satisfies)) {
+      errors.push(`${where}: satisfies must be a list`);
+      continue;
+    }
+    const linked = new Set();
+    for (const [j, link] of (satisfies || []).entries()) {
+      const swhere = `${where}.satisfies[${j}]`;
+      if (link === null || typeof link !== "object" || Array.isArray(link)) {
+        errors.push(`${swhere}: must be an object`);
+        continue;
+      }
+      const ref = link.capability_ref;
+      if (typeof ref !== "string" || !capRefs.has(ref)) {
+        errors.push(`${swhere}: capability_ref ${JSON.stringify(ref ?? null)} does not match a capability`);
+      } else if (linked.has(ref)) {
+        errors.push(`${swhere}: ${JSON.stringify(ref)} is listed twice`);
+      }
+      linked.add(ref);
+      if (link.confidence == null) {
+        // Confirmed: observed in code.
+        if (!TECH_FITS.has(link.fit)) errors.push(`${swhere}: fit must be one of ${sorted(TECH_FITS)}`);
+        if (link.basis != null && typeof link.basis !== "string") errors.push(`${swhere}: basis must be a string`);
+      } else {
+        checkGuess(errors, swhere, link);
+        if (link.fit != null && !TECH_FITS.has(link.fit)) errors.push(`${swhere}: fit must be one of ${sorted(TECH_FITS)}`);
+      }
+    }
   }
 
   const seenEdges = new Set();
@@ -321,10 +416,22 @@ class UpstreamApi {
     return body;
   }
 
+  /** For endpoints an older instance may not have yet: absent reads as []. */
+  async getOptional(route) {
+    const { status, body } = await this.request("GET", route);
+    return status === 200 ? body : [];
+  }
+
   async post(route, payload) {
     return this.request("POST", route, payload);
   }
+
+  async put(route, payload) {
+    return this.request("PUT", route, payload);
+  }
 }
+
+const isDry = (id) => String(id).startsWith("dry-run:");
 
 class Loader {
   constructor(api, doc, dryRun) {
@@ -338,6 +445,9 @@ class Loader {
     this.capIds = new Map();
     this.featureIds = new Map();
     this.productIds = new Map();
+    this.techIds = new Map();
+    this.featureCaps = new Map(); // feature ref -> capability ids it realizes (confirmed)
+    this.existingGuesses = null;
   }
 
   note(collection, action) {
@@ -455,16 +565,18 @@ class Loader {
     // Add-only: an existing feature keeps its capability links as they are —
     // the importer never rewrites a row. Identity is (product, name): another
     // product's "Sign in" is a different feature, not a reuse.
-    const existing = new Map(
-      (await this.api.get("/api/features")).map((feature) => [featureKey(feature.product_id, feature.name), feature.id]),
-    );
+    const instance = await this.api.get("/api/features");
+    const existing = new Map(instance.map((feature) => [featureKey(feature.product_id, feature.name), feature.id]));
+    const capsOf = new Map(instance.map((feature) => [feature.id, new Set(feature.capability_ids || [])]));
     for (const feature of this.doc.features || []) {
       const key = featureKey(this.productIds.get(feature.product_ref), feature.name);
       if (existing.has(key)) {
         this.featureIds.set(feature.ref, existing.get(key));
+        this.featureCaps.set(feature.ref, capsOf.get(existing.get(key)) || new Set());
         this.note("features", "reused");
         continue;
       }
+      this.featureCaps.set(feature.ref, new Set(featureCapabilityRefs(feature).map((ref) => this.capIds.get(ref))));
       this.featureIds.set(
         feature.ref,
         await this.create("features", "/api/features", {
@@ -479,6 +591,164 @@ class Loader {
           priority_rationale: feature.priority_rationale,
         }, feature.name),
       );
+    }
+  }
+
+  /** Guesses already in the instance, keyed by (capability, feature or tech). */
+  async guesses() {
+    if (this.existingGuesses === null) {
+      this.existingGuesses = new Map(
+        (await this.api.getOptional("/api/guesses")).map((guess) => [
+          `${guess.capability_id}:${guess.feature_id || guess.tech_id}`,
+          guess,
+        ]),
+      );
+    }
+    return this.existingGuesses;
+  }
+
+  /** Create or update one guess. The endpoint is idempotent per pair, so a
+   * re-import updates confidence and basis instead of stacking rows. */
+  async postGuess(payload, label) {
+    const other = payload.feature_id || payload.tech_id;
+    const current = (await this.guesses()).get(`${payload.capability_id}:${other}`);
+    if (current && ["confidence", "basis", "fit"].every((k) => (current[k] ?? null) === (payload[k] ?? null))) {
+      this.note("guesses", "reused");
+      return;
+    }
+    if (this.dryRun || isDry(other)) {
+      this.note("guesses", current ? "would update" : "would create");
+      return;
+    }
+    const { status, body } = await this.api.post("/api/guesses", prune(payload));
+    if (status === 200 || status === 201) {
+      this.note("guesses", current ? "updated" : "created");
+    } else {
+      this.warnings.push(`guess ${label} rejected (${status}): ${JSON.stringify(body)}`);
+      this.note("guesses", "rejected");
+    }
+  }
+
+  async loadFeatureGuesses() {
+    // Reused features get their guesses too: guesses arrive gradually, on
+    // each product's next export, mostly for features metis already has.
+    for (const feature of this.doc.features || []) {
+      const featureId = this.featureIds.get(feature.ref);
+      for (const guess of feature.capability_guesses || []) {
+        const capabilityId = this.capIds.get(guess.capability_ref);
+        const label = `${feature.ref} ~> ${guess.capability_ref}`;
+        if ((this.featureCaps.get(feature.ref) || new Set()).has(capabilityId)) {
+          this.notes.push(`guess ${label} skipped: the link is already confirmed`);
+          this.note("guesses", "skipped");
+          continue;
+        }
+        await this.postGuess({
+          capability_id: capabilityId,
+          feature_id: featureId,
+          confidence: guess.confidence,
+          basis: guess.basis,
+        }, label);
+      }
+    }
+  }
+
+  async allTechnologies() {
+    const rows = [];
+    for (let offset = 0; ; offset += 200) {
+      const page = await this.api.get(`/api/tech?limit=200&offset=${offset}`);
+      rows.push(...page.rows);
+      if (offset + 200 >= page.total || page.rows.length === 0) return rows;
+    }
+  }
+
+  async loadTechnologies() {
+    const techs = this.doc.technologies || [];
+    if (techs.length === 0) return;
+    const existing = new Map((await this.allTechnologies()).map((tech) => [tech.slug, tech.id]));
+    for (const tech of techs) {
+      const slug = techSlug(tech);
+      if (existing.has(slug)) {
+        this.techIds.set(tech.ref, existing.get(slug));
+        this.note("technologies", "reused");
+        continue;
+      }
+      this.techIds.set(
+        tech.ref,
+        await this.create("technologies", "/api/tech", { slug, name: tech.name, kind: tech.kind, layer: tech.layer }, tech.name),
+      );
+    }
+
+    // Observed usage. PUT resets an existing row's slot binding, so pairs
+    // already recorded are left alone.
+    const usage = new Map();
+    for (const tech of techs) {
+      const techId = this.techIds.get(tech.ref);
+      for (const productRef of tech.products || []) {
+        const productId = this.productIds.get(productRef);
+        if (isDry(productId) || isDry(techId)) {
+          this.note("tech_usage", "would create");
+          continue;
+        }
+        if (!usage.has(productId)) {
+          usage.set(productId, new Set((await this.api.get(`/api/stacks/usage?product_id=${productId}`)).map((u) => u.tech_id)));
+        }
+        if (usage.get(productId).has(techId)) {
+          this.note("tech_usage", "reused");
+        } else if (this.dryRun) {
+          this.note("tech_usage", "would create");
+        } else {
+          const { status, body } = await this.api.put(`/api/stacks/usage?product_id=${productId}`, { tech_id: techId });
+          if (status !== 200 && status !== 201) {
+            throw new Error(`usage ${tech.ref} by ${productRef} returned ${status}: ${JSON.stringify(body)}`);
+          }
+          usage.get(productId).add(techId);
+          this.note("tech_usage", "created");
+        }
+      }
+    }
+
+    const confirmed = new Set(
+      (await this.api.get("/api/tech/satisfactions")).map((s) => `${s.tech_id}:${s.capability_id}`),
+    );
+    for (const tech of techs) {
+      const techId = this.techIds.get(tech.ref);
+      for (const link of tech.satisfies || []) {
+        const capabilityId = this.capIds.get(link.capability_ref);
+        const label = `${tech.ref} satisfies ${link.capability_ref}`;
+        const known = confirmed.has(`${techId}:${capabilityId}`);
+        if (link.confidence != null) {
+          if (known) {
+            this.notes.push(`guess ${label} skipped: the link is already confirmed`);
+            this.note("guesses", "skipped");
+            continue;
+          }
+          await this.postGuess({
+            capability_id: capabilityId,
+            tech_id: techId,
+            confidence: link.confidence,
+            basis: link.basis,
+            fit: link.fit,
+          }, label);
+          continue;
+        }
+        if (known) {
+          this.note("satisfactions", "reused");
+          continue;
+        }
+        if (this.dryRun) {
+          this.note("satisfactions", "would create");
+          continue;
+        }
+        const { status, body } = await this.api.post("/api/tech/satisfactions", prune({
+          tech_id: techId,
+          capability_id: capabilityId,
+          fit: link.fit,
+          notes: link.basis,
+        }));
+        if (status === 201) this.note("satisfactions", "created");
+        else if (status === 409) this.note("satisfactions", "reused");
+        else throw new Error(`satisfaction ${label} returned ${status}: ${JSON.stringify(body)}`);
+      }
     }
   }
 
@@ -618,7 +888,9 @@ class Loader {
     await this.loadMotivations();
     await this.loadProductRows();
     await this.loadFeatures();
+    await this.loadFeatureGuesses();
     await this.loadEdges();
+    await this.loadTechnologies();
     await this.loadProducts();
     // Names are identity, so a re-described repo with reworded features adds
     // near-duplicates. Say so before anyone presses Import.
@@ -642,6 +914,10 @@ class Loader {
         products: this.count("products"),
         bundles: this.count("bundles"),
         decompositions: this.count("decompositions"),
+        technologies: this.count("technologies"),
+        tech_usage: this.count("tech_usage"),
+        satisfactions: this.count("satisfactions"),
+        guesses: this.count("guesses"),
       },
       notes: this.notes,
       warnings: this.warnings,

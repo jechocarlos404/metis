@@ -7,10 +7,14 @@ description: Remove a previously seeded project from the running metis instance 
 
 The inverse of `metis-seed-instance`: given a `metis-seed/v1` file, remove
 what it created from the running instance. Matching uses the loader's
-identity rules — goals by type+title; capabilities, features, and products by
-name; edges by src+dst+kind; motivations by pair — so the file doesn't need
+identity rules (goals by type+title; capabilities and products by name;
+features by product+name; technologies by slug; edges by src+dst+kind;
+motivations and satisfactions by pair), so the file doesn't need
 to be byte-identical to the one that was loaded. Names are identity: whatever
 in the instance bears a seed entity's name is what gets deleted.
+
+Paths below such as `scripts/` are relative to this skill's own directory, the
+one holding this SKILL.md.
 
 ## Prerequisites
 
@@ -28,27 +32,33 @@ user the full list of what would be deleted, and get their explicit
 confirmation before the real run.**
 
 ```sh
-python3 .claude/skills/metis-unseed/scripts/unseed_instance.py <seed-file> --dry-run
-python3 .claude/skills/metis-unseed/scripts/unseed_instance.py <seed-file>
+python3 <this skill's directory>/scripts/unseed_instance.py <seed-file> --dry-run
+python3 <this skill's directory>/scripts/unseed_instance.py <seed-file>
 ```
 
 The script is stdlib-only and defaults to `--base-url http://localhost:8000`.
 It deletes in dependency-safe order (motivations, edges, products, features,
-capabilities leaf-first, goals children-first) and protects anything the seed
-shares with the rest of the instance:
+technologies, capabilities leaf-first, goals children-first) and protects
+anything the seed shares with the rest of the instance:
 
 - a **product is kept** (warning) if features outside the seed belong to it —
   deleting it would silently strip their product
+- a **technology is kept** if a product outside the seed uses it, if it has an
+  adoption stance, or if it satisfies (or is guessed to satisfy) a capability
+  the seed does not link it to. On a kept technology, the seed's own
+  satisfactions of a capability being deleted are removed first
 - a **capability is kept** (warning, not deleted) if features outside the
   seed realize it (any of a feature's capabilities counts — capabilities are
-  shared across products), if any technology satisfies it, or if any child capability
-  is outside the seed or kept. A seed carries no tech, so a satisfaction on a
-  seeded capability was recorded by someone else — deleting it would drop data
-  the seed never created, and would strand any stack slot bound through it
+  shared across products), if a technology satisfies it or a guess points at it
+  and the seed did not declare that link, or if any child capability is outside
+  the seed or kept. A link the seed did not declare was recorded by someone
+  else: deleting it would drop data the seed never created, and would strand
+  any stack slot bound through it
 - a **goal is kept** if it has child goals outside the seed, or a product
   outside the seed (or a kept one) points at it
-- deleting a **feature cascades its edges**, including edges a foreign
-  feature had to it — those are reported as notes
+- deleting a **feature cascades its edges and guesses**, including edges a
+  foreign feature had to it (reported as notes)
+- deleting a **technology cascades its satisfactions, guesses and usage**
 - deleting a **product cascades its PRD and all epics/stories/tickets**,
   including tickets created after seeding
 

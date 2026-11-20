@@ -16,7 +16,8 @@ function formatCounts(collection, counts) {
 }
 
 export const summarizeCounts = (counts) =>
-  ["goals", "capabilities", "motivations", "features", "edges", "products", "bundles", "decompositions"]
+  ["goals", "capabilities", "motivations", "features", "edges", "products", "bundles", "decompositions",
+    "technologies", "tech_usage", "satisfactions", "guesses"]
     .map((k) => formatCounts(k, counts?.[k]))
     .filter(Boolean);
 

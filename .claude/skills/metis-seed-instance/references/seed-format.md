@@ -1,1 +1,0 @@
-../../../../skills/metis-export/references/seed-format.md

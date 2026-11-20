@@ -142,7 +142,9 @@ export default function TechCatalogIsland({ initialView = "catalog", initialQuer
     if (adoption) params.set("adoption", adoption);
     const timer = setTimeout(() => {
       api(`/tech?${params}`)
-        .then((p) => live && setPage(p))
+        // Whether this answer was filtered, so a cleared filter can't read an
+        // empty filtered answer as "no technologies at all".
+        .then((p) => live && setPage({ ...p, filtered: Boolean(q || kind || layer || adoption) }))
         .catch((e) => live && setError(e.detail ?? e.message))
         .finally(() => live && setLoading(false));
     }, 200); // debounce, per the spec
@@ -179,9 +181,9 @@ export default function TechCatalogIsland({ initialView = "catalog", initialQuer
   const techTotal = lifecycle?.technologies ?? null;
   const unknown = lifecycle?.unknown ?? 0;
   const judged = (techTotal ?? 0) - unknown;
-  // Nothing to filter or sort: say so, without the filters and table around it.
-  const filtered = Boolean(q || kind || layer || adoption);
-  const noTech = view === "catalog" ? page != null && total === 0 && !filtered : techTotal === 0;
+  // Nothing to filter or sort: say so, without the filters and table around
+  // it. Judged from an unfiltered answer, never from the filters on screen.
+  const noTech = view === "catalog" ? page != null && total === 0 && !page.filtered : techTotal === 0;
   const noTechWords = canWrite
     ? <>No technologies yet. They come in with a product's seed file, imported from <a href="/settings">Settings → Seed files</a>.</>
     : "No technologies yet. They appear once an editor imports a product's seed file that lists them.";

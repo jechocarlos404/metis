@@ -4,7 +4,7 @@ import { Button, Dialog, Icon, IconButton, Input, PriorityBadge, Select, StatusB
 import { api } from "../../lib/api.js";
 import { readParam, useParamRestore, writeParams } from "../../lib/url-state.js";
 import { GoalNetworkView } from "../graph/GoalNetworkView.jsx";
-import { NEED, PRIORITY_HINT, andList, count, needKey, statusLabel } from "../../lib/words.js";
+import { DONE_WHEN, NEED, PRIORITY_HINT, andList, count, needKey, statusLabel } from "../../lib/words.js";
 import { capabilityCount, deleteEffects } from "../graph/goal-facts.js";
 
 const EMPTY_DRAFT = { goal_type: "product", parent_goal_id: "", title: "", description: "", success_criteria: "", priority: "3", status: "pending" };
@@ -247,17 +247,17 @@ export default function GoalsIsland({ canWrite = true }) {
                 <div id={`goal-${org.id}`} style={{ background: "var(--surface-inverse)", borderRadius: "var(--radius-lg)", padding: "20px 24px", display: "flex", flexWrap: "wrap", alignItems: "center", gap: 16, ...highlightStyle(org.id) }}>
                   <Icon name="target" size={20} style={{ color: "var(--aegean-4)" }} />
                   <div style={{ flex: "1 1 220px", minWidth: 0 }}>
-                    <div style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-2xs)", letterSpacing: "var(--tracking-caps)", textTransform: "uppercase", color: "var(--aegean-4)" }}>org goal · {org.display_id}</div>
+                    <div style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-2xs)", letterSpacing: "var(--tracking-caps)", textTransform: "uppercase", color: "var(--ink-3)" }}>org goal · {org.display_id}</div>
                     <div style={{ fontFamily: "var(--font-display)", fontSize: "var(--text-xl)", fontWeight: "var(--weight-semibold)", color: "var(--text-inverse)", letterSpacing: "var(--tracking-tight)" }}>{org.title}</div>
                     {productById[org.product_id] && (
-                      <div style={{ fontSize: "var(--text-xs)", color: "var(--aegean-4)", marginTop: 2 }}>
-                        For <a href={`/products?product=${org.product_id}`} style={{ color: "var(--text-inverse)" }}>{productById[org.product_id].name}</a>
+                      <div style={{ fontSize: "var(--text-xs)", color: "var(--ink-3)", marginTop: 2 }}>
+                        For <a href={`/products?product=${org.product_id}`} style={{ color: "var(--aegean-4)", textDecoration: "underline" }}>{productById[org.product_id].name}</a>
                       </div>
                     )}
-                    {org.description && <div style={{ fontSize: "var(--text-sm)", color: "var(--aegean-4)", marginTop: 4 }}>{org.description}</div>}
-                    {org.success_criteria && <div style={{ fontSize: "var(--text-xs)", color: "var(--aegean-4)", marginTop: 2 }}>Success: {org.success_criteria}</div>}
+                    {org.description && <div style={{ fontSize: "var(--text-sm)", color: "var(--ink-3)", marginTop: 4 }}>{org.description}</div>}
+                    {org.success_criteria && <div style={{ fontSize: "var(--text-xs)", color: "var(--ink-3)", marginTop: 2 }}>{DONE_WHEN}: {org.success_criteria}</div>}
                     {/* The same count the Network panel shows (goal-facts.js). */}
-                    <div style={{ fontSize: "var(--text-xs)", color: "var(--aegean-4)", marginTop: 4 }}>{capabilityCount(org, goals, capsByGoal).text}</div>
+                    <div style={{ fontSize: "var(--text-xs)", color: "var(--ink-3)", marginTop: 4 }}>{capabilityCount(org, goals, capsByGoal).text}</div>
                   </div>
                   <StatusBadge status={org.status} />
                   {canWrite && (
@@ -369,7 +369,7 @@ export default function GoalsIsland({ canWrite = true }) {
             onChange={(e) => setDraft({ ...draft, description: e.target.value })}
           />
           <Input
-            label="Success criteria"
+            label={DONE_WHEN}
             value={draft.success_criteria}
             onChange={(e) => setDraft({ ...draft, success_criteria: e.target.value })}
             placeholder="Jira, Linear, Notion round-trip by Q4"
@@ -443,7 +443,7 @@ function GoalList({ goals, productById, capsByGoal, highlightStyle, editButton, 
                   <div style={{ fontSize: "var(--text-sm)", color: "var(--text-body)", marginTop: 2 }}>{g.description}</div>
                 )}
                 {g.success_criteria && (
-                  <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", marginTop: 2 }}>Success: {g.success_criteria}</div>
+                  <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", marginTop: 2 }}>{DONE_WHEN}: {g.success_criteria}</div>
                 )}
                 <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", marginTop: 4, display: "flex", gap: 6, flexWrap: "wrap" }}>
                   {caps.length === 0 ? (

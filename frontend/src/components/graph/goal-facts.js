@@ -61,3 +61,15 @@ export function ownedTrees(productId, goals) {
     return { goal: root, children: below(root.id, 1, []) };
   });
 }
+
+/**
+ * The goal trees a product's Goals tab and its Share snapshot both draw: the
+ * ones it owns (ownedTrees()). Owning none, a product of ours still shows the
+ * goal it points at (a goal two of our products point at belongs to
+ * neither); someone else's product shows none.
+ */
+export function productGoalTrees(product, goals) {
+  const trees = ownedTrees(product.id, goals);
+  const pointed = goals.find((g) => g.id === product.goal_id);
+  return trees.length === 0 && pointed && !product.external ? [{ goal: pointed, children: [] }] : trees;
+}

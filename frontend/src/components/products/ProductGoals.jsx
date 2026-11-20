@@ -1,7 +1,7 @@
 import React from "react";
 import { StatusBadge } from "../../ds";
-import { count } from "../../lib/words.js";
-import { ownedTrees } from "../graph/goal-facts.js";
+import { DONE_WHEN, count } from "../../lib/words.js";
+import { productGoalTrees } from "../graph/goal-facts.js";
 
 // A product's own goals are the ones the goals API says belong to it
 // (product_id), drawn as the tree they form, whichever of them the product
@@ -10,10 +10,7 @@ import { ownedTrees } from "../graph/goal-facts.js";
 // other goals that motivate a capability one of this product's features
 // realizes (direct links only: feature -> capability <- goal).
 export function ProductGoals({ product, goals, features, capabilities, motivations, canWrite }) {
-  let trees = ownedTrees(product.id, goals);
-  // A goal two of our products point at belongs to neither; still show the one it points at.
-  const pointed = goals.find((g) => g.id === product.goal_id);
-  if (trees.length === 0 && pointed && !product.external) trees = [{ goal: pointed, children: [] }];
+  const trees = productGoalTrees(product, goals); // the Share snapshot draws the same (A43)
   const own = new Set([product.goal_id, ...goals.filter((g) => g.product_id === product.id).map((g) => g.id)]);
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -27,7 +24,7 @@ export function ProductGoals({ product, goals, features, capabilities, motivatio
               <StatusBadge status={goal.status} />
             </div>
             {goal.description && <div style={{ fontSize: "var(--text-sm)", color: "var(--text-body)" }}>{goal.description}</div>}
-            {goal.success_criteria && <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>Done when: {goal.success_criteria}</div>}
+            {goal.success_criteria && <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>{DONE_WHEN}: {goal.success_criteria}</div>}
             {parent && (
               <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>
                 Part of <a href={`/goals?goal=${parent.id}`}>{parent.title}</a>

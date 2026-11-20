@@ -4,7 +4,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  GOAL_LINES, LABEL_PX, READABLE_SCALE, centreTransform, fitTransform, openTransform, readableUnion, revealTransform, wrapLabel,
+  GOAL_LINES, LABEL_PX, READABLE_SCALE, centreTransform, fitTransform, openTransform, pickTransform, readableUnion, revealTransform, wrapLabel,
 } from "../src/components/graph/graph-data.js";
 
 const screen = (t, x) => x * t.k + t.x;
@@ -97,19 +97,42 @@ test("a selected goal opens centred at full size when the whole network can't be
   assert.equal((screenY(t, goal.y0) + screenY(t, goal.y1)) / 2, 220);
 });
 
-test("a grouped graph opens on as many of its hubs as show whole and readable (B35)", () => {
+test("a grouped graph opens on its biggest hub, with each next one that shows with it readable (B35)", () => {
   const b = { x0: -1000, y0: -600, x1: 1000, y1: 600 };
-  // Most used first; the two on the left sit close, the first far right.
+  // Biggest first: the first far right, the two on the left close together.
   const hubs = [{ x0: 400, y0: 0, x1: 548, y1: 40 }, { x0: -10, y0: -200, x1: 138, y1: -160 }, { x0: -10, y0: 0, x1: 138, y1: 40 }];
-  // 300 px wide: no two across 400 units, so the pair that does fit wins.
+  // 300 px wide: nothing else fits across 400 units with the biggest, so it
+  // opens on the biggest alone, never on the smaller pair without it.
   const narrow = readableUnion(hubs, 300, 600);
-  assert.deepEqual(narrow, { x0: -10, y0: -200, x1: 138, y1: 40 });
+  assert.deepEqual(narrow, hubs[0]);
   const t = openTransform(b, 300, 600, 0, 2.5, narrow, true);
   assert.ok(t.k >= READABLE_SCALE && t.k <= 1);
-  for (const h of hubs.slice(1)) assert.ok(inside(t, h, 0, 0, 300, 600));
+  assert.ok(inside(t, hubs[0], 0, 0, 300, 600));
   // Wide, all of them.
   assert.deepEqual(readableUnion(hubs, 900, 600), { x0: -10, y0: -200, x1: 548, y1: 40 });
   assert.equal(readableUnion([], 900, 600), null);
+});
+
+test("a goal picked from the list is centred with the goals it shares with around it, when they fit readable (A10, C39)", () => {
+  const goal = { x0: 0, y0: 0, x1: 148, y1: 72 };
+  const near = [{ x0: -300, y0: 100, x1: -152, y1: 172 }, { x0: 250, y0: -150, x1: 398, y1: -78 }];
+  const t = pickTransform(goal, near, 900, 700, { top: 40 });
+  assert.ok(t.k >= READABLE_SCALE && t.k <= 1);
+  assert.equal((screen(t, goal.x0) + screen(t, goal.x1)) / 2, 450);
+  for (const n of near) assert.ok(inside(t, n, 0, 40, 900, 700));
+  // Nothing near: centred at full size, as before.
+  assert.deepEqual(pickTransform(goal, [], 900, 700, { top: 40 }), centreTransform(goal, 1, 900, 700, { top: 40 }));
+});
+
+test("a picked goal whose partners don't fit around it readable is fitted with all of them instead (C39)", () => {
+  const goal = { x0: 0, y0: 0, x1: 148, y1: 72 };
+  // One partner far right: centring on the goal would leave the left half empty.
+  const near = [{ x0: 1200, y0: 0, x1: 1348, y1: 72 }, { x0: 300, y0: 300, x1: 448, y1: 372 }];
+  const t = pickTransform(goal, near, 670, 418, { top: 46 });
+  for (const n of [goal, ...near]) assert.ok(inside(t, n, 0, 46, 670, 418));
+  assert.ok(t.k < READABLE_SCALE); // too far apart to read here: still all in view
+  // Never closer than the cap.
+  assert.ok(pickTransform(goal, [{ x0: 160, y0: 0, x1: 308, y1: 72 }], 2000, 2000, 0, 1).k <= 1);
 });
 
 test("a goal card holds the whole name the first-run network cut (C35)", () => {

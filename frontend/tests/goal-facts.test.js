@@ -2,7 +2,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { capabilityCount, deleteEffects, ownedTrees } from "../src/components/graph/goal-facts.js";
+import { capabilityCount, deleteEffects, ownedTrees, productGoalTrees } from "../src/components/graph/goal-facts.js";
 
 const goal = (id, extra = {}) => ({ id, display_id: id, title: `${id} title`, parent_goal_id: null, product_id: null, ...extra });
 
@@ -64,4 +64,13 @@ test("an owned goal under a goal the product doesn't own starts its own tree, de
   assert.equal(rest.length, 0);
   assert.equal(tree.goal.id, "PG-2");
   assert.deepEqual(tree.children.map((c) => [c.goal.id, c.depth]), [["PG-3", 1], ["PG-4", 2]]);
+});
+
+test("the Goals tab and the Share snapshot draw one set of trees: owned, else the goal pointed at, never for someone else's product (A43)", () => {
+  const goals = [goal("OG-1"), goal("PG-2", { parent_goal_id: "OG-1", product_id: "steps" })];
+  const ids = (trees) => trees.map((t) => t.goal.id);
+  assert.deepEqual(ids(productGoalTrees({ id: "steps", goal_id: "PG-2", external: false }, goals)), ["PG-2"]);
+  // Owning nothing, ours still shows the shared goal it points at; an external product shows none.
+  assert.deepEqual(ids(productGoalTrees({ id: "a", goal_id: "OG-1", external: false }, goals)), ["OG-1"]);
+  assert.deepEqual(productGoalTrees({ id: "strava", goal_id: "OG-1", external: true }, goals), []);
 });

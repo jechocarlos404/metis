@@ -95,6 +95,9 @@ export const PROPOSAL_STATUS = { pending: "waiting for you", applying: "applying
 export const priorityLabel = (p) => (p == null ? "no priority" : `P${p}`);
 export const PRIORITY_HINT = "P1 is most urgent, P5 least";
 
+/** A goal's success_criteria, the one label it has wherever it shows. */
+export const DONE_WHEN = "Done when";
+
 /**
  * The one "can we build it?" vocabulary — Home, Products, Journeys and every
  * coverage report use these words and tones and nothing else.

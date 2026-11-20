@@ -16,7 +16,7 @@ const STATUS_DOT = { pending: "var(--text-secondary)", in_progress: "var(--warn-
 
 // `hubs` (capabilityHubs() or goalHubs() from graph-data.js) groups the
 // features around hub pills instead of laying them out in build order.
-export function FeatureGraphView({ layout, hubs, selectedId, onSelect, impactIds, cutStates, fadedIds, style, fitKey }) {
+export function FeatureGraphView({ layout, hubs, selectedId, onSelect, recheckStates, cutStates, fadedIds, style, fitKey }) {
   const svgRef = React.useRef(null);
   const viewportRef = React.useRef(null);
   const engineRef = React.useRef(null);
@@ -117,7 +117,7 @@ export function FeatureGraphView({ layout, hubs, selectedId, onSelect, impactIds
   // longer dims non-neighbors (hover still focuses transiently). Same when
   // grouped by hubs: every feature has a hub line, so selection would fade
   // the whole graph; the selected ring is enough there.
-  const wantFocus = hoveredId ?? (cutStates != null || hubs ? null : selectedId) ?? null;
+  const wantFocus = hoveredId ?? (cutStates != null || recheckStates != null || hubs ? null : selectedId) ?? null;
   // Fade the rest only when the focused card has relationships to show;
   // fading everything around a loner just makes the graph hard to read.
   const focusId = wantFocus != null && adjacency.get(wantFocus)?.size ? wantFocus : null;
@@ -203,7 +203,7 @@ export function FeatureGraphView({ layout, hubs, selectedId, onSelect, impactIds
                 isHovered={hoveredId === n.id}
                 isDimmed={focusId != null && focusId !== n.id && !focusNeighbors?.has(n.id)}
                 isFaded={fadedIds ? fadedIds.has(n.id) : false}
-                isImpacted={impactIds ? impactIds.has(n.id) : false}
+                recheck={recheckStates ? recheckStates.get(n.id) : null}
                 cutState={cutStates ? cutStates.get(n.id) : null}
                 isPinned={pinned.has(n.id)}
                 onSelect={onSelect}
@@ -220,7 +220,7 @@ export function FeatureGraphView({ layout, hubs, selectedId, onSelect, impactIds
         onZoomOut={() => engineRef.current?.zoomBy(1 / 1.4)}
         onFit={() => engineRef.current?.fitToView()}
       />
-      <GraphLegend cutActive={cutStates != null} hubs={hubs} graphData={graphData} />
+      <GraphLegend cutActive={cutStates != null} recheckActive={recheckStates != null} hubs={hubs} graphData={graphData} />
 
       <div style={{
         position: "absolute", bottom: 10, left: 12, pointerEvents: "none",
@@ -241,14 +241,15 @@ export function FeatureGraphView({ layout, hubs, selectedId, onSelect, impactIds
   );
 }
 
-function FeatureNode({ node, isSelected, isTabStop, isHovered, isDimmed, isFaded, isImpacted, cutState, isPinned, onSelect, onHoverChange, registerEl }) {
+function FeatureNode({ node, isSelected, isTabStop, isHovered, isDimmed, isFaded, recheck, cutState, isPinned, onSelect, onHoverChange, registerEl }) {
   const accent = `var(${nodeAccentVar(node.layer)})`;
   const ring = isSelected ? "var(--accent)"
-    : isImpacted ? "var(--danger-fg)"
+    : recheck === "breaks" ? "var(--danger-fg)"
+    : recheck === "retest" ? "var(--warn-fg)"
     : cutState === "target" ? "var(--accent)"
     : cutState === "essential" ? "var(--ok-fg)"
     : isHovered ? "var(--border-default)" : "var(--border-hairline)";
-  const ringWide = isSelected || cutState === "target" || cutState === "essential";
+  const ringWide = isSelected || recheck != null || cutState === "target" || cutState === "essential";
   // Deferrable and filtered-out nodes fade like focus-dimming does, but stay
   // readable on hover/select.
   const isDeferred = (cutState === "deferrable" || isFaded) && !isHovered && !isSelected;
@@ -369,7 +370,7 @@ const lineMark = (opacity) => (
   <svg width="16" height="6"><line x1="0" y1="3" x2="16" y2="3" stroke="var(--ink-4)" strokeWidth="1" opacity={opacity} /></svg>
 );
 
-function GraphLegend({ cutActive, hubs, graphData }) {
+function GraphLegend({ cutActive, recheckActive, hubs, graphData }) {
   const CUT_TIERS = [
     ["target", "var(--accent)", 1],
     ["needed", "var(--ok-fg)", 1],
@@ -423,6 +424,20 @@ function GraphLegend({ cutActive, hubs, graphData }) {
         {Object.keys(STATUS_DOT).map((status) => (
           <LegendRow key={status} mark={dot(STATUS_DOT[status])}><span title={status}>{statusLabel(status)}</span></LegendRow>
         ))}
+        {recheckActive && (
+          <>
+            <div style={LEGEND_HEAD}>If this changes</div>
+            {[["breaks", "var(--danger-fg)"], ["retest", "var(--warn-fg)"]].map(([label, color]) => (
+              <LegendRow key={label} mark={
+                <svg width="16" height="10">
+                  <rect x="2" y="1" width="12" height="8" rx="2" fill="none" stroke={color} strokeWidth="1.5" />
+                </svg>
+              }>
+                {label}
+              </LegendRow>
+            ))}
+          </>
+        )}
         {cutActive && (
           <>
             <div style={LEGEND_HEAD}>Smallest version</div>

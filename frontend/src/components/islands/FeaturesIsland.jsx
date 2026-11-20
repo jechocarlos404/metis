@@ -26,7 +26,7 @@ export default function FeaturesIsland({ canWrite = true }) {
   const [selected, setSelected] = React.useState(null);
   const [detail, setDetail] = React.useState(null);
   const [inJourneys, setInJourneys] = React.useState([]);
-  const [impact, setImpact] = React.useState(null);
+  const [recheck, setRecheck] = React.useState(null);
   const [query, setQuery] = React.useState("");
   const [results, setResults] = React.useState(null);
   const [dialog, setDialog] = React.useState(null); // null | {mode:"new"} | {mode:"edit"}
@@ -136,7 +136,7 @@ export default function FeaturesIsland({ canWrite = true }) {
   }, []);
 
   React.useEffect(() => {
-    setImpact(null);
+    setRecheck(null);
     refreshDetail(selected);
   }, [selected, refreshDetail]);
 
@@ -153,7 +153,11 @@ export default function FeaturesIsland({ canWrite = true }) {
     return () => clearTimeout(timer);
   }, [query]);
 
-  const impactIds = new Set((impact?.dependents ?? []).map((d) => d.id));
+  // While a recheck shows, ring what breaks and what to retest, fade the rest.
+  const recheckStates = React.useMemo(() => recheck && new Map([
+    ...recheck.retest.map((f) => [f.id, "retest"]),
+    ...recheck.breaks.map((f) => [f.id, "breaks"]),
+  ]), [recheck]);
 
   const nodeById = React.useMemo(() => new Map(layout.nodes.map((n) => [n.id, n])), [layout]);
   const productById = React.useMemo(() => new Map(products.map((p) => [p.id, p])), [products]);
@@ -212,13 +216,13 @@ export default function FeaturesIsland({ canWrite = true }) {
   // A cycle anywhere stops the build order, so show every cycle when it does.
   const visibleCycles = activeProduct && topoError !== "cycle" ? cycles.filter((c) => c.some((f) => matchesProduct(f.id))) : cycles;
 
-  const runImpact = async () => {
+  const runRecheck = async () => {
     if (!selected) return;
     setError(null);
     try {
-      setImpact(await api(`/graph/impact/${selected}`));
+      setRecheck(await api(`/graph/recheck/${selected}`));
     } catch {
-      setError("Could not work out what depends on this feature.");
+      setError("Could not work out what to recheck for this feature.");
     }
   };
 
@@ -430,7 +434,7 @@ export default function FeaturesIsland({ canWrite = true }) {
               </div>
             ) : (
               // A fresh graph per grouping and product: pins and hubs from another one would not fit this one.
-              <FeatureGraphView key={`${group}:${activeProduct}`}layout={visibleLayout} hubs={hubs} fitKey={activeProduct} selectedId={selected} onSelect={selectFeature} impactIds={impactIds} cutStates={cutStates} />
+              <FeatureGraphView key={`${group}:${activeProduct}`}layout={visibleLayout} hubs={hubs} fitKey={activeProduct} selectedId={selected} onSelect={selectFeature} recheckStates={cutStates ? null : recheckStates} fadedIds={!cutStates && recheckStates ? new Set(visibleLayout.nodes.filter((n) => n.id !== selected && !recheckStates.has(n.id)).map((n) => n.id)) : null} cutStates={cutStates} />
             )}
             <div role="group" aria-label="Group by" style={{ position: "absolute", top: 10, left: "50%", transform: "translateX(-50%)", display: "flex", alignItems: "center", gap: 8, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-secondary)" }}>
               Group by
@@ -521,8 +525,9 @@ export default function FeaturesIsland({ canWrite = true }) {
                 onEdgeDraft={setEdgeDraft}
                 onAddEdge={addEdge}
                 onRemoveEdge={removeEdge}
-                impact={impact}
-                onImpact={runImpact}
+                recheck={recheck}
+                onRecheck={runRecheck}
+                onClearRecheck={() => setRecheck(null)}
               />
             ) : (
               <div style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>{loaded ? "Select a feature to see what it does and why." : error ? "" : "Loading…"}</div>
@@ -611,7 +616,7 @@ function FeatureLink({ feature, onSelect, active, style }) {
   );
 }
 
-function FeaturePanel({ detail, canWrite, onEdit, onGuessConfirmed, onSelect, productIds, productById, capabilityById, journeys, why, goalParent, ownGoalRoots, allNodes, edgeDraft, onEdgeDraft, onAddEdge, onRemoveEdge, impact, onImpact }) {
+function FeaturePanel({ detail, canWrite, onEdit, onGuessConfirmed, onSelect, productIds, productById, capabilityById, journeys, why, goalParent, ownGoalRoots, allNodes, edgeDraft, onEdgeDraft, onAddEdge, onRemoveEdge, recheck, onRecheck, onClearRecheck }) {
   const layer = detail.facets?.layer;
   return (
     <>
@@ -699,21 +704,69 @@ function FeaturePanel({ detail, canWrite, onEdit, onGuessConfirmed, onSelect, pr
       </div>
 
       <div style={SECTION}>
-        {impact ? (
-          <>
-            <div style={{ fontSize: "var(--text-xs)", color: "var(--text-body)" }}>
-              {count(impact.dependents.length, "feature")} would be affected if this changes; it needs {impact.dependencies.length}.
-            </div>
-            {impact.dependents.map((d) => (
-              <FeatureLink key={d.id} feature={d} onSelect={onSelect} style={{ fontSize: "var(--text-xs)" }} />
-            ))}
-          </>
+        {recheck ? (
+          <RecheckList recheck={recheck} onSelect={onSelect} onClear={onClearRecheck} />
         ) : (
-          <Button size="sm" variant="ghost" style={{ gap: 6, alignSelf: "flex-start" }} onClick={onImpact}>
-            <Icon name="git-branch" size={13} />What depends on this?
+          <Button size="sm" variant="ghost" style={{ gap: 6, alignSelf: "flex-start" }} onClick={onRecheck}>
+            <Icon name="git-branch" size={13} />If this changes, what to recheck?
           </Button>
         )}
       </div>
+    </>
+  );
+}
+
+const RECHECK_SHOWN = 8;
+const SMALL_NOTE = { fontSize: "var(--text-xs)", color: "var(--text-secondary)" };
+
+/** What else to look at when this feature changes (GET /graph/recheck). */
+function RecheckList({ recheck, onSelect, onClear }) {
+  const { breaks, retest, broad, elsewhere } = recheck;
+  const via = (f) => f.via.length === 0 ? null
+    : `through ${f.via[f.via.length - 1]}${f.via.length > 1 ? ` and ${count(f.via.length - 1, "more", "more")}` : ""}`;
+  const row = (f, note, title) => (
+    <div key={f.id} style={{ display: "flex", flexDirection: "column" }}>
+      <FeatureLink feature={f} onSelect={onSelect} style={{ fontSize: "var(--text-xs)" }} />
+      {note && <span title={title} style={SMALL_NOTE}>{note}</span>}
+    </div>
+  );
+  const retestRow = (f) => row(f, `shares ${f.shared.map((c) => c.name).join(", ")}`);
+  const nothing = !breaks.length && !retest.length && !broad.length && !elsewhere.length;
+  return (
+    <>
+      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
+        <div style={CAPS_HEADER}>If this changes</div>
+        <button type="button" onClick={onClear} style={{ border: "none", background: "none", padding: 0, cursor: "pointer", font: "inherit", ...SMALL_NOTE }}>Clear</button>
+      </div>
+      {nothing && <div style={SMALL_NOTE}>Nothing depends on it and it shares no capability, so nothing else needs a recheck.</div>}
+      {breaks.length > 0 && (
+        <>
+          <div style={{ fontSize: "var(--text-xs)", fontWeight: "var(--weight-medium)", color: "var(--danger-fg)" }}>Breaks: {count(breaks.length, "feature")} need it</div>
+          {breaks.map((f) => row(f, via(f), f.via.join(" > ")))}
+        </>
+      )}
+      {retest.length > 0 && (
+        <>
+          <div style={{ fontSize: "var(--text-xs)", fontWeight: "var(--weight-medium)", color: "var(--warn-fg)" }}>Retest: {count(retest.length, "feature")} built on the same capabilities</div>
+          {retest.slice(0, RECHECK_SHOWN).map(retestRow)}
+          {retest.length > RECHECK_SHOWN && (
+            <details>
+              <summary style={{ cursor: "pointer", ...SMALL_NOTE }}>{count(retest.length - RECHECK_SHOWN, "more", "more")}, sharing less</summary>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6 }}>{retest.slice(RECHECK_SHOWN).map(retestRow)}</div>
+            </details>
+          )}
+        </>
+      )}
+      {broad.map((c) => (
+        <div key={c.id} style={SMALL_NOTE}>
+          Also built on {c.name}, used by {count(c.features, "other feature")} here. Retest those only if the change touches it.
+        </div>
+      ))}
+      {elsewhere.length > 0 && (
+        <div style={SMALL_NOTE}>
+          Same capabilities in other products (only matters if they share code): {elsewhere.map((p) => `${p.name} (${p.capabilities.join(", ")})`).join("; ")}.
+        </div>
+      )}
     </>
   );
 }

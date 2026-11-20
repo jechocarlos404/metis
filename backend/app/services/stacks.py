@@ -421,6 +421,12 @@ async def list_product_technologies(
     return list((await session.scalars(stmt)).all())
 
 
+async def tech_ids_used_by(session: AsyncSession, product_id: uuid.UUID) -> set[uuid.UUID]:
+    """The technologies a product records using: what exposure and lifecycle
+    narrow to for one product, so the two count the same set."""
+    return {usage.tech_id for usage in await list_product_technologies(session, product_id)}
+
+
 async def record_usage(
     session: AsyncSession, product_id: uuid.UUID, data: ProductTechnologyWrite
 ) -> ProductTechnology:

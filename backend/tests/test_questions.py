@@ -408,6 +408,11 @@ async def test_exposure_for_one_product_names_it_and_counts_only_its_own(db, cli
         "blocked_by": [],
     }]
     assert body["href"] == "/tech?view=exposure&window_days=180&product=opensails"
+    # The page that href opens counts the same set: none, for this product.
+    assert (await client.get("/api/tech/lifecycle?product=opensails")).json() == {
+        "technologies": 0, "unknown": 0,
+    }
+    assert (await client.get("/api/tech/lifecycle?product=gone")).status_code == 404
 
     async with db() as session:
         await stack_service.record_usage(
@@ -418,6 +423,9 @@ async def test_exposure_for_one_product_names_it_and_counts_only_its_own(db, cli
     # NestJS is dated; Redis, unused here, no longer counts against it.
     assert body["unresolved"] == []
     assert body["href"] == "/tech?view=exposure&window_days=60&product=opensails"
+    assert (await client.get("/api/tech/lifecycle?product=opensails")).json() == {
+        "technologies": 1, "unknown": 0,
+    }
 
 
 @pytest.mark.asyncio

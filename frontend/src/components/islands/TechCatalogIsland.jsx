@@ -94,7 +94,7 @@ function Skeleton({ columns, rows = 12 }) {
 
 const EMPTY = { margin: 16, padding: "var(--space-4)", border: "1px dashed var(--border-default)", borderRadius: "var(--radius-sm)", color: "var(--text-secondary)", fontSize: "var(--text-sm)" };
 
-export default function TechCatalogIsland({ initialView = "catalog", initialQuery = "", initialKind = "", initialLayer = "", initialAdoption = "", canWrite = false }) {
+export default function TechCatalogIsland({ initialView = "catalog", initialQuery = "", initialKind = "", initialLayer = "", initialAdoption = "", initialProduct = "", canWrite = false }) {
   const [view, setView] = React.useState(initialView);
   const [q, setQ] = React.useState(initialQuery);
   const [kind, setKind] = React.useState(initialKind);
@@ -103,6 +103,9 @@ export default function TechCatalogIsland({ initialView = "catalog", initialQuer
   const [offset, setOffset] = React.useState(0);
   const [page, setPage] = React.useState(null);
   const [exposure, setExposure] = React.useState(null);
+  // A product slug (exposure's own `?product=`): its technologies only.
+  const [product, setProduct] = React.useState(initialProduct);
+  const [productName, setProductName] = React.useState(null);
   const [lifecycle, setLifecycle] = React.useState(null); // {technologies, unknown}
   const [hasStacks, setHasStacks] = React.useState(false);
   const [windowDays, setWindowDays] = React.useState(180);
@@ -128,8 +131,9 @@ export default function TechCatalogIsland({ initialView = "catalog", initialQuer
     set("kind", kind);
     set("layer", layer);
     set("adoption", adoption);
+    set("product", view === "exposure" ? product : "");
     window.history.replaceState(null, "", url);
-  }, [view, q, kind, layer, adoption]);
+  }, [view, q, kind, layer, adoption, product]);
 
   React.useEffect(() => {
     if (view !== "catalog") return;
@@ -160,19 +164,29 @@ export default function TechCatalogIsland({ initialView = "catalog", initialQuer
     setLoading(true);
     // "Nothing at risk" only means something for technologies with an
     // end-of-life date or a maintainer count; the rest can never show up here.
-    Promise.all([api(`/exposure?window_days=${windowDays}`), api("/tech/lifecycle"), api("/tech/presence")])
-      .then(([e, l, p]) => {
-        if (!live) return;
-        setExposure(e);
-        setLifecycle(l);
-        setHasStacks(p.stacks === true);
+    const only = product ? `product=${encodeURIComponent(product)}` : "";
+    (product ? api("/products").then((ps) => ps.find((x) => x.slug === product)?.name) : Promise.resolve(null))
+      .then((name) => {
+        // A link to a product since removed: every product, as Features does.
+        if (product && !name) return live && setProduct("");
+        return Promise.all([
+          api(`/exposure?window_days=${windowDays}${only && `&${only}`}`),
+          api(`/tech/lifecycle${only && `?${only}`}`),
+          api("/tech/presence"),
+        ]).then(([e, l, p]) => {
+          if (!live) return;
+          setExposure(e);
+          setLifecycle(l);
+          setHasStacks(p.stacks === true);
+          setProductName(name);
+        });
       })
       .catch((e) => live && setError(e.detail ?? e.message))
       .finally(() => live && setLoading(false));
     return () => {
       live = false;
     };
-  }, [view, windowDays]);
+  }, [view, windowDays, product]);
 
   const total = page?.total ?? 0;
   const rows = page?.rows ?? [];
@@ -183,7 +197,8 @@ export default function TechCatalogIsland({ initialView = "catalog", initialQuer
   const judged = (techTotal ?? 0) - unknown;
   // Nothing to filter or sort: say so, without the filters and table around
   // it. Judged from an unfiltered answer, never from the filters on screen.
-  const noTech = view === "catalog" ? page != null && total === 0 && !page.filtered : techTotal === 0;
+  const noTech = view === "catalog" ? page != null && total === 0 && !page.filtered : techTotal === 0 && !product;
+  const noneUsed = view === "exposure" && product && techTotal === 0; // the product records none
   const noTechWords = canWrite
     ? <>No technologies yet. They come in with a product's seed file, imported from <a href="/settings">Settings → Seed files</a>.</>
     : "No technologies yet. They appear once an editor imports a product's seed file that lists them.";
@@ -196,7 +211,7 @@ export default function TechCatalogIsland({ initialView = "catalog", initialQuer
         meta={
           view === "exposure"
             ? [
-                exposed === 0 && techTotal > 0 && judged === 0 ? "no lifecycle data" : `${exposed} at risk`,
+                noneUsed ? "no technology recorded" : exposed === 0 && techTotal > 0 && judged === 0 ? "no lifecycle data" : `${exposed} at risk`,
                 unknown > 0 && !(exposed === 0 && judged === 0) && `${unknown} without lifecycle data`,
                 formatAsOf(exposure?.as_of),
               ].filter(Boolean).join(" · ")
@@ -330,6 +345,12 @@ export default function TechCatalogIsland({ initialView = "catalog", initialQuer
             Technologies that reach end of life in this window, are marked
             deprecated or banned, or have one maintainer. {hasStacks ? "Those that the most required slots use come first." : "Those that the most products use come first."}
           </p>
+          {product && (
+            <p style={{ margin: 0, fontSize: "var(--text-sm)", color: "var(--text-body)" }}>
+              Only the technologies {productName ?? product} uses; the counts beside each are across every product.{" "}
+              <a href="/tech?view=exposure" onClick={(e) => { e.preventDefault(); setProduct(""); }}>Show every product</a>
+            </p>
+          )}
 
           <div style={{ ...CARD, overflow: "hidden" }}>
             <div style={SCROLL_X}>
@@ -341,7 +362,9 @@ export default function TechCatalogIsland({ initialView = "catalog", initialQuer
                   <Skeleton columns={exposureColumns} rows={6} />
                 ) : exposed === 0 ? (
                   <div style={EMPTY}>
-                    {judged === 0
+                    {noneUsed
+                        ? `No technology is recorded as used by ${productName ?? product}, so this can't say whether anything it runs on is at risk.`
+                        : judged === 0
                         ? `No end-of-life dates or maintainer counts are recorded for ${techTotal === 1 ? "this technology" : `these ${techTotal} technologies`}, so this can't tell whether any is at risk.`
                         : `Nothing expires or loses support within ${windowDays} days among the ${count(judged, "technology", "technologies")} with an end-of-life date or maintainer count.${unknown > 0 ? ` The other ${unknown} have neither recorded.` : ""}`}
                   </div>

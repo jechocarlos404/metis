@@ -208,12 +208,7 @@ async def tech_exposure(
     using = None
     if product is not None:
         target = await by_slug(session, Product, product, "Product")
-        using = {
-            usage.tech_id
-            for usage in await stack_service.list_product_technologies(
-                session, target.id
-            )
-        }
+        using = await stack_service.tech_ids_used_by(session, target.id)
         findings = [f for f in findings if f.tech_id in using]
 
     rows = [

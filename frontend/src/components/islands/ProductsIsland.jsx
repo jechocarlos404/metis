@@ -338,7 +338,7 @@ export default function ProductsIsland({ canWrite = true }) {
                 bundles={bundles} canWrite={canWrite} onAddBundle={addBundle} onRemoveBundle={removeBundle} />
             )}
 
-            {shownTab === "goals" && <ProductGoals product={product} goals={goals} features={features} capabilities={capabilities}
+            {shownTab === "goals" && <ProductGoals product={product} products={products} goals={goals} features={features} capabilities={capabilities}
               motivations={motivations} canWrite={canWrite} />}
 
             {shownTab === "plan" && (showPlan ? (
@@ -422,7 +422,7 @@ export default function ProductsIsland({ canWrite = true }) {
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             <Input label="Name" value={productDialog.name} onChange={(e) => setProductDialog({ ...productDialog, name: e.target.value })} placeholder="PM tracker export" />
             <Input label="Summary" value={productDialog.summary} onChange={(e) => setProductDialog({ ...productDialog, summary: e.target.value })} />
-            <Select label="Product goal" value={productDialog.goalId} onChange={(e) => setProductDialog({ ...productDialog, goalId: e.target.value })}
+            <Select label="Goal" value={productDialog.goalId} onChange={(e) => setProductDialog({ ...productDialog, goalId: e.target.value })}
               options={[{ value: "", label: "None" },
                 ...goals.map((g) => ({ value: g.id, label: `${g.display_id} ${g.title}` }))]} />
             <Checkbox label="External: someone else's product, known from the outside. Its features never count as ours."

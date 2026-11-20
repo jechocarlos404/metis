@@ -16,6 +16,9 @@ const STATUS_DOT = { pending: "var(--text-secondary)", in_progress: "var(--warn-
 
 // `hubs` (capabilityHubs() or goalHubs() from graph-data.js) groups the
 // features around hub pills instead of laying them out in build order.
+// Grey lines go near-black when lit; coloured ones (blocks) keep their colour.
+const litColor = (kind) => (edgeStyle(kind).colorVar === "--ink-4" ? "--ink-6" : edgeStyle(kind).colorVar);
+
 export function FeatureGraphView({ layout, hubs, selectedId, onSelect, recheckStates, cutStates, fadedIds, style, fitKey }) {
   const svgRef = React.useRef(null);
   const viewportRef = React.useRef(null);
@@ -149,12 +152,13 @@ export function FeatureGraphView({ layout, hubs, selectedId, onSelect, recheckSt
         style={{ width: "100%", height: "100%", display: "block", cursor: "grab", touchAction: "none" }}
       >
         <defs>
-          {EDGE_KINDS.map((kind) => (
-            <marker key={kind} id={`graph-arrow-${kind}`} viewBox="0 0 10 10" refX="9" refY="5"
-              markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-              <path d="M0,0 L10,5 L0,10 z" fill={`var(${edgeStyle(kind).colorVar})`} />
+          {EDGE_KINDS.flatMap((kind) => [false, true].map((lit) => (
+            // markerUnits is strokeWidth, so the lit (wider) arrow is drawn smaller to match.
+            <marker key={`${kind}${lit ? "-lit" : ""}`} id={`graph-arrow-${kind}${lit ? "-lit" : ""}`} viewBox="0 0 10 10" refX="9" refY="5"
+              markerWidth={lit ? 4.5 : 7} markerHeight={lit ? 4.5 : 7} orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 z" fill={`var(${lit ? litColor(kind) : edgeStyle(kind).colorVar})`} />
             </marker>
-          ))}
+          )))}
         </defs>
         <g ref={viewportRef}>
           <g>
@@ -164,10 +168,12 @@ export function FeatureGraphView({ layout, hubs, selectedId, onSelect, recheckSt
                 (cutStates.get(e.source) === "deferrable" || cutStates.get(e.target) === "deferrable");
               const fadeDim = fadedIds != null && (fadedIds.has(e.source) || fadedIds.has(e.target));
               const dim = cutDim || fadeDim || (focusId != null && e.source !== focusId && e.target !== focusId);
+              // The focused card's own lines stand out: darker, wider, opaque.
+              const lit = !dim && focusId != null;
               if (e.kind === "USES") {
                 return (
-                  <line key={e.id} ref={edgeRef(e.id)} stroke={`var(${st.colorVar})`} strokeWidth={1}
-                    opacity={dim ? 0.06 : focusId != null ? 0.8 : e.faint ? 0.12 : 0.35}
+                  <line key={e.id} ref={edgeRef(e.id)} stroke={`var(${st.colorVar})`} strokeWidth={lit ? 2 : 1}
+                    opacity={dim ? 0.06 : lit ? 0.9 : e.faint ? 0.12 : 0.35}
                     style={{ transition: "opacity var(--dur-med) var(--ease-out)" }} />
                 );
               }
@@ -175,11 +181,11 @@ export function FeatureGraphView({ layout, hubs, selectedId, onSelect, recheckSt
                 <line
                   key={e.id}
                   ref={edgeRef(e.id)}
-                  stroke={`var(${st.colorVar})`}
-                  strokeWidth={e.kind === "DEPENDS_ON" || e.kind === "BLOCKS" ? 1.6 : 1.2}
+                  stroke={`var(${lit ? litColor(e.kind) : st.colorVar})`}
+                  strokeWidth={(e.kind === "DEPENDS_ON" || e.kind === "BLOCKS" ? 1.6 : 1.2) + (lit ? 1 : 0)}
                   strokeDasharray={st.dash || undefined}
-                  markerEnd={`url(#graph-arrow-${e.kind})`}
-                  opacity={dim ? 0.08 : e.kind === "RELATES_TO" ? 0.4 : 0.6}
+                  markerEnd={`url(#graph-arrow-${e.kind}${lit ? "-lit" : ""})`}
+                  opacity={dim ? 0.08 : lit ? 1 : e.kind === "RELATES_TO" ? 0.4 : 0.6}
                   style={{ transition: "opacity var(--dur-med) var(--ease-out)" }}
                 />
               );

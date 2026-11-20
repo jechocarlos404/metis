@@ -96,7 +96,7 @@ export function GoalNetworkView({ goals, capsByGoal, selectedId, onSelect }) {
                 return (
                   <line key={e.id} ref={ref(edgeElsRef.current, e.id, "registerEdge", "unregisterEdge")}
                     stroke={shares ? "var(--accent)" : "var(--ink-4)"}
-                    strokeWidth={shares ? sharesWidth(e.weight) : 1.2}
+                    strokeWidth={(shares ? sharesWidth(e.weight) : 1.2) + (focusId != null && !dim ? 1 : 0)}
                     strokeLinecap="round"
                     opacity={dim ? 0.06 : shares ? (focusId != null ? 0.7 : 0.22) : 0.6}
                     style={{ transition: "opacity var(--dur-med) var(--ease-out)" }}>

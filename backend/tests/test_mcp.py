@@ -185,8 +185,8 @@ def test_build_side_counts_only_our_features():
         ]}
     )
     lines = text.splitlines()
-    assert "Build side — 1 feature(s) of ours realize it:" in lines
-    ours = lines.index("Build side — 1 feature(s) of ours realize it:")
+    assert "Build side — 1 feature(s) of ours realize it, any status (0 done):" in lines
+    ours = lines.index("Build side — 1 feature(s) of ours realize it, any status (0 done):")
     assert lines[ours + 1].startswith("Spec similarity")
     theirs = lines.index("External products — 1 feature(s), not ours:")
     assert lines[theirs + 1].split() == ["Find", "similar", "routes", "done", "komoot"]
@@ -514,10 +514,10 @@ async def test_inventory_is_most_reused_first_and_filters_in_order(api):
     text = await server._dispatch("capability_inventory", {})
     _conventions(text)
     # A capability no feature realizes isn't ours, and nobody else has it either.
-    assert text.startswith("5 capabilit(ies): 3 ours, 1 external only, 1 not built yet")
+    assert text.startswith("5 capabilit(ies): 3 ours, 1 only elsewhere, 1 not built yet")
     rows = [line.split()[0] for line in text.splitlines()[2:7]]
     assert rows[-2:] == ["weather-forecast", "route-planner"]
-    assert "external only — not ours" in text
+    assert "only elsewhere — not ours" in text
     assert "not built yet — not ours" in text
     # Maturity only for what is ours; route-planner is planned and unbuilt.
     assert row(text, "route-planner").split()[3] == "—"
@@ -533,7 +533,7 @@ async def test_inventory_is_most_reused_first_and_filters_in_order(api):
 
 
 async def test_check_idea_never_counts_a_near_name(api):
-    """Ours, external only, and no match with candidates — and the candidate
+    """Ours, only elsewhere, and no match with candidates — and the candidate
     stays a candidate."""
     await _world(*api)
     text = await server._dispatch(
@@ -547,7 +547,7 @@ async def test_check_idea_never_counts_a_near_name(api):
     )
     lines = text.splitlines()
     assert any(line.strip().startswith("ours") and "strava-import (ga" in line for line in lines)
-    assert any(line.strip().startswith("external only") and "rival" in line for line in lines)
+    assert any(line.strip().startswith("only elsewhere") and "rival" in line for line in lines)
     miss = next(i for i, line in enumerate(lines) if line.strip() == "no match       Elevaton data")
     assert 'near names, unconfirmed: elevation-data "Elevation data"' in lines[miss + 1]
     assert "Not ours (2): Weather forecast, Elevaton data" in text
@@ -555,7 +555,7 @@ async def test_check_idea_never_counts_a_near_name(api):
     assert lines[-1] == (
         "Open: /home?idea=Climb%20planner&caps=strava-import,weather-forecast,Elevaton%20data"
     )
-    # Named, but no feature anywhere realizes it: not ours, and not "external only".
+    # Named, but no feature anywhere realizes it: not ours, and not "only elsewhere".
     unbuilt = await server._dispatch(
         "check_idea", {"features": [{"name": "Plan", "capabilities": ["Route planner"]}]}
     )
@@ -837,16 +837,19 @@ async def test_capability_takes_a_name_as_check_idea_does(api):
         assert await server._dispatch("capability", {"slug": value}) == by_slug
 
 async def test_ready_features_filters_by_product(api):
-    await _world(*api)
+    w = await _world(*api)
     text = await server._dispatch("ready_features", {})
     _conventions(text)
     assert text.startswith("1 feature(s) ready to start — pending, every dependency done.")
     assert "Show ride history" in text and "can-i-climb" in text
+    # Rival is external: its features are never our work, so nothing of ours
+    # is there to start, and it says so rather than "every feature of ours".
     rival = await server._dispatch("ready_features", {"product": "rival"})
-    assert rival.startswith("0 feature(s) ready to start in rival")
-    # Rival's pending features are external, so none of ours is pending there.
-    assert "Nothing is pending in rival: every feature of ours" in rival and "check_idea" in rival
-    assert rival.endswith("Open: /home")
+    assert rival.splitlines() == [
+        "0 feature(s) ready to start in rival: it is external, and its features are never "
+        "our work. Call ready_features without a product, or with one of ours.",
+        f"Open: /products?product={w['rival'].id}",
+    ]
 
     blocked = render.ready_features([], [], None, pending=2)
     assert "Nothing is ready: 2 pending feature(s), each waits on one not done." in blocked
@@ -1015,3 +1018,121 @@ def test_real_writes_from_mcp_are_still_refused(method, path):
         )
     assert err.value.status_code == 403
     assert err.value.detail["error"] == "human_action_required"
+
+
+async def test_sdk_and_resource_errors_end_with_an_open_line(api):
+    """The SDK's own checks and a resource read refuse in the tools' shape:
+    one plain sentence, then the screen, never a raw exception."""
+    import mcp.types as types
+
+    await _world(*api)
+    handler = server.server.request_handlers[types.CallToolRequest]
+
+    async def call(name, arguments):
+        request = types.CallToolRequest(
+            method="tools/call", params=types.CallToolRequestParams(name=name, arguments=arguments)
+        )
+        return (await handler(request)).root
+
+    empty = await call("check_idea", {"features": []})
+    assert empty.isError
+    assert empty.content[0].text.splitlines() == [
+        "Arguments refused at features: [] should be non-empty.",
+        "Open: /home",
+    ]
+    unknown = await call("no_such_tool", {})
+    assert unknown.isError
+    first, last = unknown.content[0].text.splitlines()
+    assert first.startswith("No tool named 'no_such_tool'. The tools are: tech_search, ")
+    assert last == "Open: /home"
+
+    read = server.server.request_handlers[types.ReadResourceRequest]
+    for uri, said, href in [
+        ("metis://tech/postgresql", "Refused (404): Technology not found", "/tech"),
+        ("metis://tech/Bad", "Not a slug: 'Bad'. Slugs are lowercase letters, digits and dashes.", "/tech"),
+        ("metis://stacks/nobody", "No product 'nobody' in metis. The products tool lists their slugs.", "/stacks"),
+    ]:
+        with pytest.raises(ValueError) as err:
+            await read(types.ReadResourceRequest(
+                method="resources/read", params=types.ReadResourceRequestParams(uri=AnyUrl(uri))
+            ))
+        assert str(err.value).splitlines() == [said, f"Open: {href}"]
+
+    prompt = server.server.request_handlers[types.GetPromptRequest]
+    with pytest.raises(ValueError) as err:
+        await prompt(types.GetPromptRequest(
+            method="prompts/get", params=types.GetPromptRequestParams(name="nope")
+        ))
+    assert str(err.value).splitlines() == [
+        "No prompt named 'nope'. The prompts are: check_this_dependency, choose_a_stack, "
+        "explain_the_ontology.",
+        "Open: /home",
+    ]
+
+
+async def test_an_unknown_capability_technology_or_slot_is_an_answer(api):
+    """capability_supply finds a capability the way `capability` does, so an
+    unknown one is the same answer with the same near names, not a refusal;
+    an unknown technology or slot reads the same way."""
+    await _world(*api)
+
+    async def answer(name, args):
+        """An answer is plain content; an error would be a CallToolResult."""
+        result = await server.call_tool(name, args)
+        assert isinstance(result, list), result
+        return result[0].text
+
+    for value in ("strava", "x?y=1", "a/b"):
+        supply = await answer("capability_supply", {"capability": value})
+        assert supply == await answer("capability", {"slug": value})
+        assert supply.startswith("0 capabilities have slug")
+    supply = await answer("capability_supply", {"capability": "Strava import"})
+    assert supply.startswith("0 offer(s) for strava-import.")
+    for tool in ("tech_blast_radius", "tech_encounters"):
+        assert (await answer(tool, {"tech": "postgresql"})).splitlines() == [
+            "0 technologies have slug 'postgresql'. Matching is exact; tech_search lists them.",
+            "Open: /tech",
+        ]
+    slot = "16ce952e-44cd-4317-9176-b3c7de518d9f"
+    proposed = await answer("propose_binding", {"slot": slot, "tech": "qdrant", "rationale": "x"})
+    assert proposed.startswith(f"0 slots have id '{slot}'.")
+
+
+async def test_ours_lists_say_any_status(api):
+    """A product named beside `ours` may have only unfinished work on it, so
+    the list says "any status" rather than implying each one has it."""
+    await _world(*api)
+    text = await server._dispatch(
+        "check_idea", {"features": [{"name": "Plan", "capabilities": ["Strava import"]}]}
+    )
+    assert any(
+        "strava-import (ga; our products on it, any status: can-i-climb)" in line
+        for line in text.splitlines()
+    )
+    inventory = await server._dispatch("capability_inventory", {"q": "strava"})
+    assert "our products, any status: can-i-climb" in inventory
+
+
+@pytest.mark.parametrize(
+    "body",
+    [{"detail": "Not Found"}, {"error": "Unable to find matching target resource method"}, "<html>"],
+)
+async def test_a_reachable_but_wrong_base_url_names_the_setting(api, monkeypatch, body):
+    """Another service, or the right one under /api twice, answers 404 the
+    way no metis route does: that is a setting, not a missing subject."""
+    import httpx
+
+    def wrong(request):
+        if isinstance(body, str):
+            return httpx.Response(404, text=body)
+        return httpx.Response(404, json=body)
+
+    monkeypatch.setattr(
+        server.client, "_http", httpx.AsyncClient(transport=httpx.MockTransport(wrong))
+    )
+    result = await server.call_tool("products", {})
+    assert result.isError
+    first, last = result.content[0].text.splitlines()
+    assert first.startswith("http://test answered 404 to /api/products the way no metis route does")
+    assert "MCP_API_BASE_URL" in first
+    assert last == "Open: /products"

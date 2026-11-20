@@ -65,7 +65,9 @@ def capability_supply(envelope: dict) -> str:
     ours = [f for f in realizations if not f.get("external")]
     theirs = [f for f in realizations if f.get("external")]
     if ours:
-        lines += ["", f"Build side — {len(ours)} feature(s) of ours realize it:"]
+        # Any status: a feature in progress realizes it without making it ours.
+        done = sum(1 for f in ours if f["status"] == "done")
+        lines += ["", f"Build side — {len(ours)} feature(s) of ours realize it, any status ({done} done):"]
         lines += _table(
             [
                 [f["feature"], f["status"], f"{f['tickets']} ticket(s)", f["product"] or ""]
@@ -285,7 +287,7 @@ def _standing(c: dict) -> str:
     `ours` false means one of two things; external_products tells which."""
     if c["ours"]:
         return c["maturity"]
-    return "external only" if c["external_products"] else "not built yet"
+    return "only elsewhere" if c["external_products"] else "not built yet"
 
 
 def _candidates(candidates: list[dict]) -> str:
@@ -331,7 +333,7 @@ def capability_inventory(rows: list[dict], query: str | None, limit: int = 50) -
         else f"{total} capabilit(ies)"
     )
     lines = [
-        f"{head}: {in_use} ours, {outside} external only, "
+        f"{head}: {in_use} ours, {outside} only elsewhere, "
         f"{unbuilt} not built yet; showing {len(shown)}.",
         "",
     ]
@@ -345,11 +347,13 @@ def capability_inventory(rows: list[dict], query: str | None, limit: int = 50) -
                 f'"{r["name"]}"',
                 r["maturity"] if r["ours"] else "—",
                 f"{r['features']} feature(s)",
-                f"our products: {_names(r['products'])}" if r["products"] else "our products: —",
+                f"our products, any status: {_names(r['products'])}"
+                if r["products"]
+                else "our products: —",
                 f"external: {_names(r['external_products'])}" if r["external_products"] else "",
                 ""
                 if r["ours"]
-                else "external only — not ours"
+                else "only elsewhere — not ours"
                 if r["external_products"]
                 else "not built yet — not ours",
             ]
@@ -367,14 +371,16 @@ def capability_inventory(rows: list[dict], query: str | None, limit: int = 50) -
 def _need(need: dict) -> list[str]:
     match = need["match"]
     if match and match["ours"]:
+        # Our products with work on it at any status: one of them finished
+        # it, which is what makes it ours, but not necessarily each.
         where = _names(match["products"]) or "no product listed"
         return [
             f"  ours           {need['name']} → {match['slug']} "
-            f"({match['maturity']}; in {where})"
+            f"({match['maturity']}; our products on it, any status: {where})"
         ]
     if match and match["external_products"]:
         return [
-            f"  external only  {need['name']} → {match['slug']} "
+            f"  only elsewhere {need['name']} → {match['slug']} "
             f"(external: {_names(match['external_products'])}) — exists, not ours"
         ]
     if match:
@@ -501,6 +507,33 @@ def no_product(value: str) -> str:
     return _end(
         [f"0 products have id or slug {value!r}. Call `products` for ids and slugs."],
         "/products",
+    )
+
+
+def external_product_work(product: dict) -> str:
+    """Someone else's product has no work of ours to start, as product_score
+    declines one of ours in reverse."""
+    return _end(
+        [
+            f"0 feature(s) ready to start in {product['slug']}: it is external, and "
+            "its features are never our work. Call ready_features without a product, "
+            "or with one of ours.",
+        ],
+        f"/products?product={product['id']}",
+    )
+
+
+def no_tech(slug: str) -> str:
+    return _end(
+        [f"0 technologies have slug {slug!r}. Matching is exact; tech_search lists them."],
+        "/tech",
+    )
+
+
+def no_slot(slot: str) -> str:
+    return _end(
+        [f"0 slots have id {slot!r}. The metis://stacks/{{product}} resource lists a product's slots."],
+        "/stacks",
     )
 
 

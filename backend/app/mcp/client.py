@@ -95,6 +95,12 @@ class MetisClient:
                 f"Cannot reach the metis API at {self.base} ({_reason(exc)}). Start "
                 "the backend, or point MCP_API_BASE_URL at it."
             ) from exc
+        if response.status_code == 404 and not _metis_404(_body(response)):
+            raise SetupError(
+                f"{self.base} answered 404 to {path} the way no metis route does, so it "
+                "isn't the metis API, or not its root. Point MCP_API_BASE_URL at the "
+                "backend's root (for example http://localhost:8000, without /api)."
+            )
         if response.status_code >= 400:
             raise ApiError(response.status_code, _body(response))
         return response
@@ -118,6 +124,13 @@ def _body(response: httpx.Response):
         return response.json()
     except ValueError:
         return response.text
+
+
+def _metis_404(body) -> bool:
+    """Every metis 404 names what was not found in `detail`. A path no route
+    matches gets FastAPI's bare "Not Found", and another service answers in
+    its own shape: both mean the base URL is wrong, not the subject."""
+    return isinstance(body, dict) and isinstance(body.get("detail"), str) and body["detail"] != "Not Found"
 
 
 def _reason(exc: httpx.TransportError) -> str:

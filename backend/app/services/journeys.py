@@ -48,7 +48,7 @@ async def _steps(session: AsyncSession, steps_in: list[JourneyStepIn]) -> list[J
     } if ids else {}
     unknown = ids - features.keys()
     if unknown:
-        raise HTTPException(404, f"Feature not found: {sorted(map(str, unknown))[0]}")
+        raise HTTPException(404, f"Feature {sorted(map(str, unknown))[0]} not found")
     steps = []
     for position, s in enumerate(steps_in):
         feature = features.get(s.feature_id) if s.feature_id else None

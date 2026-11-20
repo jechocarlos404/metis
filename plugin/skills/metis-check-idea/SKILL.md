@@ -35,11 +35,15 @@ write to metis from this skill.
    ```
 
    Each capability comes back as one of:
-   - `ours`: one of our products already has it. Reuse it.
-   - `external only`: only an external product has it. It exists in the
+   - `ours`: a finished (`done`) feature of one of our products realizes it.
+     Reuse it. The products listed beside it have work on it at any status;
+     at least one of them finished it.
+   - `only elsewhere`: only an external product has it. It exists in the
      world, we have not built it.
-   - `no match`: we do not have it. Near names may be listed as unconfirmed
-     candidates.
+   - `not built yet`: metis knows the capability, but no finished feature
+     realizes it; our features on it, if any, are planned or in progress.
+   - `no match`: metis has no capability by that name. Near names may be
+     listed as unconfirmed candidates.
 
 3. **For each `ours` capability that matters, call `capability`** with its slug
    (lowercase, dashes, as `check_idea` prints it) to see which products and
@@ -49,9 +53,11 @@ write to metis from this skill.
    come from only if the path makes it obvious.
 
 4. **Report** in this order:
-   - What we already have, by capability, with the products that have it and
-     its maturity (`ga` and `beta` are proven; `alpha` and `planned` are not).
-   - What is missing, and any near-name candidates, labelled as unconfirmed.
+   - What we already have, by capability, with the products whose finished
+     features realize it (`capability` shows each feature's status) and its
+     maturity (`ga` and `beta` are proven; `alpha` and `planned` are not).
+   - What we don't have yet (`only elsewhere`, `not built yet`, `no match`),
+     and any near-name candidates, labelled as unconfirmed.
    - A short recommendation: which pieces to reuse from where, which to build.
 
 ## Rules

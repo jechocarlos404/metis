@@ -77,3 +77,51 @@ async def test_admin_writes_refused_off_desktop(method, path):
         res = await http.request(method, path, json={})
     assert res.status_code == 403
     assert res.json()["detail"]["error"] == "human_action_required"
+
+
+@pytest.mark.parametrize(
+    "method, path, href",
+    [
+        ("POST", "/api/users", "/users"),
+        ("PATCH", "/api/users/u1", "/users"),
+        ("DELETE", "/api/users/u1", "/users"),
+        ("POST", "/api/users/u1/reset-password", "/users"),
+        ("PUT", "/api/admin/llm/configs/orchestrator", "/admin"),
+        ("POST", "/api/admin/data/cascade-preview", "/data"),
+        ("POST", "/api/admin/data/cascade-delete", "/data"),
+    ],
+)
+async def test_the_mcp_token_hears_the_surface_before_the_role(method, path, href):
+    """The MCP service is a viewer. On an admin route its write is refused as
+    a human action, the same as every other write, not as a missing role: no
+    role would help off the desktop."""
+    app = create_app()
+    app.dependency_overrides[current_user] = lambda: Principal(
+        sub="metis-mcp", username="metis-mcp", roles=["viewer"], surface=Surface.mcp
+    )
+    app.dependency_overrides[get_db] = lambda: None
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as http:
+        res = await http.request(method, path, json={})
+    assert res.status_code == 403
+    assert res.json()["detail"]["error"] == "human_action_required"
+    assert res.json()["detail"]["href"] == href
+
+
+async def test_on_the_desktop_an_admin_route_names_the_admin_role():
+    """A viewer or editor at the desktop is a person: the role is the live
+    question, and only admin would help."""
+    app = create_app()
+    app.dependency_overrides[get_db] = lambda: None
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as http:
+        for roles in (["viewer"], ["editor"]):
+            app.dependency_overrides[current_user] = lambda roles=roles: Principal(
+                sub="p", username="p", roles=roles, surface=Surface.desktop
+            )
+            res = await http.post("/api/users", json={})
+            assert (res.status_code, res.json()["detail"]) == (403, "Requires admin role")
+        # A read by the MCP token is no write: the role answers it.
+        app.dependency_overrides[current_user] = lambda: Principal(
+            sub="metis-mcp", username="metis-mcp", roles=["viewer"], surface=Surface.mcp
+        )
+        res = await http.get("/api/users")
+        assert (res.status_code, res.json()["detail"]) == (403, "Requires admin role")

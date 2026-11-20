@@ -60,7 +60,7 @@ function ResultBox({ title, result, tone }) {
         </div>
       )}
       {(result.notes || []).map((note, i) => (
-        <div key={`n${i}`} style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>{note}</div>
+        <div key={`n${i}`} title={result.fullText?.[note]} style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>{note}</div>
       ))}
       {(result.warnings || []).map((w, i) => (
         <div key={`w${i}`} style={{ fontSize: "var(--text-xs)", color: "var(--danger-fg)" }}>{w}</div>
@@ -68,6 +68,9 @@ function ResultBox({ title, result, tone }) {
     </div>
   );
 }
+
+/** A refusal that lists several errors puts each on its own line. */
+const failure = (what, message) => `${what}:${String(message).includes("\n") ? "\n" : " "}${message}`;
 
 function FileOrPaste({ id, value, onChange, label }) {
   const load = async (event) => {
@@ -163,7 +166,7 @@ export function SeedImportPanel({ onImported }) {
       if (!dryRun) onImported?.(r);
     } catch (e) {
       setResult(null);
-      setError(`${dryRun ? "The check failed" : "The import failed"}: ${e.message}`);
+      setError(failure(dryRun ? "The check failed" : "The import failed", e.message));
     } finally {
       setAction(null);
     }
@@ -183,7 +186,7 @@ export function SeedImportPanel({ onImported }) {
       <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>
         Importing adds what's new and updates the status and description of features already in metis. Check file lists every change first.
       </div>
-      {error && <div role="alert" style={{ fontSize: "var(--text-xs)", color: "var(--danger-fg)" }}>{error}</div>}
+      {error && <div role="alert" style={{ fontSize: "var(--text-xs)", color: "var(--danger-fg)", whiteSpace: "pre-line" }}>{error}</div>}
       {result && <ResultBox title={result.dryRun ? "Check passed. This is what the import would do:" : "Imported"} result={result} />}
       <SeedExport />
     </div>
@@ -254,7 +257,7 @@ export function UnseedPanel({ onRemoved }) {
       if (!dryRun) onRemoved?.(r);
     } catch (e) {
       setResult(null);
-      setError(`${dryRun ? "The preview failed" : "The removal failed"}: ${e.message}`);
+      setError(failure(dryRun ? "The preview failed" : "The removal failed", e.message));
     } finally {
       setAction(null);
     }
@@ -274,7 +277,7 @@ export function UnseedPanel({ onRemoved }) {
       <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>
         Anything another product still uses is kept, and the preview says why.
       </div>
-      {error && <div role="alert" style={{ fontSize: "var(--text-xs)", color: "var(--danger-fg)" }}>{error}</div>}
+      {error && <div role="alert" style={{ fontSize: "var(--text-xs)", color: "var(--danger-fg)", whiteSpace: "pre-line" }}>{error}</div>}
       {result && <ResultBox title={result.dryRun ? "Preview: this is what would be removed" : "Removed"} result={result} tone={result.warnings?.length ? "danger" : undefined} />}
     </div>
   );

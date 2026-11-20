@@ -48,8 +48,10 @@ anything the seed shares with the rest of the instance:
 - a **product is kept** if features outside the seed belong to it —
   deleting it would delete those features with it
 - a **technology is kept** if a product outside the seed uses it, if it has an
-  adoption stance, or if it satisfies (or is guessed to satisfy) a capability
-  the seed does not link it to. On a kept technology, the seed's own
+  adoption stance, if it satisfies (or is guessed to satisfy) a capability
+  the seed does not link it to, or if people recorded something about it that
+  no seed file carries: who used it, a version, a link to another technology,
+  or a slot of a stack that stays. On a kept technology, the seed's own
   satisfactions of a capability being deleted are removed first
 - a **capability is kept** (not deleted) if features outside the
   seed realize it (any of a feature's capabilities counts — capabilities are
@@ -57,7 +59,8 @@ anything the seed shares with the rest of the instance:
   and the seed did not declare that link, or if any child capability is outside
   the seed or kept. A link the seed did not declare was recorded by someone
   else: deleting it would drop data the seed never created, and would strand
-  any stack slot bound through it
+  any stack slot bound through it. So is one another product's epic is about,
+  or a slot of a stack that stays answers
 - a **goal is kept** if it has child goals outside the seed, or a product
   outside the seed (or a kept one) points at it
 - a **goal link the seed does not declare keeps both its ends**: a goal the
@@ -68,10 +71,22 @@ anything the seed shares with the rest of the instance:
   with it, and the seed never made it
 - every **edge of a deleted feature** is deleted and listed one by one,
   including edges the seed doesn't declare and edges a foreign feature had to
-  it; a feature's guesses are named on its line
-- deleting a **technology cascades its satisfactions, guesses and usage**
-- deleting a **product cascades its PRD and all epics/stories/tickets**,
-  including tickets created after seeding
+  it; a feature's guesses and the capability links the file doesn't have are
+  named on its line, and so is another product's story or a journey step that
+  stays but loses its link to it
+- deleting a **technology cascades its satisfactions and guesses**, each
+  named on its line by capability
+- deleting a **capability** takes any guess that a kept technology satisfies
+  it, named on its line
+- deleting a **product cascades its PRD, epics, stories, tickets (including
+  ones created after seeding), delivery strategies, technology usage, hand-added
+  capabilities and its own stacks**, each counted on its line. What only
+  pointed at it stays and the line says so: a constraint stops applying to it,
+  another product's stack based on its stack, a person's recorded use of a
+  technology on it
+- display numbers are not kept: importing the file again adds the rows back
+  under new numbers (`OG-39` comes back as a new number), and the run says so
+  first
 
 Every kept row is listed with its reason (`note: kept ...`). Keeping shared
 rows is the expected outcome of a normal unseed, not a problem: every real seed

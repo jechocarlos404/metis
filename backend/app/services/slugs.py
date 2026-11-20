@@ -71,5 +71,5 @@ async def by_slug(session: AsyncSession, model, slug: str, label: str):
     """Slug lookup for the question endpoints, which address nodes by name."""
     found = await session.scalar(select(model).where(model.slug == slug))
     if found is None:
-        raise HTTPException(404, f"{label} `{slug}` not found")
+        raise HTTPException(404, f"{label} not found")
     return found

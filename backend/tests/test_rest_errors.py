@@ -47,6 +47,21 @@ async def test_motivations_of_an_unknown_capability_is_a_404(client, db):
     assert res.status_code == 200 and res.json() == []
 
 
+async def test_an_unknown_subject_reads_the_same_by_id_or_by_slug(client):
+    """A subject in the path is "<Kind> not found", whether the route takes
+    an id or a slug: the caller already holds what it asked for."""
+    said = {
+        f"/api/features/{uuid.uuid4()}": "Feature not found",
+        f"/api/capabilities/{uuid.uuid4()}/scope": "Capability not found",
+        "/api/capabilities/no-such/supply": "Capability not found",
+        "/api/tech/no-such": "Technology not found",
+        "/api/stacks/no-such/redundancy": "Product not found",
+    }
+    for path, detail in said.items():
+        res = await client.get(path)
+        assert (res.status_code, res.json()) == (404, {"detail": detail}), path
+
+
 async def test_a_validation_error_reads_as_a_sentence(client):
     res = await client.get("/api/features/not-a-uuid")
     assert res.status_code == 422

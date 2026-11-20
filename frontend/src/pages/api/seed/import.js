@@ -494,6 +494,8 @@ class Loader {
     this.dryRun = dryRun;
     this.counts = {};
     this.notes = [];
+    // A note whose text is trimmed, with the untrimmed text for its hover.
+    this.fullText = {};
     this.warnings = [];
     this.goalIds = new Map();
     this.capIds = new Map();
@@ -681,6 +683,7 @@ class Loader {
       .filter((id) => !have.includes(id));
     const payload = {};
     const changes = [];
+    let full = null;
     if (missing.length > 0) payload.capability_ids = [...have, ...missing];
     if (feature.status != null && feature.status !== current.status) {
       payload.status = feature.status;
@@ -689,6 +692,7 @@ class Loader {
     if (feature.description != null && feature.description !== (current.description ?? null)) {
       payload.description = feature.description;
       changes.push(`description ${textChange(current.description, feature.description)}`);
+      full = `Description before:\n${current.description ?? "(empty)"}\n\nAfter:\n${feature.description}`;
     }
     const flag = feature.unknown_capabilities;
     if (typeof flag === "boolean" && flag !== (current.unknown_capabilities === true)) {
@@ -697,6 +701,7 @@ class Loader {
     }
     if (Object.keys(payload).length === 0) return new Set(have);
     const overwrites = changes.length > 0 ? `feature ${JSON.stringify(feature.name)}: ${changes.join("; ")}` : null;
+    if (overwrites && full) this.fullText[overwrites] = full;
     if (this.dryRun) {
       this.note("features", missing.length > 0 ? "would link" : "would update");
       if (overwrites) this.notes.push(overwrites);
@@ -1085,6 +1090,7 @@ class Loader {
         guesses: this.count("guesses"),
       },
       notes: this.notes,
+      fullText: this.fullText,
       warnings: this.warnings,
     };
   }

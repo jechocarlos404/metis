@@ -252,9 +252,11 @@ the caller named it on purpose.
    `capability_id` is `RESTRICT`. A Feature's Product is direct (`features.product_id`),
    never derived from the Capabilities it shares with other Products. A Product may
    be `external` — someone else's, known from the outside. Its Features are never
-   our work (excluded from ready, topo, MVP cut and rollup), and a Capability only
-   external Features realize is known, not ours: the inventory lists it apart and
-   coverage counts it missing, whatever its maturity says.
+   our work (excluded from ready, topo, MVP cut and rollup). A Capability is ours
+   only when a finished (`done`) Feature of one of our own Products realizes it.
+   One only external Features realize is known, not ours (`only elsewhere`): the
+   inventory lists it apart and coverage counts it not ours, whatever its maturity
+   says. One only planned or in-progress Features realize is `not built yet`.
 2. `technologies` has no column whose value depends on who is asking.
 3. `REQUIRES ∪ RUNS_ON` is jointly acyclic, rejected at write time. `ALTERNATIVE_TO`
    is symmetric — write both rows, or read with the detail endpoint's `OR`.

@@ -1,17 +1,26 @@
 import asyncio
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.auth import TokenVerifier, enforce_rbac, require_admin, require_editor
+from app.auth import (
+    Principal,
+    TokenVerifier,
+    authorize,
+    current_user,
+    enforce_rbac,
+    require_admin,
+    require_editor,
+)
 from app.auth.deps import _is_read
 from app.config import get_settings
 from app.db import init_db, make_engine
 from app.llm.registry import ProviderRegistry
+from app.models.enums import Surface
 from app.routers import (
     admin_data,
     admin_llm,
@@ -110,6 +119,13 @@ async def validation_error(request, exc: RequestValidationError) -> JSONResponse
     return JSONResponse({"detail": said, "errors": errors}, status_code=422)
 
 
+async def surface_first(request: Request, principal: Principal = Depends(current_user)) -> None:
+    """The write boundary before an admin route's role check: off the desktop
+    a write is refused as a human action, whatever the caller's role."""
+    if principal.surface is not Surface.desktop:
+        authorize(request.method, principal, request.url.path)
+
+
 def create_app() -> FastAPI:
     settings = get_settings()
     app = FastAPI(title="Metis API", version="0.1.0", lifespan=lifespan)
@@ -150,7 +166,10 @@ def create_app() -> FastAPI:
     # Admin-only: user management and LLM provider config. Both gates, for the
     # same reason as the cascade below: require_admin alone would leave these
     # writes reachable from an api/mcp token (test_route_gates sweeps for it).
-    admin_only = [Depends(require_admin), Depends(enforce_rbac)]
+    # The surface goes first, as on every other write: off the desktop no role
+    # would help, so a write there hears human_action_required, not "Requires
+    # admin role". On the desktop a viewer still hears that it needs admin.
+    admin_only = [Depends(surface_first), Depends(require_admin), Depends(enforce_rbac)]
     app.include_router(users.router, dependencies=admin_only)
     app.include_router(admin_llm.router, dependencies=admin_only)
     # Cascade delete gets BOTH gates. require_admin checks role only, so mounting
@@ -158,10 +177,7 @@ def create_app() -> FastAPI:
     # token could reach — see test_writes_blocked_off_desktop_even_for_admin.
     # Preview is a POST and is therefore desktop-only too; that is intended, not
     # an oversight.
-    app.include_router(
-        admin_data.cascade_router,
-        dependencies=[Depends(require_admin), Depends(enforce_rbac)],
-    )
+    app.include_router(admin_data.cascade_router, dependencies=admin_only)
     return app
 
 

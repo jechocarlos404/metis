@@ -39,15 +39,17 @@ function StepArgs({ args }) {
 }
 
 // What an agent did on the way to its reply: each tool it called, whether
-// that read or changed data, what it was given and what came back.
-function AgentSteps({ tools }) {
+// that read or changed data, what it was given and what came back. A
+// proposed change's outcome is the approval card's: the step keeps no status
+// of its own, which would go stale once someone decides.
+function AgentSteps({ tools, waiting = false }) {
   const proposed = tools.filter((t) => t.status === "proposed").length;
   const failed = tools.filter((t) => t.status === "failed").length;
   return (
     <details style={{ fontSize: "var(--text-xs)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-sm)", background: "var(--surface-card)" }}>
       <summary style={{ cursor: "pointer", padding: "6px 10px", color: "var(--text-secondary)" }}>
         What it did: {count(tools.length, "step", "steps")}
-        {proposed > 0 && <span style={{ color: "var(--warn-fg)", fontWeight: "var(--weight-medium)" }}> · proposed {count(proposed, "change", "changes")}</span>}
+        {proposed > 0 && <span style={waiting ? { color: "var(--warn-fg)", fontWeight: "var(--weight-medium)" } : undefined}> · proposed {count(proposed, "change", "changes")}</span>}
         {failed > 0 && <span style={{ color: "var(--danger-fg)" }}> · {failed} failed</span>}
       </summary>
       <ol style={{ margin: 0, padding: "0 10px 8px 30px", display: "flex", flexDirection: "column", gap: 6 }}>
@@ -61,7 +63,7 @@ function AgentSteps({ tools }) {
               </span>
             </span>
             {t.arguments && Object.keys(t.arguments).length > 0 && <StepArgs args={t.arguments} />}
-            {t.summary && <div style={{ color: t.status === "failed" ? "var(--danger-fg)" : "var(--text-body)" }}>→ {t.summary}</div>}
+            {t.summary && t.status !== "proposed" && <div style={{ color: t.status === "failed" ? "var(--danger-fg)" : "var(--text-body)" }}>→ {t.summary}</div>}
           </li>
         ))}
       </ol>
@@ -78,7 +80,7 @@ function Dot() {
   return <span aria-hidden="true" style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--accent)", animation: "pulse 1s infinite" }} />;
 }
 
-function AgentMessage({ agent, text, viz, tools, status }) {
+function AgentMessage({ agent, text, viz, tools, status, waiting }) {
   const running = status === "running";
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8, minWidth: 0 }}>
@@ -90,7 +92,7 @@ function AgentMessage({ agent, text, viz, tools, status }) {
         {running && <Dot />}
         {running && !text && <span style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>working…</span>}
       </div>
-      {tools && tools.length > 0 && <AgentSteps tools={tools} />}
+      {tools && tools.length > 0 && <AgentSteps tools={tools} waiting={waiting} />}
       {text && (
         // renderChatMarkdown escapes raw HTML and unsafe links; see lib/chat-markdown.js.
         <div className="chat-md" style={{ fontSize: "var(--text-sm)", color: "var(--text-body)", lineHeight: "var(--leading-body)" }}
@@ -134,7 +136,7 @@ function Proposals({ message, canWrite, onDecided }) {
     <div style={{ border: "1px solid var(--border-default)", borderRadius: "var(--radius-md)", background: "var(--surface-card)", padding: 12, display: "flex", flexDirection: "column", gap: 8 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
         <span style={{ fontSize: "var(--text-sm)", fontWeight: "var(--weight-semibold)", color: "var(--text-heading)", flex: 1 }}>
-          {pending.length > 0 ? `${count(pending.length, "change", "changes")} waiting for approval` : "Proposed changes"}
+          {pending.length > 0 ? `${count(pending.length, "change", "changes")} waiting for you` : "Proposed changes"}
         </span>
         {canWrite && agentDone && pending.length > 1 && (
           <Button size="sm" variant="secondary" disabled={busy} onClick={() => decide(`/chat/messages/${message.id}/approve-all`)}>
@@ -190,7 +192,7 @@ function SpecialistCard({ message, canWrite, onDecided }) {
       </summary>
       <div style={{ padding: "0 12px 12px", display: "flex", flexDirection: "column", gap: 8 }}>
         {message.task && <div style={{ fontSize: "var(--text-xs)", color: "var(--text-body)" }}>Task: {message.task}</div>}
-        {message.tool_calls?.length > 0 && <AgentSteps tools={message.tool_calls} />}
+        {message.tool_calls?.length > 0 && <AgentSteps tools={message.tool_calls} waiting={waiting > 0} />}
         {message.content && (
           <div className="chat-md" style={{ fontSize: "var(--text-sm)", color: "var(--text-body)", lineHeight: "var(--leading-body)" }}
             dangerouslySetInnerHTML={{ __html: renderChatMarkdown(message.content) }} />
@@ -229,7 +231,8 @@ function TurnBody({ run, children, canWrite, onDecided }) {
     const only = children[0];
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        <AgentMessage agent="orchestrator" text={only.content} viz={only.viz} tools={only.tool_calls} status={only.status} />
+        <AgentMessage agent="orchestrator" text={only.content} viz={only.viz} tools={only.tool_calls} status={only.status}
+          waiting={(only.proposals ?? []).some((p) => p.status === "pending")} />
         <Proposals message={only} canWrite={canWrite} onDecided={onDecided} />
       </div>
     );

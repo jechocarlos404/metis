@@ -6,6 +6,7 @@
   "loginWithEmailAllowed": true,
   "duplicateEmailsAllowed": false,
   "resetPasswordAllowed": true,
+  "passwordPolicy": "length(12) and notUsername",
   "editUsernameAllowed": false,
   "accessTokenLifespan": 300,
   "ssoSessionIdleTimeout": 1800,
@@ -97,7 +98,7 @@
       "firstName": "Metis",
       "lastName": "Admin",
       "credentials": [
-        { "type": "password", "value": "admin", "temporary": true }
+        { "type": "password", "value": "admin-dev-only", "temporary": true }
       ],
       "realmRoles": ["admin"]
     },
@@ -109,7 +110,7 @@
       "firstName": "Metis",
       "lastName": "Editor",
       "credentials": [
-        { "type": "password", "value": "editor", "temporary": true }
+        { "type": "password", "value": "editor-dev-only", "temporary": true }
       ],
       "realmRoles": ["editor"]
     },
@@ -121,7 +122,7 @@
       "firstName": "Metis",
       "lastName": "Viewer",
       "credentials": [
-        { "type": "password", "value": "viewer", "temporary": true }
+        { "type": "password", "value": "viewer-dev-only", "temporary": true }
       ],
       "realmRoles": ["viewer"]
     },

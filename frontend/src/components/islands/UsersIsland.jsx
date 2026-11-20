@@ -2,7 +2,6 @@ import React from "react";
 import { PageHeader } from "../shell/PageHeader.jsx";
 import { Badge, Button, Dialog, Icon, IconButton, Input, Select, Switch, DeleteConfirm, Toast } from "../../ds";
 import { api } from "../../lib/api.js";
-import { pressable } from "../../lib/pressable.js";
 import { ROLE_WORDS, roleCan, roleLabel } from "../shell/roles.js";
 
 const ROLES = ["admin", "editor", "viewer"].map((r) => ({ value: r, label: roleLabel(r) }));
@@ -15,6 +14,9 @@ const TH = {
   textTransform: "uppercase", color: "var(--text-secondary)",
 };
 const COLS = "1fr 1fr 90px 90px 40px";
+// Under 560px the email sits under the name and status under the role, so
+// every column stays on screen.
+const NARROW_COLS = "minmax(0,1fr) auto 40px";
 const EMPTY = { username: "", email: "", firstName: "", lastName: "", role: "viewer", password: "", temporary: true };
 
 export default function UsersIsland() {
@@ -28,6 +30,15 @@ export default function UsersIsland() {
   const [dialogError, setDialogError] = React.useState(null);
   const [confirmingDelete, setConfirmingDelete] = React.useState(false);
   const [toast, setToast] = React.useState(null);
+  // The table's own width, measured after mount (the island is server-rendered).
+  const [tableEl, setTableEl] = React.useState(null);
+  const [narrow, setNarrow] = React.useState(false);
+  React.useEffect(() => {
+    if (!tableEl) return undefined;
+    const observer = new ResizeObserver(() => setNarrow(tableEl.offsetWidth < 560));
+    observer.observe(tableEl);
+    return () => observer.disconnect();
+  }, [tableEl]);
 
   React.useEffect(() => {
     if (!toast) return undefined;
@@ -172,14 +183,26 @@ export default function UsersIsland() {
         <div style={{ padding: "8px 24px", fontSize: "var(--text-sm)", color: "var(--danger-fg)" }}>{error}</div>
       )}
       <div style={{ flex: 1, overflowY: "auto", margin: 20, minWidth: 0 }}>
-        <div style={{ background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", overflowX: "auto" }}>
-          <div style={{ minWidth: 560 }}>
-          <div style={{ display: "grid", gridTemplateColumns: COLS, padding: "8px 16px", borderBottom: "1px solid var(--border-hairline)", ...TH }}>
-            <span>User</span><span>Email</span><span>Role</span><span>Status</span><span />
+        <div ref={setTableEl} style={{ background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", overflowX: "auto" }}>
+          <div style={{ minWidth: narrow ? 0 : 560 }}>
+          <div style={{ display: "grid", gridTemplateColumns: narrow ? NARROW_COLS : COLS, gap: narrow ? 8 : 0, padding: "8px 16px", borderBottom: "1px solid var(--border-hairline)", ...TH }}>
+            {narrow
+              ? <><span>User</span><span>Role</span><span /></>
+              : <><span>User</span><span>Email</span><span>Role</span><span>Status</span><span /></>}
           </div>
-          {users.map((u, i) => (
-            <div key={u.id} {...pressable(() => openEdit(u))}
-              style={{ display: "grid", gridTemplateColumns: COLS, alignItems: "center", padding: "10px 16px", gap: 8,
+          {users.map((u, i) => {
+            const email = <span style={{ color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{u.email || "—"}</span>;
+            const role = <span title={u.role ? roleCan(u.role) : NO_ROLE}>{u.role ? <Badge tone={ROLE_TONES[u.role]}>{roleLabel(u.role)}</Badge> : <Badge tone="warn">no role</Badge>}</span>;
+            const status = (
+              <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: u.enabled ? "var(--ok-fg)" : "var(--text-secondary)" }}>
+                {u.enabled ? "enabled" : "disabled"}
+              </span>
+            );
+            // A click anywhere on the row edits; keyboard and screen readers
+            // use the row's one button, so no control sits inside another.
+            return (
+            <div key={u.id} onClick={() => openEdit(u)}
+              style={{ display: "grid", gridTemplateColumns: narrow ? NARROW_COLS : COLS, alignItems: "center", padding: "10px 16px", gap: 8,
                 borderBottom: i < users.length - 1 ? "1px solid var(--border-hairline)" : "none", cursor: "pointer", fontSize: "var(--text-sm)" }}>
               <span style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
                 <span style={{ color: "var(--text-heading)", fontWeight: "var(--weight-medium)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -190,17 +213,17 @@ export default function UsersIsland() {
                     {u.username}
                   </span>
                 )}
+                {narrow && email}
               </span>
-              <span style={{ color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{u.email || "—"}</span>
-              <span title={u.role ? roleCan(u.role) : NO_ROLE}>{u.role ? <Badge tone={ROLE_TONES[u.role]}>{roleLabel(u.role)}</Badge> : <Badge tone="warn">no role</Badge>}</span>
-              <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: u.enabled ? "var(--ok-fg)" : "var(--text-secondary)" }}>
-                {u.enabled ? "enabled" : "disabled"}
-              </span>
+              {narrow
+                ? <span style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 4 }}>{role}{status}</span>
+                : <>{email}{role}{status}</>}
               <IconButton size="sm" label={`Edit ${displayName(u)}`} onClick={(e) => { e.stopPropagation(); openEdit(u); }}>
                 <Icon name="pencil" size={13} />
               </IconButton>
             </div>
-          ))}
+            );
+          })}
           {users.length === 0 && !error && (
             <div style={{ padding: 16, fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>No users yet. Add one with New user above.</div>
           )}

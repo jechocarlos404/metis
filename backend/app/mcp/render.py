@@ -401,34 +401,33 @@ def idea_link(idea: str, report: dict) -> str:
 
 
 def product_score(score: dict) -> str:
-    """Four groups that sum to the total. The API gives three lists; the fourth
-    — features fully described but missing a capability — is what's left."""
+    """Four groups that sum to the total, as the API partitions them."""
     total = score["total_features"]
     buildable = score["buildable"]
-    partly = score["known_covered"]
-    not_described = [n for n in score["unknown_features"] if n not in partly]
-    missing = total - len(buildable) - len(score["unknown_features"])
+    partly = score["partly"]
+    not_described = score["not_described"]
+    missing = score["missing"]
     product = score["product"]
     lines = [
         f"{len(buildable)}/{total} feature(s) of {product['slug']} buildable from what we "
         f"have; {len(partly)} partly known, {len(not_described)} not described, "
-        f"{missing} missing a capability.",
+        f"{len(missing)} missing a capability.",
         "",
     ]
     report = score.get("report")
-    short = [
-        f["name"]
-        for f in (report["features"] if report else [])
-        if f["existing"] < f["total"] and f["name"] not in score["unknown_features"]
-    ]
     for label, names in (
         ("Buildable — every capability known and ours", buildable),
-        ("Partly known (known_covered) — every named capability ours, list incomplete", partly),
-        ("Not described — capability list incomplete and not covered", not_described),
-        ("Missing a capability — fully described, needs one we don't have", short),
+        ("Partly known (partly) — every named capability ours, list incomplete", partly),
+        ("Not described (not_described) — no capability named", not_described),
+        ("Missing a capability — names one we don't have", missing),
     ):
         if names:
             lines.append(f"{label} ({len(names)}): {', '.join(names)}")
+    if score["missing_incomplete"]:
+        lines.append(
+            f"Of the missing, {len(score['missing_incomplete'])} also have an incomplete "
+            "capability list: what's named may not be all they need."
+        )
     if report:
         lines.append(
             f"Across its named capabilities: {report['existing']}/{report['needed']} ours, "

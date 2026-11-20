@@ -248,7 +248,8 @@ TOOLS = [
         name="product_score",
         description=(
             "How much of a product (ours or external) we could build from what "
-            "we have: buildable, partly known, not described, missing a "
+            "we have: its features split into four groups that sum to the "
+            "total — buildable, partly known, not described, missing a "
             "capability. A lower bound."
         ),
         inputSchema={

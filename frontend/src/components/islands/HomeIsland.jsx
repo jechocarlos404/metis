@@ -2,7 +2,7 @@ import React from "react";
 import { PageHeader } from "../shell/PageHeader.jsx";
 import { Badge, Button, Input } from "../../ds";
 import { api } from "../../lib/api.js";
-import { NEED, VERDICT, count, freshness, needKey } from "../../lib/words.js";
+import { NEED, VERDICT, count, freshness, needKey, scoreGroups } from "../../lib/words.js";
 import { CapabilityPicker } from "../shared/CapabilityPicker.jsx";
 import { CoverageReport } from "../shared/coverage.jsx";
 import GetStartedIsland from "./GetStartedIsland.jsx";
@@ -209,12 +209,9 @@ function IdeaChecker({ inventory, canWrite }) {
 // ---- Portfolio -----------------------------------------------------------
 
 function scoreCounts(score) {
-  const partly = score.known_covered.length;
   return {
     total: score.total_features,
-    buildable: score.buildable.length,
-    partly,
-    unknown: score.unknown_features.filter((n) => !score.known_covered.includes(n)).length,
+    groups: scoreGroups(score).map((g) => [g.key, g.names.length]),
   };
 }
 
@@ -274,7 +271,7 @@ function ScoreLine({ score }) {
   if (score == null) return <span style={QUIET}>scoring…</span>;
   if (score === "error") return <span style={QUIET}>couldn't score</span>;
   if (score.total === 0) return <span style={QUIET}>no features yet</span>;
-  const parts = [["buildable", score.buildable], ["partly", score.partly], ["unknown", score.unknown]].filter(([, n]) => n > 0);
+  const parts = score.groups.filter(([, n]) => n > 0);
   return (
     <span style={{ ...QUIET, display: "inline-flex", gap: 10, flexWrap: "wrap" }}>
       {parts.map(([kind, n]) => (

@@ -30,7 +30,7 @@ export function ProductScore({ score }) {
       <div style={{ fontSize: "var(--text-sm)", color: "var(--text-heading)", fontWeight: "var(--weight-medium)" }}>
         {score.product.name}: {score.total_features} feature{score.total_features === 1 ? "" : "s"}
       </div>
-      {score.buildable.length === 0 && score.unknown_features.length > 0 && (
+      {score.buildable.length === 0 && score.partly.length > 0 && (
         <div style={{ color: "var(--text-secondary)" }}>
           Nothing counts as buildable yet: its features still have capabilities nobody has named. Partly known is the useful number here.
         </div>
@@ -42,6 +42,12 @@ export function ProductScore({ score }) {
             <VerdictBadge kind={g.key} />
             <span style={{ color: "var(--text-secondary)" }}>{VERDICT[g.key].hint}</span>
           </summary>
+          {g.key === "missing" && score.missing_incomplete.length > 0 && (
+            <div style={{ margin: "6px 0 0", color: "var(--text-secondary)" }}>
+              {score.missing_incomplete.length === g.names.length ? `All ${g.names.length}` : `${score.missing_incomplete.length} of these`}
+              {" "}also have capabilities nobody has named yet, so adding what's named may not be enough.
+            </div>
+          )}
           <ul style={{ margin: "6px 0 0", paddingLeft: 18, columns: g.names.length > 6 ? 2 : 1, columnGap: 24, color: "var(--text-body)" }}>
             {g.names.map((n) => <li key={n} style={{ breakInside: "avoid" }}>{n}</li>)}
           </ul>

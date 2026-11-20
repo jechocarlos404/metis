@@ -141,16 +141,23 @@ class CoverageReport(BaseModel):
 class ProductCoverage(BaseModel):
     """How much of an existing product — typically someone else's — we could
     build from what we already have. A lower bound: features declaring unknown
-    capabilities never count as buildable, whatever their known links say."""
+    capabilities never count as buildable, whatever their known links say.
+    `buildable`, `partly`, `missing` and `not_described` are feature names, in
+    feature order, and partition the product's features: each is in exactly one."""
 
     product: ProductRef
     total_features: int
-    #: Features whose every capability is known and ours.
+    #: Every capability known, at least one named, and all of them ours.
     buildable: list[str]
-    #: Features whose capability list is declared incomplete.
-    unknown_features: list[str]
-    #: Of those, the ones where we have every capability anyone could name — a
-    #: weaker signal than buildable, since the unnamed rest may be missing.
-    known_covered: list[str]
+    #: Capability list declared incomplete; every capability named so far is
+    #: ours — a weaker signal than buildable, since the unnamed rest may be missing.
+    partly: list[str]
+    #: Names at least one capability that isn't ours, complete list or not.
+    missing: list[str]
+    #: Of `missing`, those whose capability list is also declared incomplete:
+    #: adding what's named may still not be enough.
+    missing_incomplete: list[str]
+    #: Names no capability at all.
+    not_described: list[str]
     #: Coverage of the features' known capabilities; None when none are known.
     report: CoverageReport | None

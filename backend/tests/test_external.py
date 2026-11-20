@@ -5,7 +5,7 @@ saying what *we* can do: external usage is shown, never counted as ours."""
 import pytest
 from fastapi import HTTPException
 
-from app.models import CapabilityMaturity, Product, WorkStatus
+from app.models import CapabilityMaturity, Feature, Product, WorkStatus
 from app.schemas.capability import CapabilityCreate, CoverageRequest
 from app.schemas.feature import FeatureCreate, FeatureUpdate
 from app.services import capabilities as capability_service
@@ -171,10 +171,12 @@ async def test_how_much_of_an_external_product_we_could_build(db):
     # Only a feature whose every capability is known AND ours counts. Share routes
     # needs only sync as far as we know — but "as far as we know" is not covered.
     assert score.buildable == ["Sync activities"]
-    assert score.unknown_features == ["Beacon live tracking", "Share routes"]
     # The softer signal: every capability anyone named for Share routes is ours.
     # Beacon names none, so it never counts.
-    assert score.known_covered == ["Share routes"]
+    assert score.partly == ["Share routes"]
+    assert score.missing == ["Compete on segments"]
+    assert score.missing_incomplete == []
+    assert score.not_described == ["Beacon live tracking"]
     report = score.report
     assert (report.needed, report.existing) == (2, 1)
     assert report.missing == ["Segment leaderboards"]
@@ -190,5 +192,47 @@ async def test_a_product_with_only_unknown_features_scores_zero(db):
         )
         score = await capability_service.product_coverage(session, p.id)
     assert score.report is None
-    assert (score.total_features, score.buildable, score.unknown_features) == (1, [], ["Magic"])
-    assert score.known_covered == []
+    assert (score.total_features, score.buildable, score.not_described) == (1, [], ["Magic"])
+    assert score.partly == score.missing == []
+
+
+@pytest.mark.asyncio
+async def test_a_product_score_partitions_its_features(db):
+    """Every feature lands in exactly one group, decided by its own links —
+    never by name, never by subtracting one list from another."""
+    async with db() as session:
+        s = await estate(session)
+        strava = s["strava"]
+
+        async def feature(name, caps, unknown):
+            await feature_service.create_feature(
+                session,
+                FeatureCreate(
+                    name=name,
+                    product_id=strava.id,
+                    capability_ids=[c.id for c in caps],
+                    unknown_capabilities=unknown,
+                ),
+            )
+
+        # estate() gave Strava: Sync activities (buildable), Compete on
+        # segments (missing, complete list), Beacon live tracking (flagged, none).
+        await feature("Share routes", [s["sync"]], True)  # partly
+        # Flagged, and what is named exists only at Strava: missing, not "not described".
+        await feature("Segment challenges", [s["segments"]], True)
+        await feature("Synced segments", [s["sync"], s["segments"]], True)
+        # Unflagged with no link: the write path refuses it (422), but a row like
+        # this can exist, so the score must still place it.
+        session.add(Feature(name="Legacy import", product_id=strava.id))
+        await session.commit()
+        score = await capability_service.product_coverage(session, strava.id)
+
+    groups = [score.buildable, score.partly, score.missing, score.not_described]
+    names = [n for g in groups for n in g]
+    assert sum(map(len, groups)) == score.total_features == 7
+    assert sorted(names) == sorted(set(names))  # disjoint
+    assert score.buildable == ["Sync activities"]
+    assert score.partly == ["Share routes"]
+    assert score.missing == ["Compete on segments", "Segment challenges", "Synced segments"]
+    assert score.missing_incomplete == ["Segment challenges", "Synced segments"]
+    assert score.not_described == ["Beacon live tracking", "Legacy import"]

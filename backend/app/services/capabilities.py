@@ -762,16 +762,23 @@ async def product_coverage(session: AsyncSession, product_id: uuid.UUID) -> Prod
     report, scored = await score_items(
         session, [(f.name, [names[c] for c in f.capability_ids]) for f in features]
     )
-    covered = {i for i, fc in enumerate(scored) if fc is not None and fc.existing == fc.total}
+    # One pass, by position, so the groups partition the features — the same
+    # precedence a journey step's verdict uses.
+    groups: dict[str, list[str]] = {
+        "buildable": [], "partly": [], "missing": [], "missing_incomplete": [], "not_described": []
+    }
+    for f, fc in zip(features, scored):
+        if fc is None:
+            groups["not_described"].append(f.name)
+        elif fc.existing < fc.total:
+            groups["missing"].append(f.name)
+            if f.unknown_capabilities:
+                groups["missing_incomplete"].append(f.name)
+        else:
+            groups["partly" if f.unknown_capabilities else "buildable"].append(f.name)
     return ProductCoverage(
         product=ProductRef.model_validate(product),
         total_features=len(features),
-        buildable=[
-            f.name for i, f in enumerate(features) if i in covered and not f.unknown_capabilities
-        ],
-        unknown_features=[f.name for f in features if f.unknown_capabilities],
-        known_covered=[
-            f.name for i, f in enumerate(features) if i in covered and f.unknown_capabilities
-        ],
+        **groups,
         report=report,
     )

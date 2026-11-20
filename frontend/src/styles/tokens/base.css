@@ -44,6 +44,12 @@ main:focus { outline: none; }
 /* DS Checkbox, Switch and Radio hide the native input; show its focus on the drawn control. */
 [data-ds-control]:focus-visible + span { outline: 2px solid var(--border-focus); outline-offset: 2px; }
 
+/* Segmented controls (a role=group of aria-pressed buttons) clip to their
+   rounded border, and a tab strip may scroll, which clips too: draw the
+   ring inside the control so it is never cut off. */
+[role="group"] button[aria-pressed]:focus-visible,
+[role="tab"]:focus-visible { outline-offset: -2px; }
+
 /* Collapsible nav group (AppLayout). Summary matches the plain group label. */
 .nav-group > summary {
   display: flex; align-items: center; justify-content: space-between; gap: 6px;

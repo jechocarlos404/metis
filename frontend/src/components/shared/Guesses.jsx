@@ -14,7 +14,8 @@ import { CONFIDENCE } from "../../lib/words.js";
  *
  *   query:       { feature_id } | { capability_id } | { product_id } | { tech_id }
  *   name:        "capability" shows the guessed capability; "subject" the feature or
- *                technology; "both" shows "feature probably uses capability"
+ *                technology; "both" shows "feature guessed to use capability", with
+ *                the pill beside it saying how sure
  *   onConfirmed: called after a confirm, so the caller can reload its facts
  *   onCount:     called with how many guesses still wait for a decision
  */
@@ -75,7 +76,7 @@ export function Guesses({ query, name = "capability", title = "Guesses", onConfi
           <div key={g.id} style={{ border: "1px dashed var(--border-default)", borderRadius: "var(--radius-sm)", padding: "8px 10px", display: "flex", flexDirection: "column", gap: 6, fontSize: "var(--text-xs)", opacity: state === "rejected" ? 0.6 : 1 }}>
             <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
               {showSubject && <Subject guess={g} product={productNames[g.product_id]} />}
-              {name === "both" && <span style={{ color: "var(--text-secondary)" }}>probably uses</span>}
+              {name === "both" && <span style={{ color: "var(--text-secondary)" }}>guessed to use</span>}
               {name !== "subject" && <a href={`/capabilities/${g.capability_slug}`} style={{ color: "var(--text-accent)" }}>{g.capability_name}</a>}
               <span title={c.hint}><Badge tone={c.tone}>{c.label}</Badge></span>
             </div>
@@ -85,12 +86,12 @@ export function Guesses({ query, name = "capability", title = "Guesses", onConfi
                 <>
                   <Button size="sm" variant="secondary" disabled={busy === g.id} onClick={() => act(g, true)}>Confirm</Button>
                   <DeleteConfirm armed={rejecting === g.id} onArm={() => setRejecting(g.id)} onCancel={() => setRejecting(null)}
-                    onConfirm={() => act(g, false)} disabled={busy === g.id} label="Not right" confirmLabel="Delete guess" />
+                    onConfirm={() => act(g, false)} disabled={busy === g.id} label="Reject" confirmLabel="Reject guess" />
                 </>
               )}
               <span role="status" style={{ color: state === "confirmed" ? "var(--ok-fg)" : "var(--text-secondary)" }}>
                 {state === "confirmed" && <>Confirmed. {g.subject_name} now counts as using <a href={`/capabilities/${g.capability_slug}`}>{g.capability_name}</a>.</>}
-                {state === "rejected" && "Not right: guess deleted."}
+                {state === "rejected" && "Rejected. The guess is gone and counts nowhere."}
               </span>
             </div>
           </div>

@@ -118,7 +118,8 @@ export const VERDICT = {
 export const NEED = {
   ours: { label: "ours", tone: "ok", hint: "a finished feature of one of our products realizes it" },
   elsewhere: { label: "only elsewhere", tone: "warn", hint: "only products we don't own have it, so it isn't ours" },
-  none: { label: "not built yet", tone: "danger", hint: "no finished feature in metis realizes it" },
+  // Not an alarm: often it is being built. Red is "missing"'s, a feature's word.
+  none: { label: "not built yet", tone: "neutral", hint: "no finished feature in metis realizes it" },
 };
 
 /** The NEED key for a capability match or inventory entry (null: no match).

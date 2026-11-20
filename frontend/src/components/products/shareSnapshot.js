@@ -59,16 +59,20 @@ function groupFeatures(features, capabilities) {
   return { grouped, unnamed };
 }
 
+// The product's goal first, then its other goals: the ones the goals API says
+// belong to it (product_id), as the product's Goals tab lists them.
 function goalSection(product, goals) {
   const goal = goals.find((g) => g.id === product.goal_id);
   if (!goal) return "";
   const parent = goals.find((g) => g.id === goal.parent_goal_id);
-  return `<h2>Goal</h2>
+  const others = goals.filter((g) => g.product_id === product.id && g.id !== goal.id && g.id !== parent?.id);
+  return `<h2>${others.length > 0 ? "Goals" : "Goal"}</h2>
 <div class="card">
   <h3>${esc(goal.title)} <span class="tag">${esc(statusLabel(goal.status))}</span></h3>
   ${goal.description ? `<p>${esc(goal.description)}</p>` : ""}
   ${goal.success_criteria ? `<p class="muted">Done when: ${esc(goal.success_criteria)}</p>` : ""}
   ${parent ? `<p class="muted">Part of: ${esc(parent.title)}</p>` : ""}
+  ${others.map((g) => `<div class="row"><span class="name">${esc(g.title)}</span><span class="status">${esc(statusLabel(g.status))}</span></div>`).join("")}
 </div>`;
 }
 
@@ -79,11 +83,15 @@ function scoreSection(product, score) {
   const title = `<h2>How much of ${esc(product.name)} we could build</h2>`;
   if (!score) return `${title}<p class="muted">Not scored in this snapshot.</p>`;
   const headline = scoreHeadline(score);
+  // Each group names its features, as the page does, with how many of each
+  // one's capabilities are ours.
+  const ofOurs = new Map((score.report?.features ?? []).map((f) => [f.name, `${f.existing} of ${f.total} ours`]));
   const groups = scoreGroups(score)
     .filter((g) => g.names.length > 0)
     .map((g) => {
       const note = g.key === "missing" ? incompleteNote(score) : null;
-      return `<li><span class="num">${g.names.length}</span> ${esc(VERDICT[g.key].label)}: <span class="muted">${esc(VERDICT[g.key].hint)}</span>${note ? `<br><span class="muted">${esc(note)}</span>` : ""}</li>`;
+      const names = g.names.map((n) => `<li>${esc(n)}${ofOurs.has(n) ? ` <span class="muted">· ${esc(ofOurs.get(n))}</span>` : ""}</li>`).join("");
+      return `<li><span class="num">${g.names.length}</span> ${esc(VERDICT[g.key].label)}: <span class="muted">${esc(VERDICT[g.key].hint)}</span>${note ? `<br><span class="muted">${esc(note)}</span>` : ""}<ul>${names}</ul></li>`;
     })
     .join("");
   const gaps = score.missing_capabilities;

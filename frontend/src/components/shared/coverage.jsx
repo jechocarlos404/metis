@@ -111,7 +111,10 @@ export function BuildNext({ score }) {
 // candidate is a link to that capability so the person can judge it.
 // `scored`: the product whose own features these are, never named as where a
 // capability is "known from"; its score above already leads with the headline.
-export function CoverageReport({ report, onCandidate, scored }) {
+// `verdicts`: say per feature whether we could build it. Only for an idea
+// whose every need is named (Home's check): a product's features can be
+// partly known, and the report can't tell.
+export function CoverageReport({ report, onCandidate, scored, verdicts = false }) {
   return (
     <div style={{ borderTop: "1px solid var(--border-hairline)", padding: 16, display: "flex", flexDirection: "column", gap: 14 }}>
       {!scored && <div style={{ fontSize: "var(--text-sm)", color: "var(--text-heading)" }}>{coverageHeadline(report)}</div>}
@@ -124,6 +127,10 @@ export function CoverageReport({ report, onCandidate, scored }) {
         <div key={`${i}:${f.name}`} style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           <div style={{ display: "flex", gap: 8, alignItems: "baseline" }}>
             <span style={{ fontSize: "var(--text-sm)", fontWeight: "var(--weight-medium)", color: "var(--text-heading)" }}>{f.name}</span>
+            {verdicts && (() => {
+              const v = VERDICT[f.existing === f.total ? "buildable" : "missing"];
+              return <span title={v.hint}><Badge tone={v.tone}>{v.label}</Badge></span>;
+            })()}
             <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>{f.existing} of {f.total} ours</span>
           </div>
           {f.capabilities.map((need, j) => (
@@ -141,17 +148,20 @@ function NeedRow({ need, onCandidate, scored }) {
   const quiet = { color: "var(--text-secondary)" };
   const names = (list) => list.map((p) => p.name).join(", ");
   const others = (need.match?.external_products ?? []).filter((p) => p.id !== scored?.id);
+  // On the scored product's own page "elsewhere" would mean this product:
+  // when nobody else has it, say whose it is instead.
+  const onlyHere = kind === "elsewhere" && scored && others.length === 0;
   const chip = { font: "inherit", fontSize: 11, color: "var(--text-accent)", background: "var(--accent-wash)", border: "none", borderRadius: "var(--radius-pill)", padding: "1px 8px", cursor: "pointer", textDecoration: "none" };
   return (
     <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", paddingLeft: 10, fontSize: "var(--text-xs)" }}>
-      <span title={n.hint}><Badge tone={n.tone}>{n.label}</Badge></span>
+      <span title={n.hint}><Badge tone={n.tone}>{onlyHere ? `only in ${scored.name}` : n.label}</Badge></span>
       {need.match ? (
         <>
           <a href={`/capabilities/${need.match.slug}`}>{need.match.name}</a>
           {/* Maturity describes our implementation: only shown when it's ours. */}
           {kind === "ours" && <MaturityBadge maturity={need.match.maturity} />}
           {kind === "ours" && need.match.products.length > 0 && <span style={quiet}>in {names(need.match.products)}</span>}
-          {kind === "elsewhere" && <span style={quiet}>{others.length > 0 ? `known from ${names(others)}` : "in no other product"}</span>}
+          {kind === "elsewhere" && !onlyHere && <span style={quiet}>known from {names(others)}</span>}
         </>
       ) : (
         <>

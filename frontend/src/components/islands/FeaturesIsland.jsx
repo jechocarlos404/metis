@@ -7,7 +7,7 @@ import { CapabilityPicker } from "../shared/CapabilityPicker.jsx";
 import { Guesses } from "../shared/Guesses.jsx";
 import { api, ApiError } from "../../lib/api.js";
 import { FeatureGraphView } from "../graph/FeatureGraphView.jsx";
-import { capabilityHubs, goalHubs, goalRoot } from "../graph/graph-data.js";
+import { capabilityHubs, goalHubs } from "../graph/graph-data.js";
 import { pressable } from "../../lib/pressable.js";
 import { useParamRestore, writeParams } from "../../lib/url-state.js";
 
@@ -38,7 +38,6 @@ export default function FeaturesIsland({ canWrite = true }) {
   const [motivations, setMotivations] = React.useState(null); // null loading | false failed | rows
   const [productFilter, setProductFilter] = React.useState(""); // "" | "unattributed" | product id
   const [group, setGroup] = React.useState("order"); // graph: order | capability | goal
-  const goalParent = React.useMemo(() => new Map((goals || []).map((g) => [g.id, g.parent_goal_id])), [goals]);
 
   // ?feature=<id>&tab=graph|plan&product=<id>&group=capability|goal: linkable, and Back restores the previous view.
   useParamRestore("feature", (v) => { if (v) setSelected(v); setPanelOpen(Boolean(v)); });
@@ -51,6 +50,15 @@ export default function FeaturesIsland({ canWrite = true }) {
     setPanelOpen(true);
     writeParams({ feature: id }, { push: true });
   }, []);
+  // Picked from the keyboard, a row hands focus to its details, so they are
+  // one Tab away rather than after every row of the list.
+  const panelRef = React.useRef(null);
+  const focusPanelFor = React.useRef(null);
+  React.useEffect(() => {
+    if (!detail || focusPanelFor.current !== detail.id) return;
+    focusPanelFor.current = null;
+    panelRef.current?.focus();
+  }, [detail]);
   // On a phone, changing the view closes the panel so the change shows.
   const changeTab = (t) => { setTab(t); setPanelOpen(false); writeParams({ tab: t === "directory" ? "" : t }, { push: true }); };
   const changeProduct = (v) => { setProductFilter(v); setPanelOpen(false); writeParams({ product: v }, { push: true }); };
@@ -77,6 +85,7 @@ export default function FeaturesIsland({ canWrite = true }) {
   const [saving, setSaving] = React.useState(false);
   const [confirmingDelete, setConfirmingDelete] = React.useState(false);
   const [error, setError] = React.useState(null);
+  const [notice, setNotice] = React.useState(null); // what the last write did, said in place
   const [cutTarget, setCutTarget] = React.useState("");
   const [cut, setCut] = React.useState(null);
   const [cutError, setCutError] = React.useState(null);
@@ -200,7 +209,9 @@ export default function FeaturesIsland({ canWrite = true }) {
     return activeProduct === "unattributed" ? ids.length === 0 : ids.includes(activeProduct);
   }, [activeProduct, nodeById]);
 
-  const directory = (results ?? layout.nodes).filter((n) => matchesProduct(n.id));
+  // Search picks which rows; each row reads the layout, which reloads after
+  // every write, so a saved status shows in the list as in the panel.
+  const directory = (results ? results.map((r) => nodeById.get(r.id) ?? r) : layout.nodes).filter((n) => matchesProduct(n.id));
 
   // The product filter removes other products' features from the graph and the
   // plan (fading them was invisible at real scale, so the filter looked broken).
@@ -214,14 +225,14 @@ export default function FeaturesIsland({ canWrite = true }) {
     };
   }, [activeProduct, layout, matchesProduct]);
   // Group by capability or goal: hubs for the graph's one product. Goals use
-  // the same "own goal" rule as the panel's Why (same top goal as the product).
+  // the same rule as the panel's Why: a goal is the product's own when the
+  // goals API says it belongs to it (product_id).
   const hubs = React.useMemo(() => {
     if (tab !== "graph" || group === "order") return null;
     if (group === "capability") return capabilityHubs(visibleLayout.nodes, capabilityById);
     if (!goals || !motivations) return null;
-    const goalId = productById.get(activeProduct)?.goal_id;
-    return goalHubs(visibleLayout.nodes, motivations, goals, goalId ? goalRoot(goalParent, goalId) : null);
-  }, [tab, group, visibleLayout, capabilityById, goals, motivations, productById, activeProduct, goalParent]);
+    return goalHubs(visibleLayout.nodes, motivations, goals, productById.has(activeProduct) ? activeProduct : null);
+  }, [tab, group, visibleLayout, capabilityById, goals, motivations, productById, activeProduct]);
   const visibleReady = activeProduct ? ready.filter((f) => matchesProduct(f.id)) : ready;
   // Planning is on demand: ready to start, build order and the smallest
   // version say nothing true until one of our features is planned. The header
@@ -230,7 +241,11 @@ export default function FeaturesIsland({ canWrite = true }) {
   const plannedShown = hasPlanned(visibleLayout.nodes);
   const canPlan = productFilter ? plannedShown : hasPlanned(layout.nodes);
   const shownTab = tab === "plan" && !canPlan ? "directory" : tab;
-  const visibleTopo = activeProduct && topoOrder ? topoOrder.filter((f) => matchesProduct(f.id)) : topoOrder;
+  // Build order answers "what to build next", so finished work stays out; the
+  // note under it says how much was left out.
+  const shownTopo = activeProduct && topoOrder ? topoOrder.filter((f) => matchesProduct(f.id)) : topoOrder;
+  const visibleTopo = shownTopo && shownTopo.filter((f) => f.status !== "done");
+  const topoDone = shownTopo ? shownTopo.length - visibleTopo.length : 0;
   // A cycle anywhere stops the build order, so show every cycle when it does.
   const visibleCycles = activeProduct && topoError !== "cycle" ? cycles.filter((c) => c.some((f) => matchesProduct(f.id))) : cycles;
 
@@ -292,6 +307,7 @@ export default function FeaturesIsland({ canWrite = true }) {
     setDraft((d) => ({ ...EMPTY_DRAFT, productId: activeProduct ? onScreen : d.productId }));
     setConfirmingDelete(false);
     setError(null);
+    setNotice(null);
     setDialog({ mode: "new" });
   };
 
@@ -309,6 +325,7 @@ export default function FeaturesIsland({ canWrite = true }) {
     });
     setConfirmingDelete(false);
     setError(null);
+    setNotice(null);
     setDialog({ mode: "edit" });
   };
 
@@ -347,13 +364,28 @@ export default function FeaturesIsland({ canWrite = true }) {
         setDraft((d) => ({ ...EMPTY_DRAFT, productId: d.productId }));
         await load();
         selectFeature(created.id);
+        const product = productById.get(created.product_id);
+        setNotice(`Created ${created.name}${product ? ` in ${product.name}` : ""}.`);
       } else {
+        // Said in place afterwards, as capabilities and goals do.
+        const was = new Set(detail.capability_ids);
+        const changes = [
+          body.name !== detail.name && `renamed from ${detail.name}`,
+          draft.status !== detail.status && `status now ${statusLabel(draft.status)}`,
+          body.priority !== (detail.priority ?? null) && `priority now ${priorityLabel(body.priority)}`,
+          body.product_id !== (detail.product_id ?? null) && `product now ${productById.get(body.product_id)?.name ?? "none"}`,
+          (body.capability_ids.length !== was.size || body.capability_ids.some((id) => !was.has(id))) && "capabilities updated",
+          body.unknown_capabilities !== detail.unknown_capabilities && "capabilities updated",
+          draft.layer !== (detail.facets?.layer ?? "service") && `layer now ${plain(LAYER, draft.layer)}`,
+          body.description !== (detail.description ?? null) && "description updated",
+        ].filter(Boolean);
         await api(`/features/${detail.id}`, {
           method: "PATCH",
           body: { ...body, facets: { ...detail.facets, layer: draft.layer }, status: draft.status },
         });
         await load();
         await refreshDetail(detail.id);
+        setNotice(changes.length ? `Saved ${body.name}: ${[...new Set(changes)].join(", ")}.` : `Saved ${body.name}. Nothing changed.`);
       }
       setDialog(null);
     } catch (e) {
@@ -366,12 +398,16 @@ export default function FeaturesIsland({ canWrite = true }) {
   const removeFeature = async () => {
     setSaving(true);
     setError(null);
+    const { id, name } = detail; // detail clears with the selection
     try {
-      await api(`/features/${detail.id}`, { method: "DELETE" });
+      await api(`/features/${id}`, { method: "DELETE" });
       setDialog(null);
+      // Out of the search results too, or the panel reopens on the deleted one.
+      setResults((r) => r && r.filter((n) => n.id !== id));
       setSelected(null);
       setPanelOpen(false);
       await load();
+      setNotice(`Deleted ${name}.`);
     } catch (e) {
       setError(String(e.message));
       setConfirmingDelete(false);
@@ -438,7 +474,7 @@ export default function FeaturesIsland({ canWrite = true }) {
     <>
       <PageHeader
         title="Features"
-        meta={`${searching ? `${directory.length} of ` : ""}${count(visibleLayout.nodes.length, "feature")}${searching ? " match" : ""}${plannedShown ? ` · ${visibleReady.length} ready to start` : ""}${activeProduct ? ` · filtered from ${layout.nodes.length}` : ""}`}
+        meta={`${searching ? `${directory.length} of ` : ""}${count(visibleLayout.nodes.length, "feature")}${searching ? " match" : ""}${plannedShown ? ` · ${visibleReady.length} ready to start` : ""}${shownTab === "graph" && !productFilter ? ` · ${productById.get(graphProduct)?.name ?? "No product"} only: the graph draws one product at a time` : activeProduct ? ` · filtered from ${layout.nodes.length}` : ""}`}
         actions={
           <>
             {!phone && filters}
@@ -455,6 +491,7 @@ export default function FeaturesIsland({ canWrite = true }) {
         <Tabs tabs={[{ value: "directory", label: "Directory", count: directory.length }, { value: "graph", label: "Graph" }, ...(canPlan ? [{ value: "plan", label: "Plan" }] : [])]} value={shownTab} onChange={changeTab} />
       </div>
       {error && !dialog && <div role="alert" style={{ padding: "8px 24px", fontSize: "var(--text-sm)", color: "var(--danger-fg)" }}>{error}</div>}
+      {notice && !error && <div role="status" style={{ padding: "8px 24px 0", fontSize: "var(--text-sm)", color: "var(--ok-fg)" }}>{notice}</div>}
 
       {noFeatures ? (
         <div style={{ margin: 20, padding: 24, background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", display: "flex", flexDirection: "column", gap: 10, alignItems: "flex-start" }}>
@@ -501,6 +538,7 @@ export default function FeaturesIsland({ canWrite = true }) {
             ready={visibleReady}
             cycles={visibleCycles}
             topoOrder={visibleTopo}
+            topoDone={topoDone}
             topoError={topoError}
             selectedId={selected}
             onSelect={selectFeature}
@@ -521,13 +559,15 @@ export default function FeaturesIsland({ canWrite = true }) {
         <div style={{ flex: 1, minWidth: 0, overflowY: "auto", padding: 20 }}>
           <div style={{ background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", overflow: "hidden" }}>
             {!compactRows && <div style={{ display: "grid", gridTemplateColumns: COLUMNS, columnGap: 12, padding: "8px 16px", borderBottom: "1px solid var(--border-hairline)", fontFamily: "var(--font-mono)", fontSize: "var(--text-2xs)", letterSpacing: "var(--tracking-caps)", textTransform: "uppercase", color: "var(--text-secondary)" }}>
-              <span>Feature</span><span>What it does</span><span>Product</span><span>Priority</span><span>Status</span>
+              <span>Feature</span><span>Built on</span><span>Product</span><span>Priority</span><span>Status</span>
             </div>}
             {directory.map((n, i) => {
               const capabilitiesTitle = (n.capability_ids ?? []).map((c) => capabilityById.get(c)?.name).join(", ");
               const productNames = (nodeById.get(n.id)?.product_ids ?? []).map((pid) => productById.get(pid)?.name ?? "").filter(Boolean).join(", ");
               return (
-              <div key={n.id} {...pressable(() => selectFeature(n.id))} aria-pressed={selected === n.id} style={{ display: "grid", gridTemplateColumns: compactRows ? "minmax(0, 1fr) auto" : COLUMNS, columnGap: 12, alignItems: "center", padding: "10px 16px", borderBottom: i < directory.length - 1 ? "1px solid var(--border-hairline)" : "none", cursor: "pointer", fontSize: "var(--text-sm)", background: selected === n.id ? "var(--surface-hover)" : undefined }}>
+              <div key={n.id} {...pressable((e) => { selectFeature(n.id); if (e.type === "keydown") focusPanelFor.current = n.id; })} aria-pressed={selected === n.id} style={{ display: "grid", gridTemplateColumns: compactRows ? "minmax(0, 1fr) auto" : COLUMNS, columnGap: 12, alignItems: "center", padding: "10px 16px", borderBottom: i < directory.length - 1 ? "1px solid var(--border-hairline)" : "none", cursor: "pointer", fontSize: "var(--text-sm)",
+                // Selected: inset surface (muted text 4.98:1, priority bars still show) and an accent edge.
+                background: selected === n.id ? "var(--surface-inset)" : undefined, boxShadow: selected === n.id ? "inset 3px 0 0 var(--accent)" : undefined }}>
                 {compactRows ? (
                   // Narrow: the name, then product and capabilities on one line; badges on the right.
                   <>
@@ -565,7 +605,7 @@ export default function FeaturesIsland({ canWrite = true }) {
         </div>
         )}
           {(!phone || panelShown) && (
-          <aside style={{ ...(phone ? { flex: 1, minWidth: 0, margin: 16 } : { width: 300, flex: "none", margin: "20px 20px 20px 0" }), background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", padding: 16, display: "flex", flexDirection: "column", gap: 14, overflowY: "auto" }}>
+          <aside ref={panelRef} tabIndex={-1} aria-label="Feature details" style={{ ...(phone ? { flex: 1, minWidth: 0, margin: 16 } : { width: 300, flex: "none", margin: "20px 20px 20px 0" }), background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", padding: 16, display: "flex", flexDirection: "column", gap: 14, overflowY: "auto" }}>
             {phone && (
               <Button size="sm" variant="ghost" style={{ alignSelf: "flex-start", gap: 6 }} onClick={() => { setPanelOpen(false); writeParams({ feature: "" }, { push: true }); }}>
                 <span style={{ display: "inline-flex", transform: "rotate(180deg)" }}><Icon name="chevron-right" size={13} /></span>Back
@@ -612,22 +652,35 @@ export default function FeaturesIsland({ canWrite = true }) {
               <DeleteConfirm armed={confirmingDelete} onArm={() => setConfirmingDelete(true)} onCancel={() => setConfirmingDelete(false)} onConfirm={removeFeature} disabled={saving}
                 label="Delete" confirmLabel={"Delete feature"} style={{ marginRight: "auto" }} />
             )}
-            <Button size="sm" variant="secondary" onClick={() => setDialog(null)}>Cancel</Button>
-            <Button size="sm" variant="accent" disabled={saving || !canSave} onClick={save}>
-              {dialog?.mode === "new" ? "Create feature" : "Save"}
-            </Button>
+            {!confirmingDelete && !canSave && (
+              // Why Create is off, as New capability says it.
+              <span style={{ marginRight: "auto", alignSelf: "center", fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>
+                {!draft.name.trim() ? "Give it a name" : "Pick what it is built on, or tick that some are unknown,"} to {dialog?.mode === "new" ? "create" : "save"} it.
+              </span>
+            )}
+            {/* While a delete is armed, Keep is the one way back. */}
+            {!confirmingDelete && <>
+              <Button size="sm" variant="secondary" onClick={() => setDialog(null)}>Cancel</Button>
+              <Button size="sm" variant="accent" disabled={saving || !canSave} onClick={save}>
+                {dialog?.mode === "new" ? "Create feature" : "Save"}
+              </Button>
+            </>}
           </>
         }
       >
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
           {error && <div role="alert" style={{ fontSize: "var(--text-sm)", color: "var(--danger-fg)" }}>{error}</div>}
           <Input label="Name (what the user gets, verb phrase)" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="Export tickets to Notion" />
-          <Input label="Description" value={draft.description} onChange={(e) => setDraft({ ...draft, description: e.target.value })} />
+          <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            <span style={{ fontSize: "var(--text-xs)", fontWeight: "var(--weight-medium)", color: "var(--text-heading)" }}>Description</span>
+            <textarea rows={3} value={draft.description} onChange={(e) => setDraft({ ...draft, description: e.target.value })}
+              style={{ padding: "8px 10px", fontSize: "var(--text-sm)", fontFamily: "var(--font-body)", color: "var(--text-heading)", background: "var(--surface-card)", border: "1px solid var(--border-control)", borderRadius: "var(--radius-sm)", resize: "vertical" }} />
+          </label>
           <Select label="Product" value={draft.productId} onChange={(e) => setDraft({ ...draft, productId: e.target.value })}
             options={[{ value: "", label: "No product" }, ...productOptions(products)]} />
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            <span aria-hidden="true" style={{ fontSize: "var(--text-xs)", fontWeight: "var(--weight-medium)", color: "var(--text-heading)" }}>What it does</span>
-            <CapabilityPicker id="feature-capabilities" label="What it does" options={capabilityOptions} value={draftCapabilityNames}
+            <span aria-hidden="true" style={{ fontSize: "var(--text-xs)", fontWeight: "var(--weight-medium)", color: "var(--text-heading)" }}>Built on</span>
+            <CapabilityPicker id="feature-capabilities" label="Built on" options={capabilityOptions} value={draftCapabilityNames}
               onChange={setDraftCapabilityNames} allowNew={false} placeholder="Type a capability…" />
             <Checkbox label="Some capabilities are unknown. Link only the ones you can name."
               checked={draft.unknownCapabilities} onChange={(on) => setDraft({ ...draft, unknownCapabilities: on })} />
@@ -745,7 +798,7 @@ function FeaturePanel({ detail, canWrite, onEdit, onGuessConfirmed, onSelect, pr
       </div>
 
       <div style={SECTION}>
-        <div style={CAPS_HEADER}>What it does</div>
+        <div style={CAPS_HEADER}>Built on</div>
         {detail.capability_ids.map((cid) => {
           const c = capabilityById.get(cid);
           return c
@@ -758,7 +811,7 @@ function FeaturePanel({ detail, canWrite, onEdit, onGuessConfirmed, onSelect, pr
         {detail.capability_ids.length === 0 && !detail.unknown_capabilities && (
           <div style={NOTE}>No capability linked yet.</div>
         )}
-        {canWrite && <Guesses query={{ feature_id: detail.id }} title="Probably also built on" onConfirmed={onGuessConfirmed} />}
+        {canWrite && <Guesses query={{ feature_id: detail.id }} title="Guessed to be built on too" onConfirmed={onGuessConfirmed} />}
       </div>
 
       <WhySection chain={why?.chain} goals={goals} product={productById.get(productIds[0])} hasCapabilities={detail.capability_ids.length > 0} />
@@ -954,7 +1007,7 @@ function PlanList({ items, selectedId, onSelect, numbered, limit }) {
 }
 
 // Shown only while a feature of ours is planned (see canPlan).
-function PlanView({ ready, cycles, topoOrder, topoError, selectedId, onSelect, canCut, cutTargetOptions, cutTarget, onPickCutTarget, onRunCut, onClearCut, onShowCut, cut, cutError, cutting, matchesProduct, productFilter }) {
+function PlanView({ ready, cycles, topoOrder, topoDone, topoError, selectedId, onSelect, canCut, cutTargetOptions, cutTarget, onPickCutTarget, onRunCut, onClearCut, onShowCut, cut, cutError, cutting, matchesProduct, productFilter }) {
   const body = (content) => (
     <div style={{ flex: 1, minWidth: 0, overflowY: "auto", padding: 20 }}>{content}</div>
   );
@@ -999,10 +1052,13 @@ function PlanView({ ready, cycles, topoOrder, topoError, selectedId, onSelect, c
           ) : topoOrder == null ? (
             <div style={NOTE}>Loading…</div>
           ) : topoOrder.length === 0 ? (
-            <div style={NOTE}>None of these features are ours to build.</div>
+            <div style={NOTE}>{topoDone > 0 ? `Nothing left to build: ${count(topoDone, "feature")}, all done.` : "None of these features are ours to build."}</div>
           ) : (
             <>
-              <div style={NOTE}>What a feature needs comes before it.</div>
+              <div style={NOTE}>
+                What a feature needs comes before it.
+                {topoDone > 0 && ` Unfinished work only: ${count(topoDone, "done feature")} left out.`}
+              </div>
               <PlanList items={topoOrder} selectedId={selectedId} onSelect={onSelect} numbered limit={50} />
             </>
           )}

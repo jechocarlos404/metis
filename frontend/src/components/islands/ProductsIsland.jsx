@@ -158,9 +158,18 @@ export default function ProductsIsland({ canWrite = true }) {
         const created = await api("/products", { method: "POST", body });
         await loadProducts();
         selectProduct(created.id);
+        setToast({ tone: "ok", title: `Created ${created.name}` });
       } else {
+        const goal = goals.find((g) => g.id === body.goal_id);
+        const changes = [
+          body.name !== product.name && `renamed from ${product.name}`,
+          body.summary !== (product.summary ?? null) && "summary updated",
+          body.goal_id !== (product.goal_id ?? null) && (goal ? `goal now ${goal.display_id} ${goal.title}` : "no goal now"),
+          body.external !== product.external && (body.external ? "now someone else's product" : "now one of ours"),
+        ].filter(Boolean);
         await api(`/products/${productId}`, { method: "PATCH", body });
         await loadProducts();
+        setToast({ tone: "ok", title: `Saved ${body.name}`, detail: changes.length ? `${changes.join(", ")}.` : "Nothing changed." });
       }
       setProductDialog(null);
     } catch (e) {
@@ -175,7 +184,7 @@ export default function ProductsIsland({ canWrite = true }) {
     try {
       await api(`/products/${productId}`, { method: "DELETE" });
       setProductDialog(null);
-      setToast({ tone: "ok", title: "Product deleted" });
+      setToast({ tone: "ok", title: `Deleted ${product.name}`, detail: features?.length ? `With its ${count(features.length, "feature")}.` : undefined });
       await loadProducts();
     } catch (e) {
       showError("Delete failed")(e);
@@ -257,16 +266,16 @@ export default function ProductsIsland({ canWrite = true }) {
 
   const closeTicket = () => { setTicketDialog(null); setConfirmingTicketDelete(false); };
 
-  // What the owner reads in their own Chat thread, so plain words. The display id
-  // stays: the agent resolves a product by it, and a bare name can match two.
+  // What the owner reads in their own Chat thread, so plain words and no ids:
+  // Chat resolves the exact name first and refuses one several products share.
   const planActions = {
     prompts: {
       decompose: () =>
-        `Plan the work left on "${product.name}" (${product.display_id}): break it down into a plan document and tickets, each ticket small enough for one coding session. Use the current capabilities and features.`,
+        `Plan the work left on "${product.name}": break it down into a plan document and tickets, each ticket small enough for one coding session. Use the current capabilities and features.`,
       refreshPrd: () =>
-        `Update the draft plan document for "${product.name}" (${product.display_id}) to match the current capabilities and features. Keep what still fits.`,
+        `Update the draft plan document for "${product.name}" to match the current capabilities and features. Keep what still fits.`,
       strategy: () =>
-        `Make a delivery strategy for "${product.name}" (${product.display_id}): a timeline in phases that follows its plan document and the order its features need.${strategy ? " It replaces the current one with a new version." : ""}`,
+        `Make a delivery strategy for "${product.name}": a timeline in phases that follows its plan document and the order its features need.${strategy ? " It replaces the current one with a new version." : ""}`,
     },
     approveSpec: approveProduct,
     approvePrd,
@@ -341,7 +350,7 @@ export default function ProductsIsland({ canWrite = true }) {
                 bundles={bundles} canWrite={canWrite} onAddBundle={addBundle} onRemoveBundle={removeBundle} />
             )}
 
-            {shownTab === "goals" && <ProductGoals product={product} products={products} goals={goals} features={features} capabilities={capabilities}
+            {shownTab === "goals" && <ProductGoals product={product} goals={goals} features={features} capabilities={capabilities}
               motivations={motivations} canWrite={canWrite} />}
 
             {shownTab === "plan" && (showPlan ? (
@@ -413,10 +422,13 @@ export default function ProductsIsland({ canWrite = true }) {
               <DeleteConfirm armed={confirmingDelete} onArm={() => setConfirmingDelete(true)} onCancel={() => setConfirmingDelete(false)} onConfirm={deleteProduct}
                 disabled={saving || features == null} label="Delete" confirmLabel={"Delete product"} style={{ marginRight: "auto" }} />
             )}
-            <Button size="sm" variant="secondary" onClick={() => setProductDialog(null)}>Cancel</Button>
-            <Button size="sm" variant="accent" disabled={saving || !productDialog?.name?.trim()} onClick={saveProduct}>
-              {productDialog?.mode === "new" ? "Create product" : "Save"}
-            </Button>
+            {/* While a delete is armed, Keep is the one way back: Cancel would do the same, and Save is another act. */}
+            {!confirmingDelete && <>
+              <Button size="sm" variant="secondary" onClick={() => setProductDialog(null)}>Cancel</Button>
+              <Button size="sm" variant="accent" disabled={saving || !productDialog?.name?.trim()} onClick={saveProduct}>
+                {productDialog?.mode === "new" ? "Create product" : "Save"}
+              </Button>
+            </>}
           </>
         }
       >

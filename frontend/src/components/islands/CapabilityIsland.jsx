@@ -5,7 +5,7 @@ import { MaturityBadge } from "../shared/coverage.jsx";
 import { Term } from "../shared/Term.jsx";
 import { Guesses } from "../shared/Guesses.jsx";
 import { api } from "../../lib/api.js";
-import { FIT, MATURITY, NEED, count, needKey, plain, statusLabel } from "../../lib/words.js";
+import { FIT, MATURITY, NEED, andList, count, needKey, plain, statusLabel } from "../../lib/words.js";
 import { FIT_TONE, STANCE_TONE } from "../../lib/ontology.js";
 
 /**
@@ -67,6 +67,7 @@ export default function CapabilityIsland({ slug, canWrite = false }) {
   const [saving, setSaving] = React.useState(false);
   const [dialogError, setDialogError] = React.useState(null);
   const [confirmingDelete, setConfirmingDelete] = React.useState(false);
+  const [guessCount, setGuessCount] = React.useState(0); // guesses a delete would drop with it
   const [removing, setRemoving] = React.useState(null); // goal id armed for unlink
   const [impact, setImpact] = React.useState(null); // null | "loading" | "error" | {dependents, dependencies}
   const [techNames, setTechNames] = React.useState({}); // slug → name, for Build or buy
@@ -263,6 +264,15 @@ export default function CapabilityIsland({ slug, canWrite = false }) {
                     : `Its ${children.length} sub-capabilities will move to the top level.`}
                 </span>
               )}
+              {/* What goes with it: the links to it that a delete removes. */}
+              {confirmingDelete && (motivations?.length > 0 || guessCount > 0) && (
+                <span style={{ fontSize: "var(--text-xs)", color: "var(--text-body)" }}>
+                  {[
+                    motivations?.length > 0 && `Unlinks ${motivations.length === 1 ? "goal" : "goals"} ${andList(motivations.map((g) => g.display_id))}`,
+                    guessCount > 0 && `drops ${count(guessCount, "guess", "guesses")} waiting for review`,
+                  ].filter(Boolean).join(" and ")}.
+                </span>
+              )}
               <DeleteConfirm armed={confirmingDelete} onArm={armDelete} onCancel={() => setConfirmingDelete(false)}
                 onConfirm={remove} disabled={saving} label="Delete" confirmLabel="Delete capability" />
             </span>
@@ -312,7 +322,7 @@ export default function CapabilityIsland({ slug, canWrite = false }) {
               {ours.map((g) => <ProductGroup key={g.product?.id ?? "none"} group={g} slugByName={slugByName} external={false} />)}
             </>
           )}
-          {canWrite && <Guesses query={{ capability_id: cap.id }} name="subject" title="Features and technologies that probably use it" onConfirmed={() => load()} />}
+          {canWrite && <Guesses query={{ capability_id: cap.id }} name="subject" title="Features and technologies guessed to use it" onConfirmed={() => load()} onCount={setGuessCount} />}
           {theirs.length > 0 && (
             <div style={{ display: "flex", flexDirection: "column", gap: 10, borderTop: "1px solid var(--border-hairline)", paddingTop: 10 }}>
               <div style={SUBHEAD}>Also in products we don't own (not counted)</div>
@@ -337,7 +347,7 @@ export default function CapabilityIsland({ slug, canWrite = false }) {
                 <a href={`/goals?goal=${g.id}`} style={{ flex: 1, minWidth: 0 }}>{g.title}</a>
                 {canWrite && (
                   <DeleteConfirm armed={removing === g.id} onArm={() => setRemoving(g.id)} onCancel={() => setRemoving(null)}
-                    onConfirm={() => removeMotivation(g.id)} label="Unlink" confirmLabel="Unlink goal" />
+                    onConfirm={() => removeMotivation(g.id)} label={`Unlink ${g.display_id}`} confirmLabel={`Unlink ${g.display_id}`} />
                 )}
               </div>
             ))
@@ -388,6 +398,7 @@ export default function CapabilityIsland({ slug, canWrite = false }) {
             <>
               <ImpactList title={`${count(impact.dependents.length, "capability", "capabilities")} need this`} items={impact.dependents} />
               <ImpactList title={`It needs ${count(impact.dependencies.length, "capability", "capabilities")}`} items={impact.dependencies} />
+              <BothWays impact={impact} />
             </>
           )}
           </div>
@@ -449,6 +460,22 @@ function ProductGroup({ group, slugByName, external }) {
           {r.tickets > 0 && <span style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>{count(r.tickets, "ticket")}</span>}
         </div>
       ))}
+    </div>
+  );
+}
+
+// A capability can sit on both lists without any loop: features of it need
+// features of this one, and other features of it are needed by them (or one
+// feature is built on both). Say so, so the owner doesn't read a cycle.
+function BothWays({ impact }) {
+  const needed = new Set(impact.dependencies.map((c) => c.id));
+  const both = impact.dependents.filter((c) => needed.has(c.id)).map((c) => c.name).sort((a, b) => a.localeCompare(b));
+  if (both.length === 0) return null;
+  return (
+    <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>
+      On both lists: {andList(both)}. Some of {both.length === 1 ? "its" : "their"} features need one of this capability's,
+      and others are needed by one, often because a feature is built on both. That is two links, not a loop:
+      features never need each other in a circle.
     </div>
   );
 }

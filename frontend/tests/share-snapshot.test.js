@@ -24,7 +24,10 @@ const score = {
   missing: ["Record an activity", "Upload files"],
   missing_incomplete: [],
   not_described: [],
-  report: { features: [], needed: 2, existing: 1, mature: 1, missing: ["Activity Logging"] },
+  report: {
+    features: [{ name: "Record an activity", existing: 0, total: 1 }, { name: "Upload files", existing: 1, total: 2 }],
+    needed: 2, existing: 1, mature: 1, missing: ["Activity Logging"],
+  },
   missing_capabilities: [{ name: "Activity Logging", slug: "activity-logging", features: 2, only_gap: 2, elsewhere: [] }],
   closest_products: [
     { product: ref("a", "Alpha"), capabilities: 1 },
@@ -38,7 +41,7 @@ describe("Share snapshot", () => {
     const out = text(snapshotHtml({ product: strava, goals: [], features, capabilities, score }));
     assert.match(out, /We have 1 of the 2 capabilities needed · 1 proven \(beta or stable\)\. Nothing is buildable yet\./);
     assert.match(out, /"Ours": a finished feature of one of our products realizes it\./);
-    assert.match(out, /2 missing: needs a capability we don't have/);
+    assert.match(out, /2 missing: needs a capability we don't have Record an activity · 0 of 1 ours Upload files · 1 of 2 ours/);
     assert.doesNotMatch(out, /0 buildable/); // empty groups stay off, as on the page
     assert.match(out, /1 capability we don't have, most useful first/);
     assert.match(out, /Activity Logging · needed by 2 features · the only gap in 2 of them · in no other product/);
@@ -56,7 +59,8 @@ describe("Share snapshot", () => {
   test("nothing named: the groups, then what's missing to score it", () => {
     const blank = { ...score, buildable: [], missing: [], not_described: ["Record an activity", "Upload files"], report: null, missing_capabilities: [], closest_products: [] };
     const out = text(snapshotHtml({ product: strava, goals: [], features, capabilities, score: blank }));
-    assert.match(out, /Strava: 2 features 2 not described: nobody has named the capabilities it needs yet Nothing to score yet: none of its features names a capability\./);
+    // Each group names its features; with nothing named there is no "of ours" count.
+    assert.match(out, /Strava: 2 features 2 not described: nobody has named the capabilities it needs yet Record an activity Upload files Nothing to score yet: none of its features names a capability\./);
     assert.doesNotMatch(out, /We have|Closest/);
   });
 
@@ -64,5 +68,18 @@ describe("Share snapshot", () => {
     const out = text(snapshotHtml({ product: ours, goals: [], features, capabilities, score: { ...score, product: ref("climb", "Can I Climb") } }));
     assert.doesNotMatch(out, /We have|buildable|we could build|Closest/);
     assert.match(out, /What it does/);
+  });
+
+  test("the product's goals: its own goal first, then the others the goals API gives it", () => {
+    const steps = { ...ours, id: "steps", name: "Steps", goal_id: "og60" };
+    const goals = [
+      { id: "og60", title: "Walk more", status: "pending", parent_goal_id: null, product_id: "steps" },
+      { id: "pg61", title: "Count steps", status: "in_progress", parent_goal_id: "og60", product_id: "steps" },
+      { id: "pg62", title: "Share a streak", status: "pending", parent_goal_id: "og60", product_id: "steps" },
+      { id: "pg99", title: "Someone else's", status: "pending", parent_goal_id: "og60", product_id: "other" },
+    ];
+    const out = text(snapshotHtml({ product: steps, goals, features, capabilities, score: null }));
+    assert.match(out, /Goals Walk more planned Count steps in progress Share a streak planned/);
+    assert.doesNotMatch(out, /Someone else's/);
   });
 });

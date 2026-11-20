@@ -93,12 +93,12 @@ async def _refuse_name_clash(
     derives to (and an explicit one), and on the current name ignoring case,
     because a rename keeps the old slug."""
     slugs = {slugify(name)} | ({slug} if slug else set())
-    stmt = select(Capability).where(
-        or_(Capability.slug.in_(slugs), func.lower(Capability.name) == name.strip().lower())
-    )
+    same_name = func.lower(Capability.name) == name.strip().lower()
+    stmt = select(Capability).where(or_(Capability.slug.in_(slugs), same_name))
     if exclude_id is not None:
         stmt = stmt.where(Capability.id != exclude_id)
-    existing = await session.scalar(stmt.limit(1))
+    # Several can match (older -2 duplicates): name the same-named, oldest one.
+    existing = await session.scalar(stmt.order_by(same_name.desc(), Capability.seq).limit(1))
     if existing is not None:
         raise HTTPException(
             409,

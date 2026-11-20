@@ -19,6 +19,7 @@ exposure number is worse than one that says it does not know.
 """
 
 from typing import Any
+from urllib.parse import quote
 
 #: Column widths chosen so the common case lines up without padding logic
 #: leaking into every function.
@@ -334,7 +335,7 @@ def _need(need: dict) -> list[str]:
     return lines
 
 
-def check_idea(report: dict) -> str:
+def check_idea(report: dict, idea: str) -> str:
     not_ours = report["missing"]
     lines = [
         f"{report['existing']}/{report['needed']} distinct capabilit(ies) are ours, "
@@ -356,7 +357,21 @@ def check_idea(report: dict) -> str:
         "confirm, never counted as matches.",
         "",
     ]
-    return _end(lines, "/home")
+    return _end(lines, idea_link(idea, report))
+
+
+def idea_link(idea: str, report: dict) -> str:
+    """Home's idea check, pre-filled: every distinct need once, in order, as
+    its slug when matched and as typed when not. The per-feature split is not
+    carried; the distinct-capability count is the same."""
+    caps: list[str] = []
+    for feature in report["features"]:
+        for need in feature["capabilities"]:
+            token = need["match"]["slug"] if need["match"] else need["name"]
+            if token not in caps:
+                caps.append(token)
+    joined = ",".join(quote(c, safe="") for c in caps)
+    return f"/home?idea={quote(idea, safe='')}&caps={joined}"
 
 
 def product_score(score: dict) -> str:
@@ -545,9 +560,12 @@ def journey_analysis(analysis: dict) -> str:
     return _end(lines, f"/journeys?id={journey['id']}")
 
 
-def ready_features(rows: list[dict], products: list[dict], only: dict | None) -> str:
+def ready_features(
+    rows: list[dict], products: list[dict], only: dict | None, pending: int | None = None
+) -> str:
     """The graph serves the whole frontier; one product is a filter over it, in
-    the graph's order (priority, then age)."""
+    the graph's order (priority, then age). `pending` counts our pending
+    features in scope, asked for only when nothing is ready."""
     by_id = {p["id"]: p["slug"] for p in products}
     if only:
         rows = [r for r in rows if r["product_id"] == only["id"]]
@@ -567,9 +585,18 @@ def ready_features(rows: list[dict], products: list[dict], only: dict | None) ->
             for r in rows
         ]
     )
-    if not rows:
+    if rows:
+        lines.append("")
+        return _end(lines, "/features")
+    if pending:
         lines.append(
-            "Nothing is ready: every pending feature waits on one not done, or none is pending."
+            f"Nothing is ready{scope}: {pending} pending feature(s), each waits on one not done."
         )
-    lines.append("")
-    return _end(lines, "/features")
+    else:
+        lines.append(f"Nothing is pending{scope}: every feature of ours is in progress or done.")
+    lines += [
+        "To find what to build next, check an idea against what already exists with "
+        "check_idea. Its Open: line pre-fills Home's idea check for the owner.",
+        "",
+    ]
+    return _end(lines, "/home")

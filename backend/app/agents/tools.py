@@ -63,9 +63,20 @@ async def _resolve(session, model, ref: str, prefix: str, name_column=None):
         if obj is not None:
             return obj
     if name_column is not None:
-        obj = await session.scalar(select(model).where(name_column.ilike(f"%{ref}%")).limit(1))
-        if obj is not None:
-            return obj
+        # The exact name first, then a name only one row contains. Several
+        # rows containing it is refused with their names, never picked: an
+        # answer about "Tagomoto Website" is not an answer about "Tagomoto".
+        exact = (await session.scalars(select(model).where(func.lower(name_column) == ref.lower()))).all()
+        if len(exact) == 1:
+            return exact[0]
+        near = (await session.scalars(
+            select(model).where(name_column.ilike(f"%{ref}%")).order_by(name_column).limit(6)
+        )).all()
+        if len(near) == 1:
+            return near[0]
+        if near:
+            names = ", ".join(f"`{getattr(o, name_column.key)}`" for o in near[:5])
+            raise ToolError(f"`{ref}` fits several {model.__tablename__}: {names}. Use the exact name.")
     raise ToolError(f"Could not resolve `{ref}` to a known {model.__tablename__[:-1]}")
 
 

@@ -717,3 +717,18 @@ async def test_list_goals_says_which_goal_each_sits_under(db):
     by_title = {r["title"]: r for r in rows}
     assert by_title["Cafe owners"]["parent"] == by_title["Hanko"]["display_id"]
     assert by_title["Hanko"]["parent"] is None and by_title["Other"]["parent"] is None
+
+
+async def test_a_name_resolves_exactly_before_by_substring(db):
+    """'Tagomoto' is Tagomoto, never Tagomoto Website; a name several rows
+    contain is refused with their names rather than picked."""
+    from app.agents.tools import ToolError, _resolve
+
+    async with db() as session:
+        session.add_all([Product(name="Tagomoto Website", slug="tagomoto-website"),
+                         Product(name="Tagomoto", slug="tagomoto")])
+        await session.commit()
+        assert (await _resolve(session, Product, "tagomoto", "SPEC", Product.name)).name == "Tagomoto"
+        assert (await _resolve(session, Product, "Website", "SPEC", Product.name)).name == "Tagomoto Website"
+        with pytest.raises(ToolError, match="fits several products: `Tagomoto`, `Tagomoto Website`"):
+            await _resolve(session, Product, "Tago", "SPEC", Product.name)

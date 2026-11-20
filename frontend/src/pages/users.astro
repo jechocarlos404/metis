@@ -1,12 +1,14 @@
 ---
 import AppLayout from "../layouts/AppLayout.astro";
 import UsersIsland from "../components/islands/UsersIsland.jsx";
+import AdminOnly from "../components/shell/AdminOnly.astro";
 
-// Admin-only. The API enforces this too (require_admin on /api/users); this
-// redirect just avoids rendering a page that would only 403.
-if (Astro.locals.user?.role !== "admin") return Astro.redirect("/");
+// Admin-only. The API enforces this too (require_admin on /api/users); anyone
+// else gets a page that says why rather than an unexplained bounce.
+const isAdmin = Astro.locals.user?.role === "admin";
+if (!isAdmin) Astro.response.status = 403;
 ---
 
 <AppLayout title="Users">
-  <UsersIsland client:load />
+  {isAdmin ? <UsersIsland client:load /> : <AdminOnly title="Users" />}
 </AppLayout>

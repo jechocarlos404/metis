@@ -197,7 +197,7 @@ export default function TechCatalogIsland({ initialView = "catalog", initialQuer
   const judged = (techTotal ?? 0) - unknown;
   // Nothing to filter or sort: say so, without the filters and table around
   // it. Judged from an unfiltered answer, never from the filters on screen.
-  const noTech = view === "catalog" ? page != null && total === 0 && !page.filtered : techTotal === 0 && !product;
+  const noTech = view === "catalog" ? page != null && total === 0 && !page.filtered : !loading && techTotal === 0 && !product; // a refetch still holds the last answer
   const noneUsed = view === "exposure" && product && techTotal === 0; // the product records none
   const noTechWords = canWrite
     ? <>No technologies yet. They come in with a product's seed file, imported from <a href="/settings">Settings → Seed files</a>.</>

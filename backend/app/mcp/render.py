@@ -144,9 +144,12 @@ def tech_exposure(envelope: dict) -> str:
     # Filtered to a product, the answer is about what that product uses only.
     subject = envelope["subject"]
     product = subject["slug"] if subject.get("kind") == "product" else None
+    # A row's products and slots are the technology's, estate-wide; say so
+    # when the rows are one product's.
     lines = [
         f"{len(rows)} exposed technolog(ies){f' used by {product}' if product else ''}, "
-        f"{at_risk} required slot(s) affected.",
+        f"{at_risk} required slot(s) affected"
+        f"{' across every product that uses them' if product else ''}.",
         "",
     ]
     if not rows and product is None:

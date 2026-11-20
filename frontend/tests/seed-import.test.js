@@ -781,7 +781,7 @@ describe("removing a seeded product names every row it deletes or keeps", () => 
     const { body } = await unseed(probeSeed());
     assert.ok(body.notes.includes(
       'would delete product "Probe", with 1 epic, 1 story, 2 tickets and its stack "Probe stack" (1 slot); ' +
-        "importing this file again won't bring back its stack",
+        "importing this file again won't bring back its stack and 2 tickets as they are now (changed or added since its plan was written)",
     ), body.notes.join("\n"));
     assert.ok(body.notes.includes('would delete feature "Probe feature", with its 2 capability links; journey "Sign up" keeps its step, no longer linked to it'));
     assert.ok(body.notes.includes('would delete feature "Second feature", with its 1 capability link; story "Their story" of product "Other" stays, no longer about it'));
@@ -792,14 +792,23 @@ describe("removing a seeded product names every row it deletes or keeps", () => 
     use(probe());
     const [prod] = metis.products;
     prod.status = "approved";
-    metis.plans.push({ id: "pd1", product_id: prod.id, version: 2, status: "approved" }, { id: "pd2", product_id: prod.id, version: 1, status: "draft" });
-    metis.tickets.push({ id: "tk1", product_id: prod.id, epic_id: null, story_id: null, status: "in_progress" });
+    // Newest first, as the API lists them. The latest plan made ep1 and its
+    // tickets: tk1 untouched, tk2 moved on since; tk3 added by hand.
+    metis.plans.push({ id: "pd2", product_id: prod.id, version: 2, status: "approved" }, { id: "pd1", product_id: prod.id, version: 1, status: "draft" });
+    metis.epics.push({ id: "ep1", product_id: prod.id, decomposition_id: "pd2", title: "Plan epic", stories: [] });
+    const at = "2026-11-20T10:00:00Z";
+    metis.tickets.push(
+      { id: "tk1", product_id: prod.id, epic_id: "ep1", status: "pending", created_at: at, updated_at: at },
+      { id: "tk2", product_id: prod.id, epic_id: "ep1", status: "in_progress", created_at: at, updated_at: "2026-11-21T09:00:00Z" },
+      { id: "tk3", product_id: prod.id, epic_id: null, status: "pending", created_at: at, updated_at: at },
+    );
     metis.strategies.push({ id: "ds1", product_id: prod.id });
     metis.stacks.push({ id: "stk1", name: "Probe stack", product_id: prod.id, parent_id: null });
     const { body } = await unseed(probeSeed());
     assert.ok(body.notes.includes(
-      'would delete product "Probe", with 2 plan documents, 1 ticket, 1 delivery strategy and its stack "Probe stack"; ' +
-        "importing this file again won't bring back its stack, its delivery strategy, 1 older plan document, its approval and its tickets' progress",
+      'would delete product "Probe", with 2 plan documents, 1 epic, 3 tickets, 1 delivery strategy and its stack "Probe stack"; ' +
+        "importing this file again won't bring back its stack, its delivery strategy, 1 older plan document, its approval " +
+        "and 2 tickets as they are now (changed or added since its plan was written)",
     ), body.notes.join("\n"));
   });
 

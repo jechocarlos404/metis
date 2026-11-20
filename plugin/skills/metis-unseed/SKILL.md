@@ -91,9 +91,10 @@ anything the seed shares with the rest of the instance:
 - what a seed file has no place for is named on its line as not coming back
   with a re-import: a cost recorded on a deleted satisfaction, and a deleted
   product's stacks, delivery strategies, older plan documents, approval and
-  ticket progress (an import makes one plan document, a draft with every
-  ticket pending). A satisfaction's note does come back from a file metis
-  exported: the export writes it as the link's `basis`
+  any ticket changed or added since its plan was written, status included
+  (the export writes the latest plan document, and an import makes it again
+  as a draft with every ticket pending). A satisfaction's note does come back
+  from a file metis exported: the export writes it as the link's `basis`
 
 Every kept row is listed with its reason (`note: kept ...`). Keeping shared
 rows is the expected outcome of a normal unseed, not a problem: every real seed

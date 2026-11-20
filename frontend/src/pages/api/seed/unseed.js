@@ -725,12 +725,16 @@ class Unseeder {
     // as a draft with every ticket pending, and never a stack or a strategy.
     const planDocs = this.instPlans.get(id) || [];
     const strategies = (this.instStrategies.get(id) || []).length;
+    // The export writes the latest plan document, not the tickets as they
+    // are: one edited since (its status too) or not made from it is lost.
+    const fromPlan = new Set(epics.filter((epic) => planDocs[0] && epic.decomposition_id === planDocs[0].id).map((epic) => epic.id));
+    const changed = tickets.filter((ticket) => ticket.updated_at !== ticket.created_at || !fromPlan.has(ticket.epic_id)).length;
     const lost = [
       stacks.length > 0 && (stacks.length === 1 ? "its stack" : `its ${stacks.length} stacks`),
       strategies > 0 && (strategies === 1 ? "its delivery strategy" : `its ${strategies} delivery strategies`),
       planDocs.length > 1 && count(planDocs.length - 1, "older plan document"),
       (product.status === "approved" || planDocs.some((doc) => doc.status === "approved")) && "its approval",
-      tickets.some((ticket) => ticket.status && ticket.status !== "pending") && "its tickets' progress",
+      changed > 0 && `${count(changed, "ticket")} as ${agree(changed, "it is", "they are")} now (changed or added since its plan was written)`,
     ].filter(Boolean);
     if (lost.length > 0) after.push(`importing this file again won't bring back ${andList(lost)}`);
     return {

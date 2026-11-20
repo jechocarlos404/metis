@@ -692,7 +692,11 @@ async def test_exposure_for_one_product_is_about_that_product(api):
 
     # Can I Climb uses the dying one.
     text = await server._dispatch("tech_exposure", {"product": str(w["climb"].id)})
-    assert text.startswith("1 exposed technolog(ies) used by can-i-climb,")
+    # The slot count is the technology's, over every product using it.
+    assert text.startswith(
+        "1 exposed technolog(ies) used by can-i-climb, 0 required slot(s) affected "
+        "across every product that uses them."
+    )
     assert "nestjs" in text and "Unresolved" not in text
     assert text.endswith("Open: /tech?view=exposure&window_days=180&product=can-i-climb")
 

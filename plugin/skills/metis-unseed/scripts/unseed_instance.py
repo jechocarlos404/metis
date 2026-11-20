@@ -783,6 +783,13 @@ class Unseeder:
         # or a strategy.
         plans = self.inst_plans.get(pid, [])
         strategies = len(self.inst_strategies.get(pid, []))
+        # The export writes the latest plan document, not the tickets as they
+        # are: one edited since (its status too) or not made from it is lost.
+        from_plan = {e["id"] for e in epics if plans and e.get("decomposition_id") == plans[0]["id"]}
+        changed = sum(
+            1 for t in tickets
+            if t.get("updated_at") != t.get("created_at") or t.get("epic_id") not in from_plan
+        )
         lost = [
             word
             for present, word in (
@@ -791,7 +798,7 @@ class Unseeder:
                 (len(plans) > 1, f"{len(plans) - 1} older plan document(s)"),
                 (prod.get("status") == "approved" or any(d.get("status") == "approved" for d in plans),
                  "its approval"),
-                (any(t.get("status") not in (None, "pending") for t in tickets), "its tickets' progress"),
+                (changed, f"{changed} ticket(s) as they are now (changed or added since its plan was written)"),
             )
             if present
         ]

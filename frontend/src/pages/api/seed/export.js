@@ -29,6 +29,42 @@ function collectGoalChain(goalById, startId) {
   return ids;
 }
 
+// The product's own goals: the largest goal tree around its goal that no other
+// product points into. Its sub-goals and sibling goals travel with it, so
+// removing the product later names every goal link it has; a goal another
+// product points at, and everything under it, stays that product's.
+function ownedGoals(goals, products, productId, startId) {
+  const goalById = new Map(goals.map((goal) => [goal.id, goal]));
+  const children = new Map();
+  for (const goal of goals) {
+    children.set(goal.parent_goal_id, [...(children.get(goal.parent_goal_id) || []), goal.id]);
+  }
+  const others = new Set(
+    products.filter((product) => product.id !== productId && product.goal_id).map((product) => product.goal_id),
+  );
+  // A goal two products share is neither one's: the file carries it, but
+  // nothing under it.
+  if (others.has(startId)) return new Set();
+  const below = (rootId, skipOthers) => {
+    const ids = new Set();
+    const stack = [rootId];
+    while (stack.length > 0) {
+      const id = stack.pop();
+      if (ids.has(id) || (skipOthers && others.has(id))) continue;
+      ids.add(id);
+      stack.push(...(children.get(id) || []));
+    }
+    return ids;
+  };
+  let root = startId;
+  for (;;) {
+    const parentId = goalById.get(root)?.parent_goal_id;
+    if (!goalById.has(parentId) || [...below(parentId, false)].some((id) => others.has(id))) break;
+    root = parentId;
+  }
+  return below(root, true);
+}
+
 // The product's own features, every capability they realize, and each of
 // those capabilities' PART_OF ancestors (so parent_ref resolves in the file).
 function withAncestors(capabilities, startIds) {
@@ -99,7 +135,7 @@ export async function GET({ request, locals }) {
   }
 
   try {
-    const [product, productsGoals, capabilityTree, features, edges, decompositions, bundles] = await Promise.all([
+    const [product, productsGoals, capabilityTree, features, edges, decompositions, bundles, products] = await Promise.all([
       api(`/api/products/${productId}`),
       api("/api/goals"),
       api("/api/capabilities/map"),
@@ -107,6 +143,7 @@ export async function GET({ request, locals }) {
       api("/api/features/edges"),
       api(`/api/products/${productId}/decompositions`),
       api(`/api/products/${productId}/bundles`),
+      api("/api/products"),
     ]);
     const [guessRows, usage, satisfactions, technologies] = await Promise.all([
       optional("/api/guesses"),
@@ -120,17 +157,13 @@ export async function GET({ request, locals }) {
     const goalById = new Map(goals.map((goal) => [goal.id, goal]));
     const capabilityList = flattenCapabilities(capabilityTree);
 
-    const productGoalIds = product.goal_id ? collectGoalChain(goalById, product.goal_id) : new Set();
-    const motivationLists = await Promise.all(
-      capabilityList.map(async (capability) => ({
-        capability_id: capability.id,
-        goals: await api(`/api/capabilities/${capability.id}/motivations`),
-      })),
-    );
-
-    const allMotivations = motivationLists.flatMap(({ capability_id, goals: linkedGoals }) =>
-      linkedGoals.map((goal) => ({ capability_id, goal_id: goal.id })),
-    );
+    // The product's own goals, and the chain above them so parent_ref resolves.
+    const ownGoalIds = product.goal_id ? ownedGoals(goals, products, product.id, product.goal_id) : new Set();
+    const productGoalIds = new Set([
+      ...ownGoalIds,
+      ...(product.goal_id ? collectGoalChain(goalById, product.goal_id) : []),
+    ]);
+    const allMotivations = await api("/api/motivations");
     const includedFeatures = features.filter((feature) => feature.product_id === productId);
     const includedFeatureIds = new Set(includedFeatures.map((feature) => feature.id));
     // A feature's guesses, minus any its confirmed links already cover.
@@ -144,6 +177,9 @@ export async function GET({ request, locals }) {
       ...includedFeatures.flatMap((feature) => feature.capability_ids || []),
       ...[...guessesOf.values()].flat().map((guess) => guess.capability_id),
       ...bundles.map((capability) => capability.id),
+      // Every goal link of the product's own goals, even to a capability no
+      // feature realizes yet. Shared goals above them bring no capabilities.
+      ...allMotivations.filter((motivation) => ownGoalIds.has(motivation.goal_id)).map((motivation) => motivation.capability_id),
     ]);
     const includedCapabilities = capabilityList.filter((capability) => includedCapabilityIds.has(capability.id));
     const includedEdges = edges.filter(

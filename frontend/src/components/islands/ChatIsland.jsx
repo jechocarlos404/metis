@@ -257,6 +257,7 @@ export default function ChatIsland({ threadId: initialThreadId = null, canWrite 
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState(null);
   const [confirmingDelete, setConfirmingDelete] = React.useState(false);
+  const [composerFocus, setComposerFocus] = React.useState(false);
   const [available, setAvailable] = React.useState(null); // null until /chat/status answers
   const [products, setProducts] = React.useState([]);
   const scrollRef = React.useRef(null);
@@ -402,34 +403,44 @@ export default function ChatIsland({ threadId: initialThreadId = null, canWrite 
 
   return (
     <>
-      <style>{`@keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: 0.3 } }`}</style>
+      <style>{`@keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: 0.3 } }
+.chat-thread-picker { width: 220px; }
+@media (max-width: 640px) {
+  .chat-thread-picker { width: 140px; }
+  .chat-label { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+}`}</style>
+      {/* The thread picker already says which thread this is, so the header
+          names one only when there is no picker. On a phone the buttons keep
+          their icons and accessible names but drop their labels, so they fit. */}
       <PageHeader
         title="Chat"
-        meta={activeThread ? `thread: ${activeThread.title}` : "new thread"}
+        meta={threads.length === 0 ? "new thread" : null}
         actions={
-          <>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", flexWrap: "wrap", gap: 8, minWidth: 0, flex: "0 1 auto" }}>
             {canWrite && threadId && (
               <Button size="sm" variant="secondary" onClick={() => switchThread(null)} style={{ gap: 6 }}>
-                <Icon name="plus" size={12} /> New thread
+                <Icon name="plus" size={12} /> <span className="chat-label">New thread</span>
               </Button>
             )}
             {threads.length > 0 && (
-              <Select
-                value={threadId ?? ""}
-                onChange={(e) => switchThread(e.target.value)}
-                aria-label="Thread"
-                style={{ width: 180 }}
-                options={[
-                  { value: "", label: canWrite ? "New thread" : "Pick a thread…" },
-                  ...threads.map((t) => ({ value: t.id, label: t.title })),
-                ]}
-              />
+              <div className="chat-thread-picker">
+                <Select
+                  value={threadId ?? ""}
+                  onChange={(e) => switchThread(e.target.value)}
+                  aria-label="Thread"
+                  title={activeThread?.title}
+                  options={[
+                    { value: "", label: canWrite ? "New thread" : "Pick a thread…" },
+                    ...threads.map((t) => ({ value: t.id, label: t.title })),
+                  ]}
+                />
+              </div>
             )}
             {canWrite && threadId && (
               <DeleteConfirm armed={confirmingDelete} onArm={() => setConfirmingDelete(true)} onCancel={() => setConfirmingDelete(false)} onConfirm={deleteThread} disabled={busy || running}
-                label="Delete thread" confirmLabel={"Delete thread"} />
+                label={<span className="chat-label">Delete thread</span>} confirmLabel={"Delete thread"} />
             )}
-          </>
+          </div>
         }
       />
       <div ref={scrollRef} aria-live="polite" aria-busy={running}
@@ -488,12 +499,15 @@ export default function ChatIsland({ threadId: initialThreadId = null, canWrite 
                 Agents are still working on the last message. You can leave this page; they keep going.
               </div>
             )}
-            <div style={{ display: "flex", alignItems: "flex-end", gap: 8, background: "var(--surface-card)", border: "1px solid var(--border-default)", borderRadius: "var(--radius-lg)", padding: "10px 12px", boxShadow: "var(--shadow-card)" }}>
+            {/* The textarea draws no outline; the box around it shows focus, as ds Input does. */}
+            <div style={{ display: "flex", alignItems: "flex-end", gap: 8, background: "var(--surface-card)", border: `1px solid ${composerFocus ? "var(--border-focus)" : "var(--border-default)"}`, borderRadius: "var(--radius-lg)", padding: "10px 12px", boxShadow: composerFocus ? "var(--shadow-card), var(--ring-focus)" : "var(--shadow-card)", transition: "border-color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out)" }}>
               <textarea
                 rows={1}
                 value={draft}
                 aria-label="Message"
                 placeholder={available === false ? "Chat is unavailable until an AI model is connected" : "Ask about goals, capabilities or features…"}
+                onFocus={() => setComposerFocus(true)}
+                onBlur={() => setComposerFocus(false)}
                 onChange={(e) => setDraft(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !e.shiftKey) {

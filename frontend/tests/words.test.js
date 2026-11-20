@@ -16,6 +16,10 @@ test("a capability nobody has finished is not built yet, not missing", () => {
   assert.ok(Object.values(NEED).every((n) => n.label !== VERDICT.missing.label));
 });
 
+test("not built yet doesn't wear missing's colour either", () => {
+  assert.notEqual(NEED.none.tone, VERDICT.missing.tone);
+});
+
 test("why a feature or step is missing, when its gaps agree", () => {
   assert.equal(lackingKey([ours, elsewhere, elsewhere]), "elsewhere");
   assert.equal(lackingKey([none, null]), "none");

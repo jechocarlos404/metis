@@ -17,10 +17,13 @@ Read-only: the metis MCP server refuses every write.
 
 1. **Find the capability.** Call `capability_inventory` with a short `q`
    substring of what you are about to build (`auth`, `upload`, `search`,
-   `notif`). Pick the entry whose name and description mean the same thing.
-   If none does, say metis has no record of it and stop: that is an answer.
+   `notif`). It prints one line per capability: slug, maturity, feature
+   count, our products and external products. Pick the slugs that look like
+   the same thing. If none does, say metis has no record of it and stop: that
+   is an answer.
 
-2. **Look it up.** Call `capability` with the entry's slug. It returns:
+2. **Look it up.** Call `capability` with the slug. It returns:
+   - its name and description, to confirm it really is the same thing,
    - our products that have it, and external products listed apart,
    - our features that realize it, with status and product,
    - its maturity (`ga` and `beta` are proven),
@@ -30,8 +33,8 @@ Read-only: the metis MCP server refuses every write.
    capability are `done`, and a capability at `ga` or `beta`. The evidence
    paths belong to the capability, not to one product, so match a path to a
    product only when the path makes it obvious (for example a top-level
-   directory named after the product's repo). Otherwise list the paths and
-   the products side by side and say the mapping is not recorded.
+   directory named after the product's repo). Otherwise list the paths and the products side by side
+   and say the mapping is not recorded.
 
 4. **Point at the code.** If the other product's repo is on this machine (try
    a sibling directory of the current repo named like the product slug), read

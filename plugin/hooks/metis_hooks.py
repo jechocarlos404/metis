@@ -18,6 +18,7 @@ import hashlib
 import json
 import os
 import re
+import stat
 import subprocess
 import sys
 import tempfile
@@ -40,26 +41,58 @@ def slugify(value):
 # ---- local state ----
 
 
+_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
+_dir = []  # resolved once per process: [path or None]
+
+
 def _data_dir():
-    path = os.environ.get("CLAUDE_PLUGIN_DATA") or os.path.join(
-        tempfile.gettempdir(), "metis-claude-plugin"
-    )
-    os.makedirs(path, exist_ok=True)
-    return path
+    """CLAUDE_PLUGIN_DATA, else ~/.cache/metis-claude-plugin, created 0700.
+    None when it is a symlink, not ours, or group/world writable: then nothing
+    is cached and the Stop reminder stays off, rather than trusting files
+    someone else could plant."""
+    if not _dir:
+        path = os.environ.get("CLAUDE_PLUGIN_DATA") or os.path.join(
+            os.path.expanduser("~"), ".cache", "metis-claude-plugin"
+        )
+        try:
+            os.makedirs(path, mode=0o700, exist_ok=True)
+            st = os.lstat(path)
+            safe = stat.S_ISDIR(st.st_mode) and not st.st_mode & 0o022
+            if hasattr(os, "getuid"):
+                safe = safe and st.st_uid == os.getuid()
+        except OSError:
+            safe = False
+        _dir.append(path if safe else None)
+    return _dir[0]
 
 
 def _state(name):
-    """A file in the plugin's data dir, keyed by the API it describes."""
+    """A file in the data dir, keyed by the API it describes, or None."""
+    root = _data_dir()
+    if not root:
+        return None
     tag = hashlib.sha1(API.encode()).hexdigest()[:8]
-    return os.path.join(_data_dir(), f"{name}-{tag}.json")
+    return os.path.join(root, f"{name}-{tag}.json")
+
+
+def _read(path):
+    """(value, mtime). Never follows a symlink."""
+    fd = os.open(path, os.O_RDONLY | _NOFOLLOW)
+    with os.fdopen(fd) as f:
+        return json.load(f), os.fstat(f.fileno()).st_mtime
 
 
 def _write(path, value):
-    tmp = f"{path}.{os.getpid()}.tmp"
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w") as f:
-        json.dump(value, f)
-    os.replace(tmp, path)
+    """A fresh 0600 file from mkstemp, renamed over the target. A rename
+    replaces a planted symlink instead of writing through it."""
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path), suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(value, f)
+        os.replace(tmp, path)
+    except BaseException:
+        os.unlink(tmp)
+        raise
 
 
 # ---- the API ----
@@ -76,11 +109,10 @@ def _token():
         return None
     path = _state("token")
     try:
-        with open(path) as f:
-            cached = json.load(f)
+        cached, _ = _read(path)
         if cached["expires_at"] > time.time() + 30:
             return cached["access_token"]
-    except (OSError, ValueError, KeyError):
+    except (OSError, ValueError, KeyError, TypeError):
         pass
     url = "{}/realms/{}/protocol/openid-connect/token".format(
         os.environ.get("METIS_KEYCLOAK_URL", "http://localhost:8080").rstrip("/"),
@@ -95,13 +127,14 @@ def _token():
     ).encode()
     with urllib.request.urlopen(url, body, timeout=HTTP_TIMEOUT) as resp:
         grant = json.load(resp)
-    _write(
-        path,
-        {
-            "access_token": grant["access_token"],
-            "expires_at": time.time() + int(grant.get("expires_in", 60)),
-        },
-    )
+    if path:
+        _write(
+            path,
+            {
+                "access_token": grant["access_token"],
+                "expires_at": time.time() + int(grant.get("expires_in", 60)),
+            },
+        )
     return grant["access_token"]
 
 
@@ -118,13 +151,14 @@ def _cached(name, path, trim):
     """One GET per CACHE_TTL. The stored copy is trimmed to what hooks read."""
     file = _state(name)
     try:
-        if time.time() - os.path.getmtime(file) < CACHE_TTL:
-            with open(file) as f:
-                return json.load(f)
-    except (OSError, ValueError):
+        value, mtime = _read(file)
+        if time.time() - mtime < CACHE_TTL:
+            return value
+    except (OSError, ValueError, TypeError):
         pass
     value = trim(_get(path))
-    _write(file, value)
+    if file:
+        _write(file, value)
     return value
 
 
@@ -302,14 +336,16 @@ def stop(event):
     session = re.sub(r"[^A-Za-z0-9_-]", "", str(event.get("session_id") or ""))
     if not session:
         return None
-    marker = os.path.join(_data_dir(), f"stop-reminded-{session}")
-    if os.path.exists(marker):
+    root = _data_dir()
+    if not root:
+        return None  # no safe place to remember it, so no promise of once
+    marker = os.path.join(root, f"stop-reminded-{session}")
+    if os.path.lexists(marker):
         return None
     product, root, _ = identify(event.get("cwd") or os.getcwd())
     if not product or not _changed_outside_seed(root):
         return None
-    with open(marker, "w"):
-        pass
+    _write(marker, {})
     return {
         "systemMessage": (
             f"metis: {product['name']} has code changes. Re-export its seed file with "

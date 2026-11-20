@@ -32,7 +32,7 @@ desktop.
 
 ## Install
 
-You need Claude Code 2.1.275 or later and `python3` (3.9 or later) on your PATH.
+Tested on Claude Code 2.1.329. You need `python3` (3.9 or later) on your PATH.
 The hooks use the standard library only.
 
 The metis repo is also a plugin marketplace (`.claude-plugin/marketplace.json`
@@ -62,11 +62,26 @@ rest of the stack from the metis checkout:
 docker compose --profile mcp up -d mcp
 ```
 
-Compose publishes it on `127.0.0.1:8001` only. Callers must send
-`Authorization: Bearer <token>`; a request without it gets a 401. Locally the
-token defaults to `dev-mcp-sse-token` on both sides, so nothing needs setting.
-Anywhere else, set `METIS_MCP_SSE_TOKEN` in metis's `.env` and the same value
-as `METIS_MCP_TOKEN` where Claude Code runs.
+The service needs a token, and there is no default: without one it refuses to
+start. Generate one into metis's `.env` once:
+
+```sh
+echo "METIS_MCP_SSE_TOKEN=$(openssl rand -hex 32)" >> .env
+```
+
+Then give Claude Code the same value as `METIS_MCP_TOKEN`, for example in your
+shell profile, or under `env` in `~/.claude/settings.json`:
+
+```sh
+export METIS_MCP_TOKEN=<the same value>
+```
+
+Compose publishes the service on `127.0.0.1:8001` only. Callers must send
+`Authorization: Bearer <token>`, and a request without it gets a 401. The
+server also answers only requests whose Host header is `localhost`,
+`127.0.0.1` or `mcp`, so a web page cannot reach it by rebinding its own DNS
+name to your machine. Without `METIS_MCP_TOKEN`, the plugin's MCP server shows
+as failed in `/mcp`; the hooks and skills' instructions still load.
 
 The hooks do not need the MCP service. They read the REST API directly.
 
@@ -78,7 +93,7 @@ Code settings.
 | Variable | Default | Used by | Meaning |
 |---|---|---|---|
 | `METIS_MCP_URL` | `http://localhost:8001/sse` | MCP | The SSE endpoint |
-| `METIS_MCP_TOKEN` | `dev-mcp-sse-token` | MCP | Must equal the server's `METIS_MCP_SSE_TOKEN` |
+| `METIS_MCP_TOKEN` | none, required | MCP | Must equal the server's `METIS_MCP_SSE_TOKEN` |
 | `METIS_API_URL` | `http://localhost:8000` | hooks | The metis REST API |
 | `METIS_API_TOKEN` | unset | hooks | A bearer token for the API, when auth is on |
 | `METIS_API_CLIENT_SECRET` | unset | hooks | Instead of a fixed token: a Keycloak client secret the hooks trade for a token, which they cache until it expires |
@@ -135,9 +150,15 @@ The Stop reminder looks at `git status`. It fires when anything other than a
 
 The product list and the capability inventory are cached for 10 minutes, so a
 prompt costs at most one API call. State lives in `${CLAUDE_PLUGIN_DATA}`, or in
-the system temp directory when that is unset. It holds the cache, the API
-token, and one marker file per session the Stop reminder has fired for. Every
-API call times out after 3 seconds, and any error means no output and exit 0.
+`~/.cache/metis-claude-plugin` (created `0700`) when that is unset. It holds the
+cache, the API token, and one marker file per session the Stop reminder has
+fired for. If that directory is a symlink, is not yours, or is group or world
+writable, the hooks cache nothing and the Stop reminder stays off. Files are
+written fresh and renamed into place, and never read through a symlink.
+
+Every API call times out after 3 seconds, and any error means no output and
+exit 0. Nothing remembers a failure, so if the API host hangs rather than
+refusing, each prompt waits up to that timeout.
 
 ## Files
 

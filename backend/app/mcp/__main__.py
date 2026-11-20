@@ -34,11 +34,10 @@ def main() -> None:
         import uvicorn
         from mcp.server.sse import SseServerTransport
         from starlette.applications import Starlette
-        from starlette.middleware import Middleware
         from starlette.routing import Mount, Route
 
         from app.config import get_settings
-        from app.mcp.auth import BearerGate
+        from app.mcp.auth import sse_middleware
 
         # stdio inherits the identity of whoever launched it. A listening
         # socket does not — and this process holds a service token, so an
@@ -65,7 +64,7 @@ def main() -> None:
                 Route("/sse", endpoint=handle_sse),
                 Mount("/messages/", app=transport.handle_post_message),
             ],
-            middleware=[Middleware(BearerGate, token=token)],
+            middleware=sse_middleware(token),
         )
         uvicorn.run(app, host=args.host, port=args.port)
     else:

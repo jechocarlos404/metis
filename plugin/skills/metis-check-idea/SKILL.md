@@ -18,9 +18,10 @@ write to metis from this skill.
 1. **Phrase the idea as features with capability names.** Break the idea into
    the user-facing features it needs, and for each, the capabilities it needs.
    Use metis's own names: first call `capability_inventory` (optionally with a
-   `q` substring, such as `auth` or `search`) and reuse the exact names it
-   prints whenever a capability means the same thing. Only invent a name when
-   nothing in the inventory fits.
+   `q` substring, such as `auth` or `search`) and reuse the exact slugs it
+   prints whenever a capability means the same thing. `check_idea` takes a
+   slug (`file-storage`) or the name (`File Storage`) alike. Only invent a
+   name when nothing in the inventory fits.
 
 2. **Call `check_idea`** with that breakdown:
 

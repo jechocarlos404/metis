@@ -13,8 +13,16 @@ is read-only bounds the damage without making it acceptable.
 
 import hmac
 
+from starlette.middleware import Middleware
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.responses import JSONResponse
+
+#: Host headers the SSE app answers: the loopback names an agent on this
+#: machine uses, and the compose service name. Anything else is refused, so a
+#: page that rebinds its own DNS name to 127.0.0.1 cannot reach the port from
+#: a browser.
+SSE_HOSTS = ["localhost", "127.0.0.1", "mcp"]
 
 
 class BearerGate(BaseHTTPMiddleware):
@@ -34,3 +42,11 @@ class BearerGate(BaseHTTPMiddleware):
                 headers={"WWW-Authenticate": "Bearer"},
             )
         return await call_next(request)
+
+
+def sse_middleware(token: str) -> list[Middleware]:
+    """Host check outermost, then the bearer gate."""
+    return [
+        Middleware(TrustedHostMiddleware, allowed_hosts=SSE_HOSTS),
+        Middleware(BearerGate, token=token),
+    ]

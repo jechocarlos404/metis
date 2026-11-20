@@ -151,9 +151,11 @@ The `mcp` service is built from the backend image and runs
 is `/sse`, and messages go to `/messages/`.
 
 Compose publishes port 8001 on `127.0.0.1` only, so agents on the same
-machine can reach it and nothing else can. Locally, `METIS_MCP_SSE_TOKEN`
-defaults to `dev-mcp-sse-token`, which is also the plugin's default. Set a real
-token before you bind the port to anything wider.
+machine can reach it and nothing else can. `METIS_MCP_SSE_TOKEN` has no
+default, and the service refuses to start without it. Generate one with
+`openssl rand -hex 32`. The server also refuses any Host header other than
+`localhost`, `127.0.0.1` and `mcp` (400), so a browser page cannot reach the
+port through DNS rebinding.
 
 The [plugin](../plugin/README.md) connects to it with no further setup. To add
 it to Claude Code by hand instead:

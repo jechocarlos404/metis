@@ -263,27 +263,49 @@ def test_slot_ids_must_be_uuids():
         _safe_id("../../admin")
 
 
+def _sse_client(host="localhost:8001"):
+    """The SSE app's middleware in front of a stub route."""
+    from httpx import ASGITransport, AsyncClient
+    from starlette.applications import Starlette
+    from starlette.responses import PlainTextResponse
+    from starlette.routing import Route
+
+    from app.mcp.auth import sse_middleware
+
+    app = Starlette(
+        routes=[Route("/sse", lambda r: PlainTextResponse("ok"))],
+        middleware=sse_middleware("s3cret"),
+    )
+    return AsyncClient(transport=ASGITransport(app=app), base_url=f"http://{host}")
+
+
 @pytest.mark.asyncio
 async def test_sse_requires_a_bearer_token():
     """stdio inherits the launcher's identity; a listening socket inherits
     nothing, and this process holds an API token."""
-    from starlette.applications import Starlette
-    from starlette.middleware import Middleware
-    from starlette.responses import PlainTextResponse
-    from starlette.routing import Route
-
-    from app.mcp.auth import BearerGate
-
-    app = Starlette(
-        routes=[Route("/sse", lambda r: PlainTextResponse("ok"))],
-        middleware=[Middleware(BearerGate, token="s3cret")],
-    )
-    from httpx import ASGITransport, AsyncClient
-
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+    async with _sse_client() as c:
         assert (await c.get("/sse")).status_code == 401
         assert (await c.get("/sse", headers={"Authorization": "Bearer wrong"})).status_code == 401
         assert (await c.get("/sse", headers={"Authorization": "Bearer s3cret"})).status_code == 200
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "host, status",
+    [
+        ("localhost:8001", 200),
+        ("127.0.0.1:8001", 200),
+        ("mcp:8001", 200),
+        ("evil.example", 400),
+        ("attacker.test:8001", 400),
+        ("localhost.evil.example", 400),
+    ],
+)
+async def test_sse_answers_only_loopback_and_compose_hosts(host, status):
+    """DNS rebinding: a page can point its own name at 127.0.0.1, but its
+    requests still carry its own Host header, so the token alone is not enough."""
+    async with _sse_client(host) as c:
+        assert (await c.get("/sse", headers={"Authorization": "Bearer s3cret"})).status_code == status
 
 
 def test_proposal_says_it_applied_nothing():

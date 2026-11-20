@@ -1,5 +1,6 @@
 import React from "react";
-import { slugify } from "../../lib/words.js";
+import { BADGE_TONES } from "../../ds/feedback/Badge.jsx";
+import { NEED, slugify } from "../../lib/words.js";
 
 /**
  * Pick capabilities by exact name — recognition, not recall, and never a fuzzy
@@ -7,7 +8,9 @@ import { slugify } from "../../lib/words.js";
  * the highlighted existing name. With allowNew, Enter on text that matches
  * nothing, or only once accents are ignored, adds it verbatim as a name nobody has yet (it will read "not built yet").
  *
- *   options:  [{ id, name, slug, hint? }]   the inventory to pick from
+ *   options:  [{ id, name, slug, hint?, need? }]   the inventory to pick from;
+ *             need (a NEED key) tones a picked chip the way the verdict below
+ *             says it, and a name no option has reads NEED.none, "not built yet"
  *   value:    [name, …]                     picked names, in order
  *   onChange: (names) => void
  */
@@ -40,7 +43,7 @@ export function CapabilityPicker({ id = "capability-picker", options, value, onC
     setActive(null);
   };
   const remove = (name) => onChange(value.filter((v) => v !== name));
-  const known = new Set(options.map((o) => slugify(o.name)));
+  const bySlug = new Map(options.map((o) => [slugify(o.name), o]));
 
   const onKeyDown = (e) => {
     if (e.key === "ArrowDown") { e.preventDefault(); setActive(Math.min(current + 1, Math.max(matches.length - 1, 0))); setOpen(true); }
@@ -63,10 +66,13 @@ export function CapabilityPicker({ id = "capability-picker", options, value, onC
       <label htmlFor={id} style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)" }}>{label}</label>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center", border: "1px solid var(--border-control)", borderRadius: "var(--radius-md)", padding: "6px 8px", background: "var(--surface-card)" }}>
         {value.map((name) => {
-          const isKnown = known.has(slugify(name));
+          const option = bySlug.get(slugify(name));
+          // Options without a NEED key (a feature's "Built on") keep the accent.
+          const need = option ? option.need && NEED[option.need] : NEED.none;
+          const tone = BADGE_TONES[need ? need.tone : "accent"];
           return (
-            <span key={name} title={isKnown ? undefined : "No product in metis has a capability by this exact name"}
-              style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: "var(--text-xs)", padding: "2px 4px 2px 9px", borderRadius: "var(--radius-pill)", background: isKnown ? "var(--accent-wash)" : "var(--danger-bg)", color: isKnown ? "var(--text-accent)" : "var(--danger-fg)" }}>
+            <span key={name} title={need ? `${need.label}: ${need.hint}` : undefined}
+              style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: "var(--text-xs)", padding: "2px 4px 2px 9px", borderRadius: "var(--radius-pill)", background: tone.bg, color: tone.fg }}>
               {name}
               <button type="button" aria-label={`Remove ${name}`} onClick={() => remove(name)}
                 style={{ border: "none", background: "transparent", color: "inherit", cursor: "pointer", padding: "0 4px", font: "inherit" }}>×</button>

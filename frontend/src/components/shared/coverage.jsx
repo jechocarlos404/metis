@@ -2,7 +2,7 @@ import React from "react";
 import { Badge } from "../../ds";
 import {
   CLOSEST_TITLE, GAP_HINT, MATURITY, NEED, VERDICT, closestGroups, closestNote, count, coverageHeadline, gapNote, gapsTitle,
-  incompleteNote, needKey, scoreGroups, scoreHeadline,
+  incompleteNote, needKey, scoreGroups, scoreHeadline, verdictOf,
 } from "../../lib/words.js";
 import { Term } from "./Term.jsx";
 
@@ -38,14 +38,16 @@ export function ProductScore({ score }) {
       </div>
       {groups.map((g) => (
         <details key={g.key} open={g.names.length <= 8}>
-          <summary style={{ cursor: "pointer", color: "var(--text-heading)", display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-            <span style={{ fontFamily: "var(--font-mono)" }}>{g.names.length}</span>
-            <VerdictBadge kind={g.key} />
+          {/* A plain (list-item) summary keeps the open/close marker; the
+              caveat on "missing" sits in it, so a closed row still says it. */}
+          <summary style={{ cursor: "pointer", color: "var(--text-heading)", lineHeight: 1.8 }}>
+            <span style={{ fontFamily: "var(--font-mono)", marginRight: 4 }}>{g.names.length}</span>{" "}
+            <span style={{ marginRight: 4 }}><VerdictBadge kind={g.key} /></span>{" "}
             <span style={{ color: "var(--text-secondary)" }}>{VERDICT[g.key].hint}</span>
+            {g.key === "missing" && incompleteNote(score) && (
+              <span style={{ display: "block", color: "var(--text-secondary)", lineHeight: "var(--leading-snug)" }}>{incompleteNote(score)}</span>
+            )}
           </summary>
-          {g.key === "missing" && incompleteNote(score) && (
-            <div style={{ margin: "6px 0 0", color: "var(--text-secondary)" }}>{incompleteNote(score)}</div>
-          )}
           <ul style={{ margin: "6px 0 0", paddingLeft: 18, columns: g.names.length > 6 ? 2 : 1, columnGap: 24, color: "var(--text-body)" }}>
             {g.names.map((n) => <li key={n} style={{ breakInside: "avoid" }}>{n}</li>)}
           </ul>
@@ -128,7 +130,7 @@ export function CoverageReport({ report, onCandidate, scored, verdicts = false }
           <div style={{ display: "flex", gap: 8, alignItems: "baseline" }}>
             <span style={{ fontSize: "var(--text-sm)", fontWeight: "var(--weight-medium)", color: "var(--text-heading)" }}>{f.name}</span>
             {verdicts && (() => {
-              const v = VERDICT[f.existing === f.total ? "buildable" : "missing"];
+              const v = verdictOf(f.existing === f.total ? "buildable" : "missing", f.capabilities.map((n) => n.match));
               return <span title={v.hint}><Badge tone={v.tone}>{v.label}</Badge></span>;
             })()}
             <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>{f.existing} of {f.total} ours</span>

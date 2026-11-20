@@ -135,6 +135,16 @@ export function lackingKey(matches) {
   return keys.size === 1 ? [...keys][0] : null;
 }
 
+/** The VERDICT entry for a feature or step of VERDICT key `kind`, given its
+ *  needs' matches. A missing one whose every lacking capability is known only
+ *  elsewhere says so, "missing · only elsewhere", on Home and on the idea alike. */
+export function verdictOf(kind, matches) {
+  const v = VERDICT[kind];
+  return kind === "missing" && lackingKey(matches) === "elsewhere"
+    ? { ...v, label: `${v.label} · ${NEED.elsewhere.label}`, hint: NEED.elsewhere.hint, elsewhere: true }
+    : v;
+}
+
 /** "A", "A and B", "A, B and C". */
 export const andList = (names) =>
   names.length <= 1 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;

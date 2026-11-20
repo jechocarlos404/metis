@@ -24,7 +24,9 @@ Errors come back with `isError` set, as one plain sentence and the same
 make the change. An argument that can't be what it claims is refused before any
 request, saying what to pass and which tool lists valid ones. A setup problem
 says which service it can't reach or sign in to (the metis API or Keycloak) and
-the setting that points at it. A subject that doesn't exist under an exact name
+the setting that points at it, and so does a base URL that answers but isn't
+the metis API. An unknown tool, arguments a tool's schema refuses, and a
+resource that can't be read come back the same way. A subject that doesn't exist under an exact name
 is an answer, not an error: `0 features are named '…'`, with the near matches
 listed when a name is shared.
 
@@ -40,12 +42,12 @@ The inventory tools answer the portfolio questions:
 |---|---|---|
 | `products` | Every product, ours and external, with slug and id. Start here so you never guess an id. | `GET /api/products` |
 | `capability_inventory` | What we can already do, most reused first: each capability's slug and exact name (a seed file reuses a capability by its name), its maturity when ours, and our products and features working on it at any status. Takes an optional `q` substring filter, applied in the server, and a `limit`. | `GET /api/capabilities/inventory` |
-| `check_idea` | How much of an idea we already have. Each need comes back `ours`, `external only` (not ours; an external product has it), `not built yet` (named, but no finished feature realizes it), or `no match` with near names listed as unconfirmed candidates. A capability is ours when a finished (`done`) feature of one of our products realizes it. Takes an optional `idea` name. Its `Open:` line pre-fills Home's idea check (`/home?idea=<name>&caps=<slug>,<slug>,...`: matched needs by slug, the rest as typed) and runs it, so the owner can save it as an idea with one click. The tool itself saves nothing. | `POST /api/capabilities/coverage` (a read) |
+| `check_idea` | How much of an idea we already have. Each need comes back `ours`, `only elsewhere` (not ours; an external product has it), `not built yet` (named, but no finished feature realizes it), or `no match` with near names listed as unconfirmed candidates. A capability is ours when a finished (`done`) feature of one of our products realizes it. Takes an optional `idea` name. Its `Open:` line pre-fills Home's idea check (`/home?idea=<name>&caps=<slug>,<slug>,...`: matched needs by slug, the rest as typed) and runs it, so the owner can save it as an idea with one click. The tool itself saves nothing. | `POST /api/capabilities/coverage` (a read) |
 | `product_score` | How much of an external product, by id or slug, we could build: buildable, partly known, not described, missing a capability. It is a lower bound. Our own products are not scored, as on the desktop: their own features are what make their capabilities ours, so the score would measure itself. | `GET /api/products/{id}/coverage` |
 | `capability` | One capability by slug or name: our features and products, external products listed apart, the goals that motivate it directly, its rollup, and the evidence paths an export recorded. | inventory, then `GET /api/capabilities/{id}/scope`, `/motivations`, `/rollup` |
 | `feature_why` | Why a feature exists, by id or exact name: its capabilities, their parents, and the goals that motivate them. The goals of the feature's own product come first (a goal is its own when it sits under the same top goal as the product's goal, as on the desktop); goals of other products, reached through a shared capability, are listed apart with their products. Each goal says which capability it motivates or which goal it is the parent of. | `GET /api/features/{id}/why`, plus `/api/features/{id}`, `/api/goals`, `/api/motivations`, `/api/products` |
 | `journeys` | Lists journeys. Given a journey id or exact name, it returns each step's verdict (`buildable`, `known_covered`, `missing`, `unknown`) and whether a user can do the step today. | `GET /api/journeys`, `GET /api/journeys/{id}/analysis` |
-| `ready_features` | Our pending features whose dependencies are all done. Optionally limited to one product. When nothing is ready it says whether anything is pending at all and points to `check_idea`. | `GET /api/graph/ready`, and `GET /api/features` when nothing is ready |
+| `ready_features` | Our pending features whose dependencies are all done. Optionally limited to one of our products; an external one is declined, since its features are never our work. When nothing is ready it says whether anything is pending at all and points to `check_idea`. | `GET /api/graph/ready`, and `GET /api/features` when nothing is ready |
 | `recheck` | If a feature changes, what else to recheck. Takes a feature id or its exact name (a name several features share is listed, not picked). Breaks: features that depend on it, through links of links. Retest (same product): features sharing a confirmed capability, rarest shared capability first. Broad (many features): capabilities used by more than half of the product (and at least 6 features), counted rather than listed. Same capability elsewhere (info only): our other products with the same capabilities; metis does not know whether they share code. Guesses are never counted. | `GET /api/graph/recheck/{id}` |
 
 The technology and buy tools, which stay hidden on the desktop until there is
@@ -54,7 +56,7 @@ data for them:
 | Tool | What it answers |
 |---|---|
 | `tech_search` | Searches the technology catalog. It returns the slugs the other technology tools take. |
-| `capability_supply` | What can answer a capability, with fit, stance and ops cost, plus our features that realize it; external products' features are listed apart and never counted as ours. |
+| `capability_supply` | What can answer a capability, with fit, stance and ops cost, plus our features that realize it at any status (the done ones are counted); external products' features are listed apart and never counted as ours. Finds a capability as `capability` does, so an unknown one comes back with its near names. |
 | `tech_blast_radius` | Which products use a technology: in a stack slot, `required` or `optional`; `off_stack` when the product's stack never declared it; "uses it" when the product has no stack. |
 | `tech_exposure` | What is dying and whether it matters: expiring release lines, stances being abandoned, a bus factor of one. |
 | `stack_redundancy` | Capabilities a product answers more than once. They are reported, never resolved. |

@@ -19,6 +19,7 @@ import json
 import re
 import uuid
 
+import jsonschema
 from mcp.server import Server
 from mcp.types import (
     CallToolResult,
@@ -215,7 +216,7 @@ TOOLS = [
         description=(
             "How much of a product idea we already have. Give features, each "
             "with the capability names it needs. Each need comes back ours, "
-            "external only, not built yet (no finished feature realizes it), or "
+            "only elsewhere, not built yet (no finished feature realizes it), or "
             "no match with near names as candidates. Exact "
             "names only: a candidate is never counted as a match. Ends with an "
             "Open: link that pre-fills Home's idea check; it saves nothing."
@@ -370,12 +371,29 @@ _SCREENS = {
 }
 
 
-@server.call_tool()
+_TOOLS_BY_NAME = {tool.name: tool for tool in TOOLS}
+
+
+def _check_arguments(name: str, arguments: dict) -> None:
+    """The SDK's own check, made here so its refusal ends with an Open: line
+    like every other: an unknown tool, or arguments its schema refuses."""
+    tool = _TOOLS_BY_NAME.get(name)
+    if tool is None:
+        raise BadInput(f"No tool named {name!r}. The tools are: {', '.join(_TOOLS_BY_NAME)}.")
+    try:
+        jsonschema.validate(instance=arguments, schema=tool.inputSchema)
+    except jsonschema.ValidationError as exc:
+        where = ".".join(str(part) for part in exc.absolute_path)
+        raise BadInput(f"Arguments refused{f' at {where}' if where else ''}: {exc.message}.") from None
+
+
+@server.call_tool(validate_input=False)
 async def call_tool(name: str, arguments: dict) -> list[TextContent] | CallToolResult:
     """An answer, or an error the agent can act on: isError set, one plain
     sentence, and the Open: line every answer ends with."""
     href = _SCREENS.get(name, "/home")
     try:
+        _check_arguments(name, arguments or {})
         return _text(await _dispatch(name, arguments or {}))
     except ApiError as exc:
         hint = None
@@ -407,18 +425,22 @@ async def _dispatch(name: str, args: dict) -> str:
         return render.tech_search(page, args.get("q"))
 
     if name == "capability_supply":
-        # A name matches by its slug, as in check_idea and capability.
-        slug = _capability_slug(args["capability"])
+        # Found the way `capability` finds it, so an unknown one is the same
+        # answer with the same near names, not a refusal.
+        entry, slug = await _find_capability(args["capability"])
+        if entry is None:
+            return await _no_capability(args["capability"], slug)
         envelope = await client.get(
-            f"/api/capabilities/{slug}/supply",
+            f"/api/capabilities/{_safe_slug(entry['slug'])}/supply",
             {"include_unadopted": str(args.get("include_unadopted", True)).lower()},
         )
         stop = _hard_stop(envelope)
         return stop or render.capability_supply(envelope)
 
     if name == "tech_blast_radius":
-        return render.tech_blast_radius(
-            await client.get(f"/api/tech/{_safe_slug(args['tech'], 'tech')}/blast-radius")
+        tech = _safe_slug(args["tech"], "tech")
+        return await _or_absent(
+            render.tech_blast_radius, f"/api/tech/{tech}/blast-radius", render.no_tech(tech)
         )
 
     if name == "tech_exposure":
@@ -440,8 +462,9 @@ async def _dispatch(name: str, args: dict) -> str:
         )
 
     if name == "tech_encounters":
-        return render.tech_encounters(
-            await client.get(f"/api/tech/{_safe_slug(args['tech'], 'tech')}/encounters")
+        tech = _safe_slug(args["tech"], "tech")
+        return await _or_absent(
+            render.tech_encounters, f"/api/tech/{tech}/encounters", render.no_tech(tech)
         )
 
     if name == "stack_recommend":
@@ -526,6 +549,8 @@ async def _dispatch(name: str, args: dict) -> str:
             only = _match_product(products, args["product"])
             if only is None:
                 return render.no_product(args["product"])
+            if only["external"]:
+                return render.external_product_work(only)
         ready = (await client.get("/api/graph/ready"))["ready"]
         pending = None
         if not any(only is None or r["product_id"] == only["id"] for r in ready):
@@ -572,24 +597,45 @@ async def _recheck(value: str) -> str:
     return render.recheck(await client.get(f"/api/graph/recheck/{feature_id}"), products)
 
 
-async def _capability(value: str) -> str:
+async def _find_capability(value: str) -> tuple[dict | None, str]:
     """By slug, or by a name matched through its slug — the coverage rule, so
-    this finds what check_idea finds, and a renamed capability by its new name.
-    Capability routes take an id; the inventory resolves one to the other and
-    already carries who uses it, so it is read once."""
+    this finds what check_idea finds, and a renamed capability by its new name."""
     slug = _capability_slug(value)
     entries = await client.get("/api/capabilities/inventory")
     entry = next((e for e in entries if e["slug"] == slug), None) or next(
         (e for e in entries if slugify(e["name"]) == slug), None
     )
+    return entry, slug
+
+
+async def _no_capability(value: str, slug: str) -> str:
+    """The coverage endpoint's own near-name search, so the candidates are the
+    same ones a human would see — and they stay candidates."""
+    report = await client.post(
+        "/api/capabilities/coverage",
+        {"features": [{"name": value, "capabilities": [value]}]},
+    )
+    return render.no_capability(slug, report["features"][0]["capabilities"][0]["candidates"])
+
+
+async def _or_absent(render_fn, path: str, absent: str) -> str:
+    """A subject that doesn't exist under an exact name is an answer, not an
+    error. Only the subject's own 404 reads that way; any other refusal is
+    still one."""
+    try:
+        return render_fn(await client.get(path))
+    except ApiError as exc:
+        if exc.status == 404:
+            return absent
+        raise
+
+
+async def _capability(value: str) -> str:
+    """Capability routes take an id; the inventory resolves one to the other
+    and already carries who uses it, so it is read once."""
+    entry, slug = await _find_capability(value)
     if entry is None:
-        # The coverage endpoint's own near-name search, so the candidates are
-        # the same ones a human would see — and they stay candidates.
-        report = await client.post(
-            "/api/capabilities/coverage",
-            {"features": [{"name": value, "capabilities": [value]}]},
-        )
-        return render.no_capability(slug, report["features"][0]["capabilities"][0]["candidates"])
+        return await _no_capability(value, slug)
     cid = _safe_id(entry["id"])
     return render.capability(
         entry,
@@ -626,7 +672,12 @@ async def _propose(args: dict) -> str:
     human a click to find out the agent was wrong."""
     slot, tech = _safe_id(args["slot"], "slot"), _safe_slug(args["tech"], "tech")
     href = f"/stacks?slot={slot}&propose={tech}"
-    offers = await client.get(f"/api/stacks/slots/{slot}/offers")
+    try:
+        offers = await client.get(f"/api/stacks/slots/{slot}/offers")
+    except ApiError as exc:
+        if exc.status == 404:
+            return render.no_slot(slot)
+        raise
     slugs = [o["slug"] for o in offers["offers"]]
     if tech not in slugs:
         blocked_by = offers.get("blocked_by") or []
@@ -761,7 +812,19 @@ def _capability_slug(value: str) -> str:
 
 @server.read_resource()
 async def read_resource(uri: AnyUrl) -> str:
+    """A resource or an error in the tools' shape: one plain sentence and the
+    Open: line, never a raw exception. The SDK sends the message as is."""
     raw = str(uri)
+    href = "/stacks" if raw.startswith("metis://stacks/") else "/tech" if raw.startswith("metis://tech/") else "/home"
+    try:
+        return await _read_resource(raw)
+    except ApiError as exc:
+        raise ValueError(render.api_error(exc.status, exc.body, href)) from None
+    except (BadInput, SetupError) as exc:
+        raise ValueError(render.error(str(exc), href)) from None
+
+
+async def _read_resource(raw: str) -> str:
     if raw == "metis://ontology/model":
         return await client.text("/api/ontology/model")
     if raw == "metis://policy/adoptions":
@@ -773,13 +836,14 @@ async def read_resource(uri: AnyUrl) -> str:
         product = _safe_slug(raw.removeprefix("metis://stacks/"))
         found = await _product(product)
         if found is None:
-            raise ValueError(f"No product {product!r} in metis. Open: /products")
+            raise BadInput(f"No product {product!r} in metis. The products tool lists their slugs.")
         stacks = await client.get("/api/stacks", {"product_id": found["id"]})
         views = [await client.get(f"/api/stacks/{stack['id']}") for stack in stacks]
         return json.dumps(
             {"product": product, "stacks": views}, indent=2, default=str
         )
-    raise ValueError(f"Unknown resource: {uri}")
+    known = [str(r.uri) for r in RESOURCES] + [t.uriTemplate for t in RESOURCE_TEMPLATES]
+    raise BadInput(f"No resource {raw!r}. The resources are: {', '.join(known)}.")
 
 
 # ---- prompts ----

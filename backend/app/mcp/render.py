@@ -251,6 +251,7 @@ def tech_search(page: dict, query: str | None, catalog: int | None = None) -> st
             f"None of the {catalog} recorded technolog(ies) match. That is an answer: "
             "it isn't recorded."
         )
+    lines.append("")
     return _end(lines, f"/tech{f'?q={query}' if query else ''}")
 
 

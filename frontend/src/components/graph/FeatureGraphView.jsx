@@ -1,7 +1,7 @@
 import React from "react";
 import { Icon, IconButton } from "../../ds";
 import { createForceGraph } from "./forceGraphEngine.js";
-import { buildFeatureGraph, buildHubGraph, buildAdjacency, edgeStyle, nodeAccentVar, wrapLabel, NODE_W, NODE_H, HUB_W, HUB_H } from "./graph-data.js";
+import { buildFeatureGraph, buildHubGraph, buildAdjacency, edgeStyle, nodeAccentVar, wrapLabel, NODE_W, NODE_H, HUB_W, HUB_H, LABEL_PX } from "./graph-data.js";
 import { EDGE, LAYER, count, statusLabel } from "../../lib/words.js";
 import { Term } from "../shared/Term.jsx";
 
@@ -60,8 +60,8 @@ export function FeatureGraphView({ layout, hubs, selectedId, onSelect, recheckSt
   // change would throw away simulation state (positions/velocities) and
   // defeat the entire point of smooth transitions between data updates.
   useIsomorphicLayoutEffect(() => {
-    // A narrow graph starts with the key folded; an open key is framed around, never drawn over.
-    if (svgRef.current.clientWidth < 560) legendRef.current.open = false;
+    // The key starts folded, so the drawing opens from the canvas's left edge;
+    // an open key is framed around, never drawn over.
     const engine = createForceGraph({
       fitInsetLeft: () => (legendRef.current?.open ? legendRef.current.offsetLeft + legendRef.current.offsetWidth : 0),
       svgEl: svgRef.current,
@@ -107,8 +107,8 @@ export function FeatureGraphView({ layout, hubs, selectedId, onSelect, recheckSt
     engineRef.current?.update(graphData.nodes, graphData.edges);
     if (!hasFitRef.current && graphData.nodes.length) {
       hasFitRef.current = true;
-      engineRef.current?.fitToView(0);
-      engineRef.current?.fitWhenSettled(); // the first fit sees unspread nodes
+      engineRef.current?.openView(selectedId, 0);
+      engineRef.current?.openWhenSettled(selectedId); // the first frame sees unspread nodes
     }
   }, [graphData]);
 
@@ -117,8 +117,13 @@ export function FeatureGraphView({ layout, hubs, selectedId, onSelect, recheckSt
   useIsomorphicLayoutEffect(() => {
     if (lastFitKey.current === fitKey) return;
     lastFitKey.current = fitKey;
-    engineRef.current?.fitWhenSettled();
+    engineRef.current?.openWhenSettled(selectedId);
   }, [fitKey]);
+
+  // A feature picked outside the canvas is brought into view.
+  useIsomorphicLayoutEffect(() => {
+    if (selectedId != null) engineRef.current?.reveal(selectedId);
+  }, [selectedId]);
 
   // With a cut overlay active, tier coloring owns the canvas — selection no
   // longer dims non-neighbors (hover still focuses transiently). Same when
@@ -129,6 +134,9 @@ export function FeatureGraphView({ layout, hubs, selectedId, onSelect, recheckSt
   // fading everything around a loner just makes the graph hard to read.
   const focusId = wantFocus != null && adjacency.get(wantFocus)?.size ? wantFocus : null;
   const focusNeighbors = focusId ? adjacency.get(focusId) : null;
+  // Zoomed out, names are hidden on the cards; the caption names this one.
+  const nameId = hoveredId ?? selectedId;
+  const named = nameId != null ? graphData.nodes.find((n) => n.id === nameId) : null;
 
   const edgeRef = (id) => (el) => {
     if (!el) return;
@@ -232,12 +240,7 @@ export function FeatureGraphView({ layout, hubs, selectedId, onSelect, recheckSt
       />
       <GraphLegend legendRef={legendRef} cutActive={cutStates != null} recheckActive={recheckStates != null} hubs={hubs} graphData={graphData} />
 
-      <div style={{
-        position: "absolute", bottom: 10, left: 12, pointerEvents: "none",
-        fontFamily: "var(--font-mono)", fontSize: "var(--text-2xs)", color: "var(--text-secondary)",
-      }}>
-        drag to move · double-click to release · scroll to zoom
-      </div>
+      <GraphCaption name={named?.name} />
 
       {graphData.nodes.length === 0 && (
         <div style={{
@@ -276,6 +279,8 @@ function FeatureNode({ node, isSelected, isTabStop, isHovered, isDimmed, isFaded
       aria-pressed={isSelected}
       onMouseEnter={() => onHoverChange(node.id)}
       onMouseLeave={() => onHoverChange(null)}
+      onFocus={() => onHoverChange(node.id)}
+      onBlur={() => onHoverChange(null)}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
@@ -344,9 +349,30 @@ export function CardLabel({ name, x, fill = "var(--text-heading)", anchor }) {
   const lineH = 14;
   return (
     <text x={x} y={-((lines.length - 1) * lineH) / 2} dominantBaseline="central" fill={fill} textAnchor={anchor}
-      style={{ fontFamily: "var(--font-body)", fontSize: 11.5, fontWeight: 500, pointerEvents: "none" }}>
+      style={{ fontFamily: "var(--font-body)", fontSize: LABEL_PX, fontWeight: 500, pointerEvents: "none" }}>
       {lines.map((l, i) => <tspan key={i} x={x} dy={i === 0 ? 0 : lineH}>{l}</tspan>)}
     </text>
+  );
+}
+
+// Zoomed out (.graph-far) the cards drop their names, so the card pointed at,
+// focused or selected is named here, at text size, in place of the line on
+// how to move things (shown only on a wide screen with a mouse). base.css
+// switches between them; render after the <svg>.
+export function GraphCaption({ name }) {
+  const chip = {
+    position: "absolute", bottom: 10, left: 10, maxWidth: "calc(100% - 20px)", pointerEvents: "none",
+    background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-sm)",
+    boxShadow: "var(--shadow-card)", padding: "4px 10px",
+  };
+  return (
+    <>
+      {/* One line: a phone's Group by bar sits just above it. */}
+      {name && <div className="graph-caption" style={{ ...chip, fontSize: "var(--text-sm)", color: "var(--text-heading)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{name}</div>}
+      <div className="graph-hint" style={{ ...chip, fontFamily: "var(--font-mono)", fontSize: "var(--text-2xs)", color: "var(--text-secondary)" }}>
+        drag to move · double-click to release · scroll to zoom
+      </div>
+    </>
   );
 }
 
@@ -389,7 +415,7 @@ function GraphLegend({ legendRef, cutActive, recheckActive, hubs, graphData }) {
   const shown = new Set(graphData.nodes.map((n) => n.layer));
   const layers = Object.keys(LAYER).filter((l) => shown.has(l));
   return (
-    <details ref={legendRef} open style={{
+    <details ref={legendRef} style={{
       position: "absolute", top: 10, left: 10,
       background: "var(--surface-card)", border: "1px solid var(--border-hairline)",
       borderRadius: "var(--radius-sm)", boxShadow: "var(--shadow-card)", padding: "6px 10px",

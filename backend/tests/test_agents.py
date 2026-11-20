@@ -664,7 +664,7 @@ async def test_existing_product_coverage_says_what_the_product_page_says(db):
         "- Plan offline (we don't have: Route Planning, Heatmaps)",
         "1 not described — nobody has named the capabilities it needs yet.",
         "2 capabilities we don't have, most useful first:",
-        "1. Route Planning · needed by 2 features; adding it covers everything named for 1 of them · in no other product",
+        "1. Route Planning · needed by 2 features · the only gap in 1 of them · in no other product",
         "2. Heatmaps · needed by 1 feature · in no other product",
         "- Atlas has 2 of the 4 capabilities Rival's features name",
     ]:
@@ -696,6 +696,27 @@ def test_chat_verdict_words_are_the_product_pages():
     for prompt in AGENT_PROMPTS.values():
         assert "ga -> stable" in prompt and "Never put tool names" in prompt
     assert "never the tool name" in PROPOSALS_NOTE and "no tool names" in SYNTHESIS_PROMPT
+
+
+def test_chat_prompts_say_the_pages_gap_words_and_leave_status_to_the_card():
+    """A29: a gap reads as the page reads it (words.js gapNote), and no prompt
+    asks a reply to say a change is waiting: the stored reply never changes,
+    so that sentence goes stale the moment someone decides. The card says it."""
+    import pathlib
+
+    from app.agents.prompts import AGENT_PROMPTS, PROPOSALS_NOTE, SYNTHESIS_PROMPT
+
+    words = pathlib.Path(__file__).resolve().parents[2] / "frontend/src/lib/words.js"
+    if not words.exists():
+        pytest.skip("frontend not checked out")
+    assert "`the only gap in ${gap.only_gap} of them`" in words.read_text()
+    for prompt in AGENT_PROMPTS.values():
+        assert '"the only gap in N of them"' in prompt
+        assert "covers everything named" not in prompt
+    for note in (PROPOSALS_NOTE, SYNTHESIS_PROMPT):
+        assert "awaiting approval" not in note and "are waiting for the user's approval" not in note
+        assert "don't say whether it is waiting, approved or rejected" in note
+        assert "never say" in note.lower()  # still never claims a proposal was applied
 
 
 async def test_list_goals_says_which_goal_each_sits_under(db):

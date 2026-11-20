@@ -6,7 +6,9 @@ P.goal_id and climb to the highest ancestor whose subtree no other product
 points into, then take that whole subtree, except any subtree rooted at
 another product's goal (that one is the other product's). A goal can belong
 to no product: an org goal two products point into, or a goal two products
-both point at. A product with no goal owns nothing, ours or someone else's.
+both point at. A product with no goal owns nothing. Someone else's product
+(external) owns no goal even when it points at one: goals say why *our*
+products exist, so pointing Strava at a goal never takes it from ours.
 
 Per goal that comes to: the nearest goal at or above it that a product
 points at decides; with none above it, the lowest ancestor whose subtree a
@@ -80,5 +82,7 @@ def goal_owners(
 async def owners(session: AsyncSession) -> dict[uuid.UUID, uuid.UUID]:
     """goal_owners over every goal and product in the database."""
     parents = dict((await session.execute(select(Goal.id, Goal.parent_goal_id))).all())
-    product_goals = list((await session.execute(select(Product.id, Product.goal_id))).all())
+    product_goals = list((await session.execute(
+        select(Product.id, Product.goal_id).where(Product.external.is_(False))
+    )).all())
     return goal_owners(parents, [tuple(row) for row in product_goals])

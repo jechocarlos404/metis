@@ -37,8 +37,10 @@ export function ProductGoals({ product, goals, features, capabilities, motivatio
         </div>
       ) : (
         <div style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>
-          No goals for this product yet.
-          {canWrite && <> Add one on <a href="/goals">Goals</a>, then choose it under Edit.</>}
+          {product.external ? "Someone else's product: metis doesn't record its goals." : <>
+            No goals for this product yet.
+            {canWrite && <> Add one on <a href="/goals">Goals</a>, then choose it under Edit.</>}
+          </>}
         </div>
       )}
       <GoalsBehindCapabilities own={own} goals={goals} features={features} capabilities={capabilities} motivations={motivations} />

@@ -94,8 +94,9 @@ def test_a_product_with_no_goal_owns_nothing():
     assert owners == {}
 
 
-def test_an_external_product_owns_only_through_its_own_goal():
-    """External or ours, the rule is the same: no goal_id, no goals."""
+def test_a_product_owns_only_through_its_own_goal():
+    """The pure rule: no goal_id, no goals. (owners() leaves external
+    products out before it runs; see the API test.)"""
     owners = owners_by_name(
         {"OG-ours": None, "PG-ours": "OG-ours", "OG-theirs": None},
         {"Ours": "OG-ours", "Strava": None, "Rival": "OG-theirs"},
@@ -151,7 +152,8 @@ async def test_the_goals_api_says_whose_each_goal_is(client):
         s.add_all([ship, verify])
         await s.flush()
         steps = Product(name="Steps", slug="steps", goal_id=ship.id)
-        strava = Product(name="Strava", slug="strava", external=True)
+        # Someone else's product pointing at our org goal takes nothing from Steps (A31).
+        strava = Product(name="Strava", slug="strava", external=True, goal_id=org.id)
         s.add_all([steps, strava])
         await s.commit()
         ids = {g.title: str(g.id) for g in (org, lone, ship, verify)}

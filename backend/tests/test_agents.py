@@ -732,12 +732,17 @@ async def test_list_goals_says_which_goal_each_sits_under(db):
         session.add_all([hanko, other])
         await session.flush()
         session.add(Goal(goal_type=GoalType.product, title="Cafe owners", parent_goal_id=hanko.id))
+        session.add_all([Product(name="Hanko app", slug="hanko-app", goal_id=hanko.id),
+                         Product(name="Strava", slug="strava", external=True, goal_id=other.id)])
         await session.commit()
         rows = json.loads((await list_goals(ToolContext(session=session))).result)
 
     by_title = {r["title"]: r for r in rows}
     assert by_title["Cafe owners"]["parent"] == by_title["Hanko"]["display_id"]
     assert by_title["Hanko"]["parent"] is None and by_title["Other"]["parent"] is None
+    # Which product each goal is for, as the goal cards say; someone else's product owns none (A32, A31).
+    assert by_title["Cafe owners"]["product"] == "Hanko app" == by_title["Hanko"]["product"]
+    assert by_title["Other"]["product"] is None
 
 
 async def test_a_name_resolves_exactly_before_by_substring(db):

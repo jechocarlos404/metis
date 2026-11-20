@@ -151,7 +151,8 @@ export default function ProductsIsland({ canWrite = true }) {
       const body = {
         name: d.name.trim(),
         summary: d.summary.trim() || null,
-        goal_id: d.goalId || null,
+        // Goals say why our products exist; someone else's product has none here (A31).
+        goal_id: d.external ? null : (d.goalId || null),
         external: d.external,
       };
       if (d.mode === "new") {
@@ -437,9 +438,11 @@ export default function ProductsIsland({ canWrite = true }) {
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             <Input label="Name" value={productDialog.name} onChange={(e) => setProductDialog({ ...productDialog, name: e.target.value })} placeholder="PM tracker export" />
             <Input label="Summary" value={productDialog.summary} onChange={(e) => setProductDialog({ ...productDialog, summary: e.target.value })} />
-            <Select label="Goal" value={productDialog.goalId} onChange={(e) => setProductDialog({ ...productDialog, goalId: e.target.value })}
-              options={[{ value: "", label: "None" },
-                ...goals.map((g) => ({ value: g.id, label: `${g.display_id} ${g.title}` }))]} />
+            {!productDialog.external && (
+              <Select label="Goal" value={productDialog.goalId} onChange={(e) => setProductDialog({ ...productDialog, goalId: e.target.value })}
+                options={[{ value: "", label: "None" },
+                  ...goals.map((g) => ({ value: g.id, label: `${g.display_id} ${g.title}` }))]} />
+            )}
             <Checkbox label="External: someone else's product, known from the outside. Its features never count as ours."
               checked={productDialog.external} onChange={(on) => setProductDialog({ ...productDialog, external: on })} />
           </div>

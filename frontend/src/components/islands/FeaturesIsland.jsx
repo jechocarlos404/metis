@@ -40,13 +40,15 @@ export default function FeaturesIsland({ canWrite = true }) {
   const [group, setGroup] = React.useState("order"); // graph: order | capability | goal
 
   // ?feature=<id>&tab=graph|plan&product=<id>&group=capability|goal: linkable, and Back restores the previous view.
-  useParamRestore("feature", (v) => { if (v) setSelected(v); setPanelOpen(Boolean(v)); });
+  // A write's line is about the feature it changed: picking another clears it.
+  useParamRestore("feature", (v) => { if (v) setSelected(v); setPanelOpen(Boolean(v)); setNotice(null); });
   useParamRestore("tab", (v) => setTab(TABS.has(v) ? v : "directory"));
   useParamRestore("product", (v) => setProductFilter(v ?? ""));
   useParamRestore("group", (v) => setGroup(GROUPS.some((g) => g.value === v) ? v : "order"));
   const changeGroup = (g) => { setGroup(g); writeParams({ group: g === "order" ? "" : g }, { push: true }); };
   const selectFeature = React.useCallback((id) => {
     setSelected(id);
+    setNotice(null);
     setPanelOpen(true);
     writeParams({ feature: id }, { push: true });
   }, []);
@@ -416,17 +418,24 @@ export default function FeaturesIsland({ canWrite = true }) {
     }
   };
 
+  // "A needs B", for the line that says what a relationship write did.
+  const edgeWords = (srcId, dstId, kind) =>
+    `${nodeById.get(srcId)?.name ?? "a feature"} ${plain(EDGE, kind)} ${nodeById.get(dstId)?.name ?? "a feature"}`;
+
   const addEdge = async () => {
     if (!selected || !edgeDraft.targetId) return;
+    const { targetId, kind } = edgeDraft;
     setEdgeError(null);
+    setNotice(null); // the last write's line must not sit over this one's result
     try {
       await api("/features/edges", {
         method: "POST",
-        body: { src_id: selected, dst_id: edgeDraft.targetId, kind: edgeDraft.kind },
+        body: { src_id: selected, dst_id: targetId, kind },
       });
       setEdgeDraft((d) => ({ ...d, targetId: "" }));
       await load();
       await refreshDetail(selected);
+      setNotice(`Added: ${edgeWords(selected, targetId, kind)}.`);
     } catch (e) {
       // A refused loop says, in plain words, which chain it would close.
       setEdgeError(String(e.message));
@@ -437,10 +446,12 @@ export default function FeaturesIsland({ canWrite = true }) {
     const edge = edgeList.find((e) => e.src_id === srcId && e.dst_id === dstId && e.kind === kind);
     if (!edge) return;
     setEdgeError(null);
+    setNotice(null);
     try {
       await api(`/features/edges/${edge.id}`, { method: "DELETE" });
       await load();
       await refreshDetail(selected);
+      setNotice(`Removed: ${edgeWords(srcId, dstId, kind)}.`);
     } catch (e) {
       setEdgeError(String(e.message));
     }

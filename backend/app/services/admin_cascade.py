@@ -25,9 +25,10 @@ from typing import Literal
 
 from fastapi import HTTPException
 from sqlalchemy import delete as sa_delete
-from sqlalchemy import func, select
+from sqlalchemy import func, literal, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from app.models import (
     Capability,
@@ -51,6 +52,7 @@ from app.models import (
     Story,
     TechSatisfaction,
     TechStack,
+    Technology,
     Ticket,
 )
 from app.schemas.admin import (
@@ -211,6 +213,17 @@ NAME_COLUMN: dict[type, str] = {
     Ticket: "title",
 }
 
+#: A link row reads as its two ends by name: (fk, end model) on each side,
+#: and the word between. A feature edge's word is its kind.
+LINK_ENDS: dict[type, tuple[tuple[str, type], str, tuple[str, type]]] = {
+    FeatureCapability: (("feature_id", Feature), "→", ("capability_id", Capability)),
+    FeatureEdge: (("src_id", Feature), "", ("dst_id", Feature)),
+    Motivation: (("goal_id", Goal), "→", ("capability_id", Capability)),
+    ProductBundle: (("product_id", Product), "⊃", ("capability_id", Capability)),
+    ProductTechnology: (("product_id", Product), "uses", ("tech_id", Technology)),
+    TechSatisfaction: (("tech_id", Technology), "satisfies", ("capability_id", Capability)),
+}
+
 
 def _counts(tally: dict[type, int]) -> list[TableCount]:
     """Ordered by size so the biggest surprise reads first."""
@@ -329,45 +342,7 @@ async def _orphaned_features(
 
 
 async def _label(session: AsyncSession, model: type, row_id: uuid.UUID) -> str:
-    column = NAME_COLUMN.get(model)
-    if column is not None:
-        value = await session.scalar(select(getattr(model, column)).where(model.id == row_id))
-        return value or str(row_id)[:8]
-    if model is FeatureEdge:
-        edge = await session.get(FeatureEdge, row_id)
-        if edge is None:
-            return str(row_id)[:8]
-        names = dict(
-            (
-                await session.execute(
-                    select(Feature.id, Feature.name).where(
-                        Feature.id.in_([edge.src_id, edge.dst_id])
-                    )
-                )
-            ).all()
-        )
-        src = names.get(edge.src_id, "?")
-        dst = names.get(edge.dst_id, "?")
-        return f"{src} {edge.kind} {dst}"
-    if model is Motivation:
-        row = await session.get(Motivation, row_id)
-        if row is None:
-            return str(row_id)[:8]
-        goal = await session.scalar(select(Goal.title).where(Goal.id == row.goal_id))
-        cap = await session.scalar(
-            select(Capability.name).where(Capability.id == row.capability_id)
-        )
-        return f"{goal or '?'} → {cap or '?'}"
-    if model is ProductBundle:
-        row = await session.get(ProductBundle, row_id)
-        if row is None:
-            return str(row_id)[:8]
-        product = await session.scalar(select(Product.name).where(Product.id == row.product_id))
-        cap = await session.scalar(
-            select(Capability.name).where(Capability.id == row.capability_id)
-        )
-        return f"{product or '?'} ⊃ {cap or '?'}"
-    return str(row_id)[:8]
+    return (await _names(session, model, {row_id})).get(row_id, str(row_id)[:8])
 
 
 def _n(n: int, one: str, many: str) -> str:
@@ -375,12 +350,43 @@ def _n(n: int, one: str, many: str) -> str:
 
 
 async def _names(session: AsyncSession, model: type, ids: set[uuid.UUID]) -> dict[uuid.UUID, str]:
-    """Each row's name, for the tables whose rows have one (NAME_COLUMN)."""
-    column = NAME_COLUMN.get(model)
-    if column is None or not ids:
+    """Each row's name: its own (NAME_COLUMN), or a link's two ends
+    (LINK_ENDS), read in one query per table. A guessed link names the
+    feature or technology it is about. Other rows have none."""
+    if not ids:
         return {}
-    rows = await session.execute(select(model.id, getattr(model, column)).where(model.id.in_(ids)))
-    return {row_id: name or str(row_id)[:8] for row_id, name in rows}
+    column = NAME_COLUMN.get(model)
+    if column is not None:
+        rows = await session.execute(select(model.id, getattr(model, column)).where(model.id.in_(ids)))
+        return {row_id: name or str(row_id)[:8] for row_id, name in rows}
+    if model is CapabilityGuess:
+        feature, tech, cap = aliased(Feature), aliased(Technology), aliased(Capability)
+        stmt = (
+            select(model.id, func.coalesce(feature.name, tech.name), literal("→ (guess)"), cap.name)
+            .outerjoin(feature, feature.id == model.feature_id)
+            .outerjoin(tech, tech.id == model.tech_id)
+            .outerjoin(cap, cap.id == model.capability_id)
+        )
+    elif model in LINK_ENDS:
+        (left_fk, left_model), word, (right_fk, right_model) = LINK_ENDS[model]
+        left, right = aliased(left_model), aliased(right_model)
+        middle = model.kind if model is FeatureEdge else literal(word)
+        stmt = (
+            select(
+                model.id,
+                getattr(left, NAME_COLUMN.get(left_model, "name")),
+                middle,
+                getattr(right, NAME_COLUMN.get(right_model, "name")),
+            )
+            .outerjoin(left, left.id == getattr(model, left_fk))
+            .outerjoin(right, right.id == getattr(model, right_fk))
+        )
+    else:
+        return {}
+    rows = await session.execute(stmt.where(model.id.in_(ids)))
+    return {
+        row_id: f"{a or '?'} {getattr(word, 'value', word)} {b or '?'}" for row_id, a, word, b in rows
+    }
 
 
 def _warnings(
@@ -411,7 +417,8 @@ def _warnings(
 
 class NamedCount(TableCount):
     """A table's share of the closure. `names` lists every row by name for the
-    tables whose rows have one; link rows are only counted."""
+    tables whose rows have one, a link by its two ends (`_names`); the rest
+    are only counted."""
 
     names: list[str] = []
 

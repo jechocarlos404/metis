@@ -180,7 +180,13 @@ export async function GET({ request, locals }) {
         (g) => g.tech_id === tech.id && includedCapabilityIds.has(g.capability_id) && !confirmedIds.has(g.capability_id),
       );
       const satisfies = [
-        ...confirmed.map((s) => ({ capability_ref: capRef.get(s.capability_id), fit: s.fit })),
+        // A confirmed link's note travels as its basis, which the importers
+        // store as the note again.
+        ...confirmed.map((s) => ({
+          capability_ref: capRef.get(s.capability_id),
+          fit: s.fit,
+          ...(s.notes ? { basis: s.notes } : {}),
+        })),
         ...guessed.map((g) => ({
           capability_ref: capRef.get(g.capability_id),
           ...(g.fit ? { fit: g.fit } : {}),

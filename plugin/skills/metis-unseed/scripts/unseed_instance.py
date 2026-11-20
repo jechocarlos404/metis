@@ -583,6 +583,18 @@ class Unseeder:
             linked += [e["src_id"] for e in detail.get("incoming", [])]
             if linked:
                 reasons.append(f"it is linked to {_and([repr(tech_names.get(i, i)) for i in linked])}")
+            described = [
+                word
+                for present, word in (
+                    (tech.get("vendor_id"), "a vendor"),
+                    (tech.get("homepage"), "a homepage"),
+                    (tech.get("facets"), "facets"),
+                    (tech.get("evidence_anchors"), "evidence paths"),
+                )
+                if present
+            ]
+            if described:
+                reasons.append(f"it has {_and(described)}, which no seed file carries")
             for s in self._live_slots():
                 if s.get("tech_id") == tid:
                     reasons.append(f"{self._slot_label(s)} uses it")
@@ -760,6 +772,25 @@ class Unseeder:
                 f"{len(recorded)} recorded use(s) of {_and([repr(n) for n in dict.fromkeys(recorded)])} "
                 "stay, no longer naming it"
             )
+        # What a seed file has no place for: an import makes one plan
+        # document, as a draft with every ticket pending, and never a stack
+        # or a strategy.
+        plans = self.inst_plans.get(pid, [])
+        strategies = len(self.inst_strategies.get(pid, []))
+        lost = [
+            word
+            for present, word in (
+                (stacks, f"its {len(stacks)} stack(s)"),
+                (strategies, f"its {strategies} delivery strategy(ies)"),
+                (len(plans) > 1, f"{len(plans) - 1} older plan document(s)"),
+                (prod.get("status") == "approved" or any(d.get("status") == "approved" for d in plans),
+                 "its approval"),
+                (any(t.get("status") not in (None, "pending") for t in tickets), "its tickets' progress"),
+            )
+            if present
+        ]
+        if lost:
+            after.append(f"importing this file again won't bring back {_and(lost)}")
         head = f"product {prod['name']!r}" + (f" (cascades {_and(parts)})" if parts else "")
         return "; ".join([head, *after])
 
@@ -823,10 +854,16 @@ class Unseeder:
             parts = ([f"its satisfaction(s) of {names(sats)}"] if sats else []) + (
                 [f"its guess(es) about {names(guesses)}"] if guesses else []
             )
+            # A cost someone scored on a link: no seed file carries one.
+            costed = [s for s in sats if s.get("cost")]
+            lost = (
+                "; importing this file again won't bring back the cost recorded on its "
+                f"satisfaction(s) of {names(costed)}" if costed else ""
+            )
             self.remove(
                 "technologies",
                 f"/api/tech/{urllib.parse.quote(tech['slug'], safe='')}",
-                f"technology {tech['name']!r}" + (f" (cascades {_and(parts)})" if parts else ""),
+                f"technology {tech['name']!r}" + (f" (cascades {_and(parts)})" if parts else "") + lost,
                 unsure=True,
             )
         dead_techs, dead_caps = self._dead("techs"), self._dead("caps")
@@ -838,7 +875,8 @@ class Unseeder:
             if s["capability_id"] not in dead_caps:
                 self.keep("satisfactions", label, ["the technology and the capability both stay"])
                 continue
-            self.remove("satisfactions", f"/api/tech/satisfactions/{s['id']}", label, unsure=True)
+            lost = "; importing this file again won't bring back its recorded cost" if s.get("cost") else ""
+            self.remove("satisfactions", f"/api/tech/satisfactions/{s['id']}", label + lost, unsure=True)
 
     def _dead_cache_rows(self, kind):
         self._dead(kind)

@@ -273,11 +273,16 @@ satisfies. A technology is shared across products, like a capability.
   as a guess.
 - `fit` is `"native"`, `"partial"` or `"workaround"`. It is required on a
   confirmed entry and optional on a guess. `basis` is optional, one sentence.
+  On a confirmed entry it is stored as the link's note, and metis's export
+  writes that note back as `basis`.
 - Each `capability_ref` is a capabilities[] ref and appears once per technology.
 - Slugs are identity: the loader reuses an existing technology with the same
   slug. Each technology's slug (given or derived) must be non-empty and unique
   within the file; give one explicitly when the name has no letters or digits.
-- Adoption stances and stack slots are human decisions and are never in a seed file.
+- Adoption stances, stack slots and a link's cost (license, ops burden,
+  familiarity, lock-in) are human decisions and are never in a seed file. Nor is what
+  people record about a technology: its vendor, homepage, versions and who
+  used it.
 
 ## Loader behavior (what you can rely on)
 

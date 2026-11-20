@@ -57,17 +57,19 @@ The script is stdlib-only (no venv needed) and defaults to
 Loading is **idempotent and add-only**: existing entities are matched (goals by
 type+title; capabilities and products by name; features by product+name;
 technologies by slug; edges by src+dst+kind; motivations, product technologies
-and satisfactions by pair) and reused, never duplicated or deleted. The one
-update: a guess that already exists for the same pair takes the file's
-confidence and basis. Because
+and satisfactions by pair) and reused, never duplicated or deleted. Two
+updates: a reused feature gains the file's confirmed links it lacks, and a guess
+that already exists for the same pair takes the file's confidence and basis. Because
 names are identity, a seed entity whose name matches an existing one is reused
 instead of created. For capabilities that is intended — a shared name is how two
 products show they use the same ability — but a feature or product name that
 matches an unrelated entity is silently reused too, so check the dry-run counts
 ("reused" vs "would create") against your expectations before the real run. A
-reused feature keeps its existing capability links and product; the loader never
-rewrites them, but its `capability_guesses` are still loaded (skipped when the
-link is already confirmed). Technologies load after features: the technology,
+reused feature keeps every link it has and gains each `capability_refs` entry it
+lacks ("linked", or "would link" in a dry run); adding a link deletes any guess
+about that same pair. `unknown_capabilities` follows the file when the file
+states it. Nothing else on the feature changes, and its `capability_guesses` are
+still loaded (skipped when the link is already confirmed). Technologies load after features: the technology,
 its use by each listed product, confirmed satisfactions, then guesses
 (`POST /api/guesses`, editor or admin on the desktop). Legacy files with a single
 `capability_ref` per feature still load.

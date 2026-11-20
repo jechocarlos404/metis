@@ -31,6 +31,7 @@ were kept or failed (see warnings).
 """
 
 import argparse
+import os
 import json
 import re
 import sys
@@ -532,6 +533,15 @@ def main():
 
     if doc.get("format") != "metis-seed/v1":
         sys.exit(f"error: {args.seed_file}: 'format' must be \"metis-seed/v1\"")
+    # A gaps file re-states a product's real features so new links attach to
+    # them. Unseeding it would delete those features, so refuse outright.
+    if (doc.get("source") or {}).get("generated_by") == "metis-fill-gaps" or os.path.basename(
+        args.seed_file
+    ) == "metis-seed-gaps.json":
+        sys.exit(
+            f"error: {args.seed_file} is a metis-fill-gaps file. Unseeding it would delete the "
+            "product's real features. Remove a single link on the desktop instead."
+        )
 
     api = Api(args.base_url)
     status, _ = api.request("GET", "/api/health")

@@ -1,6 +1,6 @@
 ---
 name: metis-fill-gaps
-description: In one of the owner's own repos that metis already knows, find the product's features whose capabilities metis marks unknown, read the code to see what each one is built on, and write a seed file of guesses plus a list of the links the code confirms, for the owner to review and load. Use when the owner asks to fill gaps, fix unknown capabilities, finish the capability links for this product, or when metis says a feature's capabilities are not named yet. Never writes to metis itself.
+description: In one of the owner's own repos that metis already knows, find the product's features whose capabilities metis marks unknown, read the code to see what each one is built on, and write a seed file of the links the code confirms plus guesses for the rest, for the owner to review and load. Use when the owner asks to fill gaps, fix unknown capabilities, finish the capability links for this product, or when metis says a feature's capabilities are not named yet. Never writes to metis itself.
 ---
 
 # Fill unknown capability links from code
@@ -8,20 +8,22 @@ description: In one of the owner's own repos that metis already knows, find the 
 Metis keeps a feature with `unknown_capabilities: true` when nobody has said
 which capabilities it is built on. In the owner's own repo the code can answer
 that. This skill reads the code for each such feature and hands the owner a
-file to load, plus a list of links to add by hand.
+file to load.
 
 The format is in `../metis-export/references/seed-format.md` (relative to this
 skill's directory). Read its "Guesses" section before writing.
 
-**Why two outputs.** A link you can see in code is real data, not a guess. But
-the seed loader reuses a feature metis already has as it is: it adds guesses
-to it, and ignores the file's `capability_refs` and `unknown_capabilities` for
-it (`load_features` in `../metis-seed-instance/scripts/seed_instance.py`; the
-desktop importer does the same). So:
-- links the code confirms go in `source.confirmed_links` in the file and in
-  your summary, for the owner to add on the desktop;
-- links the code leaves ambiguous go in `capability_guesses`, which the loader
-  does add.
+**Facts and guesses.** A link you can see in code is real data, not a guess.
+When the loader reuses a feature metis already has, it adds every
+`capability_refs` entry the feature lacks (never removing one), takes the
+file's `unknown_capabilities`, and loads its `capability_guesses`; a confirmed
+link deletes any guess about the same pair. So:
+- links the code confirms go in the feature's `capability_refs`;
+- links the code leaves ambiguous go in `capability_guesses`.
+
+The loader does not update a capability metis already has, so the
+`evidence_anchors` you would add to an existing capability go in your hand-off
+summary instead (step 7).
 
 The commands below read the API at `METIS_API_URL` (default
 `http://localhost:8000`). If the API has auth on, set `METIS_API_TOKEN`; the
@@ -80,25 +82,26 @@ each `curl`.
    repo's own `metis-seed.json`: it is the product's export and how the hooks
    recognize the repo.
    - `products`: one entry, the product's exact name, `"external": false`.
-   - `features`: each feature that has at least one guess, re-stated with its
-     exact metis name and `product_ref`, `capability_refs: []`,
-     `unknown_capabilities: true`, and its `capability_guesses`.
+   - `features`: each feature with at least one confirmed link or guess,
+     re-stated with its exact metis name and `product_ref`:
+     - `capability_refs`: the links the code confirms (only new ones are
+       needed: the loader never removes a link the file leaves out);
+     - `capability_guesses`: the ambiguous ones;
+     - `unknown_capabilities`: `false` only when the confirmed links account
+       for everything the feature is built on (no guesses, nothing unknown),
+       else `true`. The loader takes this value, so `false` clears the gap.
    - `source`:
 
      ```json
      {
        "name": "<repo directory>",
        "generated_by": "metis-fill-gaps",
-       "confirmed_links": [
-         {"feature": "<exact feature name>", "capability": "<exact capability name>",
-          "evidence": ["src/path/one.py", "src/path/two.py"]}
-       ],
        "still_unknown": ["<exact feature name>"]
      }
      ```
 
-     The loader ignores `source`, so this list travels with the file
-     without changing what loads.
+     `still_unknown` lists the features you traced and found nothing for; they
+     are not in `features`. The loader ignores `source`.
 
 6. **Validate.**
 
@@ -113,21 +116,26 @@ each `curl`.
    - counts: features traced, confirmed links, guesses by confidence,
      features still unknown, new capabilities (list every new name),
    - the confirmed links as a table of feature, capability and evidence
-     paths. To add them: on the desktop's Features page open the feature,
-     Edit, add the capabilities, and untick the unknown box once nothing is
-     left unknown. The loader cannot add these.
-   - that loading the guesses is their call: the `metis-seed-instance` skill
-     (dry run first), or on the desktop, Settings, Seed files: check, then
-     import. Each guess then waits on the feature for an editor to confirm.
+     paths (for an existing capability this is the only record of its
+     evidence: the loader does not update its `evidence_anchors`),
+   - that loading is their call: the `metis-seed-instance` skill (dry run
+     first; confirmed links show as "linked"), or on the desktop, Settings,
+     Seed files: check, then import. Each guess then waits on the feature for
+     an editor to confirm.
 
 ## Never
 
 - Write to metis. This skill reads the API and the repo and writes one file.
 - Put a link you saw in code into `capability_guesses`: it is confirmed, and
-  belongs in `source.confirmed_links`.
+  belongs in the feature's `capability_refs`.
+- Put a link in `capability_refs` that you could not trace end to end: that is
+  a guess.
 - Guess without a `basis` that cites the file you read.
 - Invent a capability name when an exact inventory name fits, or create a
   near-duplicate of one.
 - Rename a feature. The exact metis name is how the loader finds it; a new
   name makes a duplicate feature.
 - Mark a stub, plan or README-only behaviour as built on anything.
+- Suggest undoing a gaps file with metis-unseed. A gaps file re-states the
+  product's real features by name, so unseeding it deletes them. To undo a
+  link, remove it on the desktop.

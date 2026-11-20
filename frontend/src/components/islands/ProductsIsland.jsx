@@ -266,16 +266,16 @@ export default function ProductsIsland({ canWrite = true }) {
 
   const closeTicket = () => { setTicketDialog(null); setConfirmingTicketDelete(false); };
 
-  // What the owner reads in their own Chat thread, so plain words. The display id
-  // stays: the agent resolves a product by it, and a bare name can match two.
+  // What the owner reads in their own Chat thread, so plain words and no ids:
+  // Chat resolves the exact name first and refuses one several products share.
   const planActions = {
     prompts: {
       decompose: () =>
-        `Plan the work left on "${product.name}" (${product.display_id}): break it down into a plan document and tickets, each ticket small enough for one coding session. Use the current capabilities and features.`,
+        `Plan the work left on "${product.name}": break it down into a plan document and tickets, each ticket small enough for one coding session. Use the current capabilities and features.`,
       refreshPrd: () =>
-        `Update the draft plan document for "${product.name}" (${product.display_id}) to match the current capabilities and features. Keep what still fits.`,
+        `Update the draft plan document for "${product.name}" to match the current capabilities and features. Keep what still fits.`,
       strategy: () =>
-        `Make a delivery strategy for "${product.name}" (${product.display_id}): a timeline in phases that follows its plan document and the order its features need.${strategy ? " It replaces the current one with a new version." : ""}`,
+        `Make a delivery strategy for "${product.name}": a timeline in phases that follows its plan document and the order its features need.${strategy ? " It replaces the current one with a new version." : ""}`,
     },
     approveSpec: approveProduct,
     approvePrd,

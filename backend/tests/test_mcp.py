@@ -911,17 +911,107 @@ async def test_names_never_reach_a_request_path(api, monkeypatch, name, args, ho
     assert paths and not any(hostile in p or ".." in p for p in paths), paths
 
 
-async def test_an_api_refusal_is_rendered_not_raised(api):
-    """A 404 from the API comes back as text the agent can quote."""
-    await _world(*api)
-    result = await server.call_tool(
-        "feature_why", {"feature": "16ce952e-44cd-4317-9176-b3c7de518d9f"}
+async def test_an_api_refusal_is_rendered_not_raised(api, monkeypatch):
+    """A refusal from the API comes back as text the agent can quote. (An
+    unknown subject is not one: that is an answer, below.)"""
+    import httpx
+
+    def gone(request):
+        return httpx.Response(404, json={"detail": "Product not found"})
+
+    monkeypatch.setattr(
+        server.client, "_http", httpx.AsyncClient(transport=httpx.MockTransport(gone))
     )
+    result = await server.call_tool("products", {})
     assert result.isError
     assert result.content[0].text.splitlines() == [
-        "Refused (404): Feature not found",
-        "Open: /features",
+        "Refused (404): Product not found",
+        "Open: /products",
     ]
+
+
+async def test_capability_says_how_many_come_only_through_a_sub_capability(api):
+    """The count rolls up the submap; the features linked only below it are
+    named as such, so the number isn't read as direct links."""
+    app, db = api
+    w = await _world(app, db)
+    async with db() as s:
+        from sqlalchemy import select
+
+        from app.models import Capability
+
+        strava = await s.scalar(select(Capability).where(Capability.slug == "strava-import"))
+        child = await capability_service.create_capability(
+            s, CapabilityCreate(name="Strava webhooks", parent_id=strava.id)
+        )
+        await feature_service.create_feature(
+            s, FeatureCreate(name="Push new rides", product_id=w["climb"].id, capability_ids=[child.id])
+        )
+    text = await server._dispatch("capability", {"slug": "strava-import"})
+    assert text.startswith(
+        "3 feature(s) of ours (1 only through its sub-capabilities), at any status, "
+        "realize strava-import across 1 product(s); maturity ga."
+    )
+
+
+async def test_an_empty_answer_says_what_would_fill_it(api):
+    """No doubled blank line where an empty table sat, and a next step."""
+    def envelope_of(slug):
+        return {"answer": [], "subject": {"slug": slug}, "href": "/h", "as_of": "now"}
+
+    said = {
+        render.capability_supply(envelope_of("user-authentication")): "No technology is recorded as satisfying it.",
+        render.tech_exposure(envelope_of("x")): "Nothing recorded reaches its end of life",
+        render.stack_recommend(envelope_of("taskmaster007")): "taskmaster007 has no stack slot to bind.",
+        render.tech_search({"rows": [], "total": 0}, "fastapi"): "No technology is recorded yet, so nothing can match.",
+        render.tech_search({"rows": [], "total": 0}, "fastapi", 3): "None of the 3 recorded technolog(ies) match.",
+        render.journeys([]): "No journey is recorded yet.",
+        render.tech_blast_radius(envelope_of("pg")): "0 product(s) use pg",
+    }
+    for text, line in said.items():
+        assert "\n\n\n" not in text, text
+        assert line in text, text
+        assert text.splitlines()[-1].startswith("Open: /"), text
+
+    # A missing ops burden is said, not a bare "?".
+    offer = {"tech": "networkx", "fit": "native", "stance": None, "cost": {}, "bound_in": []}
+    supply = render.capability_supply({**envelope_of("graph"), "answer": [offer]})
+    assert "ops not recorded" in supply and "ops ?" not in supply
+
+    # tech_search reads the whole catalog's size only when a filter matched nothing.
+    await _world(*api)
+    empty = await server._dispatch("tech_search", {"q": "fastapi"})
+    assert "No technology is recorded yet" in empty
+
+
+async def test_an_unknown_product_or_id_is_an_answer_in_every_tool(api):
+    """The tools that take a product answer an unknown one as product_score
+    does; the tools that take an id answer an unknown id as an unknown name."""
+    w = await _world(*api)
+
+    async def answer(name, args):
+        result = await server.call_tool(name, args)
+        assert isinstance(result, list), result.content[0].text
+        return result[0].text
+
+    absent = await answer("product_score", {"product": "no-such-product"})
+    assert absent.startswith("0 products have id or slug 'no-such-product'.")
+    for tool in ("tech_exposure", "stack_redundancy", "stack_recommend"):
+        assert await answer(tool, {"product": "no-such-product"}) == absent
+    # A product's id works where its slug does.
+    by_id = await answer("stack_redundancy", {"product": str(w["climb"].id)})
+    assert by_id == await answer("stack_redundancy", {"product": "can-i-climb"})
+    assert by_id.startswith("0 capabilit(ies) answered more than once in can-i-climb.")
+
+    zero = "00000000-0000-0000-0000-000000000000"
+    for tool in ("feature_why", "recheck"):
+        text = await answer(tool, {"feature": zero})
+        assert text.splitlines() == [
+            f"0 features are named {zero!r}. Matching is exact: pass an id or the exact name.",
+            "Open: /features",
+        ]
+    journeys = await answer("journeys", {"journey": zero})
+    assert journeys.startswith(f"0 journeys are named {zero!r}. Matching is exact")
 
 
 @pytest.mark.parametrize(

@@ -33,7 +33,19 @@ def _table(rows: list[list[str]]) -> list[str]:
     ]
 
 
+def _tight(lines: list[str]) -> list[str]:
+    """One blank line at most between parts: an empty table between two
+    blank lines would otherwise leave a gap that says nothing."""
+    out: list[str] = []
+    for line in lines:
+        if line == "" and (not out or out[-1] == ""):
+            continue
+        out.append(line)
+    return out
+
+
 def _tail(envelope: dict, lines: list[str], *, stamp: bool = False) -> str:
+    lines = _tight(lines)
     for entry in envelope.get("unresolved", []):
         blocked = entry.get("blocked_by") or []
         suffix = f" [{', '.join(blocked)}]" if blocked else ""
@@ -48,13 +60,18 @@ def capability_supply(envelope: dict) -> str:
     rows = envelope["answer"]
     slug = envelope["subject"]["slug"]
     lines = [f"{len(rows)} offer(s) for {slug}.", ""]
+    if not rows:
+        lines.append(
+            "No technology is recorded as satisfying it. That is an answer; a seed file's "
+            "technologies, or the API, record one."
+        )
     lines += _table(
         [
             [
                 r["tech"],
                 r["fit"],
                 r["stance"] or "(no stance)",
-                f"ops {r['cost'].get('ops_burden', '?')}",
+                f"ops {r['cost']['ops_burden']}" if r["cost"].get("ops_burden") else "ops not recorded",
                 "← bound in " + ", ".join(r["bound_in"]) if r["bound_in"] else "",
             ]
             for r in rows
@@ -121,6 +138,13 @@ def tech_exposure(envelope: dict) -> str:
         f"{len(rows)} exposed technolog(ies), {at_risk} required slot(s) affected.",
         "",
     ]
+    if not rows:
+        # Nothing exposed is only an all-clear for what exposure can see.
+        lines.append(
+            "Nothing recorded reaches its end of life in the window, has a deprecated or "
+            "banned stance, or rests on a single maintainer. tech_search shows what is "
+            "recorded at all."
+        )
     lines += _table(
         [
             [
@@ -175,6 +199,11 @@ def stack_recommend(envelope: dict) -> str:
         f"{len(unresolved)} slot(s) unresolved.",
         "",
     ]
+    if not rows and not unresolved:
+        lines.append(
+            f"{envelope['subject']['slug']} has no stack slot to bind. A stack is recorded "
+            "only through the API (POST /api/stacks); the app and seed files never add one."
+        )
     lines += _table([[r["slot"], r["tech"], r["fit"], r["stance"] or "(no stance)"] for r in rows])
     for row in rows:
         lines.append(f"  {row['slot']}: {row['why']}")
@@ -187,10 +216,11 @@ def stack_recommend(envelope: dict) -> str:
     return _tail(envelope, lines)
 
 
-def tech_search(page: dict, query: str | None) -> str:
+def tech_search(page: dict, query: str | None, catalog: int | None = None) -> str:
     """The navigation tool. Not an envelope — the catalog endpoint predates it
     and returns {rows, total, facet_counts} — so the href is synthesized here
-    rather than read off the payload."""
+    rather than read off the payload. `catalog` is how many are recorded at
+    all, read when nothing matched: an empty catalog is not an unknown name."""
     rows = page["rows"]
     lines = [
         f"{page['total']} technolog(ies) match"
@@ -211,9 +241,17 @@ def tech_search(page: dict, query: str | None) -> str:
             for r in rows
         ]
     )
-    lines.append("")
-    lines.append(f"Open: /tech{f'?q={query}' if query else ''}")
-    return "\n".join(lines)
+    if not rows and not catalog:
+        lines.append(
+            "No technology is recorded yet, so nothing can match. A seed file's "
+            "technologies, or the API, record them."
+        )
+    elif not rows:
+        lines.append(
+            f"None of the {catalog} recorded technolog(ies) match. That is an answer: "
+            "it isn't recorded."
+        )
+    return _end(lines, f"/tech{f'?q={query}' if query else ''}")
 
 
 def propose_binding(slot: str, tech: str, rationale: str, href: str) -> str:
@@ -278,6 +316,7 @@ def _names(refs: list[dict]) -> str:
 
 
 def _end(lines: list[str], href: str) -> str:
+    lines = _tight(lines)
     lines.append(f"Open: {href}")
     return "\n".join(lines)
 
@@ -560,8 +599,12 @@ def capability(
     # The count is our work on it at any status; whether it is ours takes a
     # finished one. Maturity describes our implementation, so only when ours.
     maturity = f"; maturity {entry['maturity']}" if entry["ours"] else ""
+    # The count rolls up the submap; say how much of it is a sub-capability's
+    # link, so it isn't read as direct links (a seed removal counts those).
+    through = sum(1 for f in features if entry["id"] not in f.get("capability_ids", []))
+    via = f" ({through} only through its sub-capabilities)" if through else ""
     lines = [
-        f"{entry['features']} feature(s) of ours, at any status, realize {slug} across "
+        f"{entry['features']} feature(s) of ours{via}, at any status, realize {slug} across "
         f"{len(entry['products'])} product(s){maturity}.",
     ]
     if not entry["ours"] and entry["external_products"]:
@@ -703,6 +746,11 @@ def feature_why(
 
 def journeys(rows: list[dict]) -> str:
     lines = [f"{len(rows)} journey(s).", ""]
+    if not rows:
+        lines.append(
+            "No journey is recorded yet. Home's idea check saves one (Save as idea); "
+            "check_idea answers the same question without saving."
+        )
     lines += _table(
         [[r["name"], r["persona"] or "—", f"{len(r['steps'])} step(s)", r["id"]] for r in rows]
     )

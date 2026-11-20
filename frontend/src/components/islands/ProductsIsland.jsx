@@ -9,6 +9,7 @@ import { exportSeedFile } from "../shared/SeedFiles.jsx";
 import { WhatItDoes } from "../products/WhatItDoes.jsx";
 import { ProductGoals } from "../products/ProductGoals.jsx";
 import { ProductPlan, SIZE_HINT } from "../products/ProductPlan.jsx";
+import { downloadSnapshot } from "../products/shareSnapshot.js";
 
 const TABS = ["does", "goals", "plan"];
 const SIZES = [
@@ -116,6 +117,11 @@ export default function ProductsIsland({ canWrite = true }) {
     exportSeedFile(productId)
       .then((filename) => setToast({ tone: "ok", title: "Seed file downloaded", detail: filename }))
       .catch(showError("Export failed"));
+
+  const shareProduct = () => {
+    const filename = downloadSnapshot({ product, goals, features, capabilities, score });
+    setToast({ tone: "ok", title: "Snapshot downloaded", detail: filename });
+  };
 
   const openNewProduct = () => {
     setConfirmingDelete(false);
@@ -302,6 +308,10 @@ export default function ProductsIsland({ canWrite = true }) {
                     </Button>
                   </>
                 )}
+                <Button size="sm" variant="secondary" style={{ gap: 6 }} onClick={shareProduct} disabled={features == null || score == null}
+                  title="Download a read-only page of this product to send to someone without a login">
+                  <Icon name="send" size={13} />Share
+                </Button>
               </div>
               {product.summary && (
                 <div style={{ marginTop: 8, fontSize: "var(--text-sm)", color: "var(--text-secondary)", lineHeight: "var(--leading-body)" }}>

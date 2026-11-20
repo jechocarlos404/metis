@@ -107,6 +107,20 @@ export const NEED = {
   none: { label: "missing", tone: "danger", hint: "no product in metis has it" },
 };
 
+/** One-line headline for a coverage report, the same wording everywhere. */
+export function coverageHeadline(report) {
+  return `We have ${report.existing} of the ${report.needed} capabilities needed · ${report.mature} proven (beta or stable)`;
+}
+
+/** A scored product's features split by VERDICT key (GET /products/{id}/coverage). */
+export function scoreGroups(score) {
+  return [
+    { key: "buildable", names: score.buildable },
+    { key: "partly", names: score.known_covered },
+    { key: "unknown", names: score.unknown_features.filter((n) => !score.known_covered.includes(n)) },
+  ];
+}
+
 /** Look up a plain word; unknown values fall back to spaced lower case. */
 export function plain(dict, value) {
   if (value == null) return "";

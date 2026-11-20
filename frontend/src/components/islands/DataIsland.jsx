@@ -151,7 +151,7 @@ export default function DataIsland() {
       await reload(tab);
       setDialog(null);
     } catch (e) {
-      setDialogError(String(e.message));
+      setDialogError(String(e.detail?.message ?? e.message));
     } finally {
       setSaving(false);
     }

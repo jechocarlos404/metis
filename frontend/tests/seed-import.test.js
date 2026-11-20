@@ -4,6 +4,7 @@
 import { afterEach, beforeEach, describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { POST, validateSeed } from "../src/pages/api/seed/import.js";
+import { POST as unseedPOST } from "../src/pages/api/seed/unseed.js";
 
 const HOST = "http://metis.test";
 const slugify = (value) => value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
@@ -38,11 +39,15 @@ class FakeMetis {
     if (route === "GET /api/goals") return [200, this.goals];
     if (route === "GET /api/capabilities") return [200, this.capabilities];
     if (route === "POST /api/capabilities") {
+      // The backend's clash rule: the explicit slug, the derived one, or the
+      // current name ignoring case; the 409 names the row that holds it.
       const slug = body.slug ?? slugify(body.name);
-      const late = this.racing.findIndex((c) => c.slug === slug);
-      if (late >= 0) this.capabilities.push(...this.racing.splice(late, 1));
-      const held = this.capabilities.find((c) => c.slug === slug);
-      if (held) return [409, { detail: { message: `"${held.name}" already exists`, slug, name: held.name } }];
+      const clashes = (c) =>
+        [slug, slugify(body.name)].includes(c.slug) || c.name.toLowerCase() === body.name.trim().toLowerCase();
+      this.capabilities.push(...this.racing.filter(clashes));
+      this.racing = this.racing.filter((c) => !clashes(c));
+      const held = this.capabilities.find(clashes);
+      if (held) return [409, { detail: { message: `"${held.name}" already exists`, slug: held.slug, name: held.name } }];
       const row = { id: this.id("cap"), slug, parent_id: null, ...body };
       this.capabilities.push(row);
       return [201, row];
@@ -82,7 +87,8 @@ class FakeMetis {
       this.edges.push(body);
       return [201, body];
     }
-    if (route === "GET /api/guesses") return [200, []];
+    if (route === "GET /api/guesses" || route === "GET /api/tech/satisfactions") return [200, []];
+    if (route === "GET /api/tech") return [200, { rows: [], total: 0 }];
     throw new Error(`fake metis has no route ${route}`);
   }
 
@@ -117,15 +123,17 @@ function use(fake) {
   return fake;
 }
 
-/** POST the document to the importer, as the Settings page does. */
-async function importSeed(doc, options = {}) {
+/** POST the document to an endpoint, as the Settings page does. */
+async function postSeed(handler, doc, options = {}) {
   const payload = { document: JSON.stringify(doc), ...options };
-  const response = await POST({
-    request: new Request("http://app.test/api/seed/import", { method: "POST", body: JSON.stringify(payload) }),
+  const response = await handler({
+    request: new Request("http://app.test/api/seed", { method: "POST", body: JSON.stringify(payload) }),
     locals: { accessToken: "test-token" },
   });
   return { status: response.status, body: await response.json() };
 }
+
+const importSeed = (doc, options) => postSeed(POST, doc, options);
 
 const PLAN = "Get a phased delivery plan";
 
@@ -199,6 +207,23 @@ describe("capability identity is the slug", () => {
     assert.deepEqual(body.counts.capabilities, { reused: 2 });
     assert.deepEqual(body.counts.features, { reused: 1 });
     assert.deepEqual(metis.writes.map((r) => r.path), [`/api/products/${metis.products[0].id}/seeded`]);
+  });
+
+  test("a -2 pair imported where only the original exists lands both refs on it", async () => {
+    use(existing());
+    const doc = seed({
+      capabilities: [
+        { ref: "c1", name: "Keyword Search", slug: "keyword-search" },
+        { ref: "c2", name: "Keyword search", slug: "keyword-search-2" },
+      ],
+      features: [{ ref: "f-new", product_ref: "p", name: "Find a capability", capability_refs: ["c1", "c2"] }],
+    });
+    const { status, body } = await importSeed(doc, { dryRun: false });
+    assert.equal(status, 200);
+    assert.deepEqual(body.counts.capabilities, { reused: 2 });
+    assert.equal(metis.capabilities.length, 1);
+    const created = metis.requests.find((r) => r.method === "POST" && r.path === "/api/features");
+    assert.deepEqual([...new Set(created.body.capability_ids)], [metis.capabilities[0].id]);
   });
 
   test("a 409 slug clash on create is reuse of that slug", async () => {
@@ -298,6 +323,39 @@ describe("dry run and re-import", () => {
     assert.deepEqual(metis.writes.map((r) => r.path), [`/api/products/${metis.products[0].id}/seeded`]);
     assert.deepEqual(again.body.notes, []);
     assert.deepEqual(again.body.warnings, []);
+  });
+});
+
+describe("unseed uses the importer's capability identity", () => {
+  const unseed = (doc) => postSeed(unseedPOST, doc);
+  const wouldDelete = (body) => body.notes.filter((n) => n.startsWith("would delete capability "));
+
+  test("a name that differs only in case targets the existing capability", async () => {
+    use(existing());
+    const { status, body } = await unseed(seed());
+    assert.equal(status, 200);
+    assert.deepEqual(wouldDelete(body), ['would delete capability "Keyword Search"']);
+    assert.deepEqual(metis.writes, []);
+  });
+
+  test("a renamed capability is found by its current name", async () => {
+    use(existing({ capability: { name: "Keyword Search", slug: "search" } }));
+    const { body } = await unseed(seed({ capabilities: [{ ref: "c-search", name: "Keyword Search" }] }));
+    assert.deepEqual(wouldDelete(body), ['would delete capability "Keyword Search"']);
+  });
+
+  test("each capability of a slugged -2 pair targets its own row", async () => {
+    use(existing());
+    metis.capabilities.push({ id: "cap-dup", slug: "keyword-search-2", name: "Keyword search", parent_id: null });
+    metis.features[0].capability_ids.push("cap-dup");
+    const { body } = await unseed(seed({
+      capabilities: [
+        { ref: "c1", name: "Keyword Search", slug: "keyword-search" },
+        { ref: "c2", name: "Keyword search", slug: "keyword-search-2" },
+      ],
+      features: [{ ref: "f-plan", product_ref: "p", name: PLAN, capability_refs: ["c1", "c2"] }],
+    }));
+    assert.deepEqual(wouldDelete(body).sort(), ['would delete capability "Keyword Search"', 'would delete capability "Keyword search"']);
   });
 });
 

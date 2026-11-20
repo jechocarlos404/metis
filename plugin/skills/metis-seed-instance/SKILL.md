@@ -127,8 +127,10 @@ Then point the user at the UI: http://localhost:4321.
 ## Troubleshooting
 
 - **Connection refused** — instance is down; `docker compose up -d` from the repo root.
-- **Guess rejected**: the instance has no `/api/guesses` yet, or the caller is
-  not an editor or admin. Everything else loaded; re-run once that is fixed.
+- **Guess rejected**: the instance has no `/api/guesses` yet. Everything else
+  loaded; re-run once it has.
+- **401 or 403**: the instance has auth on. The script stops and says why; see
+  "With auth on" above.
 - **Edge rejected (422)** — the edge would close a precedence cycle *against edges
   already in the instance* (the file itself is checked before loading). The script
   skips it, reports a warning, and exits 2. Resolve the conflict in the seed file

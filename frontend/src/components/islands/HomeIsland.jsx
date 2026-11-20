@@ -224,7 +224,9 @@ function Portfolio({ products }) {
 
   React.useEffect(() => {
     let cancelled = false;
-    const queue = sorted.map((p) => p.id);
+    // Only external products: ours realize their own capabilities, so they
+    // would always read "all buildable".
+    const queue = sorted.filter((p) => p.external).map((p) => p.id);
     const worker = async () => {
       while (!cancelled && queue.length) {
         const id = queue.shift();
@@ -257,7 +259,7 @@ function Portfolio({ products }) {
                 {p.external && <Badge>external</Badge>}
                 <span title="When its seed file was last imported" style={QUIET}>{freshness(p.seeded_at)}</span>
                 <span style={{ flex: 1 }} />
-                <ScoreLine score={scores[p.id]} />
+                {p.external && <ScoreLine score={scores[p.id]} />}
               </a>
             </li>
           ))}

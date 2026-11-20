@@ -10,7 +10,7 @@ const EMPTY_DRAFT = { goal_type: "product", parent_goal_id: "", title: "", descr
 
 export default function GoalsIsland({ canWrite = true }) {
   const [goals, setGoals] = React.useState(null); // null until the first load finishes
-  const [productCounts, setProductCounts] = React.useState({});
+  const [productById, setProductById] = React.useState({});
   const [capsByGoal, setCapsByGoal] = React.useState({});
   const [highlight, setHighlight] = React.useState(null); // ?goal=<id>, scrolled to once loaded
   const [view, setView] = React.useState("list"); // ?view=network, read after mount (the server has no URL)
@@ -38,12 +38,8 @@ export default function GoalsIsland({ canWrite = true }) {
     }
     setCapsByGoal(caps);
     setGoals(goalList);
-    // Per goal, the products that serve it, so each goal links to its own product.
-    const byGoal = {};
-    for (const p of products) {
-      if (p.goal_id) (byGoal[p.goal_id] ??= []).push(p);
-    }
-    setProductCounts(byGoal);
+    // Each goal says which product it belongs to (the goals API's product_id).
+    setProductById(Object.fromEntries(products.map((p) => [p.id, p])));
   }, []);
 
   React.useEffect(() => {
@@ -256,8 +252,7 @@ export default function GoalsIsland({ canWrite = true }) {
                 </div>
                 <GoalList
                   goals={productGoals.filter((g) => g.parent_goal_id === org.id)}
-                  productCounts={productCounts}
-                  orgProducts={productCounts[org.id] ?? []}
+                  productById={productById}
                   capsByGoal={capsByGoal}
                   highlightStyle={highlightStyle}
                   editButton={editButton}
@@ -271,7 +266,7 @@ export default function GoalsIsland({ canWrite = true }) {
                 <div style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>
                   These product goals aren't under an org goal. Edit one to choose its parent.
                 </div>
-                <GoalList goals={unparented} productCounts={productCounts} capsByGoal={capsByGoal} highlightStyle={highlightStyle} editButton={editButton} canWrite={canWrite} />
+                <GoalList goals={unparented} productById={productById} capsByGoal={capsByGoal} highlightStyle={highlightStyle} editButton={editButton} canWrite={canWrite} />
               </div>
             )}
           </div>
@@ -367,7 +362,7 @@ export default function GoalsIsland({ canWrite = true }) {
   );
 }
 
-function GoalList({ goals, productCounts, orgProducts = [], capsByGoal, highlightStyle, editButton, emptyText, canWrite }) {
+function GoalList({ goals, productById, capsByGoal, highlightStyle, editButton, emptyText, canWrite }) {
   return (
     <>
       <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "16px 0 10px", fontFamily: "var(--font-mono)", fontSize: "var(--text-2xs)", letterSpacing: "var(--tracking-caps)", textTransform: "uppercase", color: "var(--text-secondary)" }}>
@@ -375,18 +370,16 @@ function GoalList({ goals, productCounts, orgProducts = [], capsByGoal, highligh
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         {goals.map((g) => {
-          const served = productCounts[g.id]?.length ? productCounts[g.id] : orgProducts;
+          const owner = productById[g.product_id];
           const caps = capsByGoal[g.id] || [];
           return (
             <div key={g.id} id={`goal-${g.id}`} style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 14, background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", boxShadow: "var(--shadow-card)", padding: "14px 18px", ...highlightStyle(g.id) }}>
               <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-secondary)", width: 46 }}>{g.display_id}</span>
               <div style={{ flex: "1 1 220px", minWidth: 0 }}>
                 <div style={{ fontSize: "var(--text-md)", fontWeight: "var(--weight-semibold)", color: "var(--text-heading)" }}>{g.title}</div>
-                {served.length > 0 && (
+                {owner && (
                   <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", marginTop: 2 }}>
-                    For {served.map((p, i) => (
-                      <React.Fragment key={p.id}>{i > 0 && ", "}<a href={`/products?product=${p.id}`}>{p.name}</a></React.Fragment>
-                    ))}
+                    For <a href={`/products?product=${owner.id}`}>{owner.name}</a>
                   </div>
                 )}
                 {g.description && (

@@ -74,6 +74,14 @@ docker compose up --build
 - API: http://localhost:8000 (OpenAPI docs at /docs)
 - Keycloak: http://localhost:8080 (admin console: `admin` / `admin`)
 
+Every published port (5432, 8080, 8000, 4321, and 8001 for the `mcp` profile) is
+bound to `127.0.0.1`, so nothing is reachable from your network: the dev
+defaults (Keycloak `admin`/`admin`, `dev-backend-secret`) would hand it over. To
+expose one on purpose, replace those defaults first, then change its mapping in
+`docker-compose.yml` (say `"0.0.0.0:4321:4321"`). Signing in from another
+machine also needs `PUBLIC_APP_URL`, `KC_HOSTNAME`/`KEYCLOAK_ISSUER` and the
+realm's redirect URIs set to the address it uses; they all say `localhost` now.
+
 Seeded realm users (temporary passwords — Keycloak will force a change on first login):
 
 | User | Password | Role |

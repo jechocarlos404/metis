@@ -123,7 +123,10 @@ export default function CapabilitiesIsland({ canWrite = true }) {
       });
       window.location.href = `/capabilities/${created.slug}`;
     } catch (e) {
-      setDialogError(String(e.message));
+      // Same name in another case: point at the one that exists, stay here.
+      setDialogError(e.status === 409 && e.detail?.slug
+        ? <>{e.detail.message}. <a href={`/capabilities/${e.detail.slug}`}>Open {e.detail.name}</a></>
+        : String(e.message));
       setSaving(false);
     }
   };

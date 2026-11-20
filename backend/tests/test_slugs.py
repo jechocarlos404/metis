@@ -22,15 +22,15 @@ def test_slugify_is_lowercase_kebab():
 
 @pytest.mark.asyncio
 async def test_slug_derived_from_name_and_deduplicated(db):
+    """Products may share a name. Capabilities may not — see
+    test_capability_identity."""
     async with db() as session:
-        first = await capability_service.create_capability(
-            session, CapabilityCreate(name="Semantic search")
-        )
-        second = await capability_service.create_capability(
-            session, CapabilityCreate(name="Semantic Search")
-        )
-        assert first.slug == "semantic-search"
-        assert second.slug == "semantic-search-2"
+        first = await unique_slug(session, Product, "Semantic search")
+        session.add(Product(name="Semantic search", slug=first))
+        await session.flush()
+        second = await unique_slug(session, Product, "Semantic Search")
+        assert first == "semantic-search"
+        assert second == "semantic-search-2"
 
 
 @pytest.mark.asyncio

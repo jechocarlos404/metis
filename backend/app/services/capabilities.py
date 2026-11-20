@@ -47,7 +47,7 @@ from app.schemas.capability import (
     Rollup,
 )
 from app.schemas.feature import WhyChain, WhyStep
-from app.services.slugs import slugify, unique_slug
+from app.services.slugs import slugify, valid_slug
 
 GA_OR_LATER = {"ga", "deprecated", "retired"}
 
@@ -81,11 +81,41 @@ async def _forbid_forest_cycle(
         cursor = parent.parent_id
 
 
+async def _refuse_name_clash(
+    session: AsyncSession,
+    name: str,
+    slug: str | None = None,
+    exclude_id: uuid.UUID | None = None,
+) -> None:
+    """One capability per name. A second "user authentication" next to "User
+    Authentication" would split one capability's reuse in two, so it is
+    refused, pointing at the one that exists. Matched on the slug the name
+    derives to (and an explicit one), and on the current name ignoring case,
+    because a rename keeps the old slug."""
+    slugs = {slugify(name)} | ({slug} if slug else set())
+    same_name = func.lower(Capability.name) == name.strip().lower()
+    stmt = select(Capability).where(or_(Capability.slug.in_(slugs), same_name))
+    if exclude_id is not None:
+        stmt = stmt.where(Capability.id != exclude_id)
+    # Several can match (older -2 duplicates): name the same-named, oldest one.
+    existing = await session.scalar(stmt.order_by(same_name.desc(), Capability.seq).limit(1))
+    if existing is not None:
+        raise HTTPException(
+            409,
+            detail={
+                "message": f'"{existing.name}" already exists',
+                "slug": existing.slug,
+                "name": existing.name,
+            },
+        )
+
+
 async def create_capability(session: AsyncSession, data: CapabilityCreate) -> Capability:
     if data.parent_id is not None and await session.get(Capability, data.parent_id) is None:
         raise HTTPException(404, f"Capability {data.parent_id} not found")
     fields = data.model_dump()
-    fields["slug"] = await unique_slug(session, Capability, data.name, data.slug)
+    fields["slug"] = valid_slug(data.name, data.slug)
+    await _refuse_name_clash(session, data.name, fields["slug"])
     capability = Capability(**fields)
     session.add(capability)
     await session.commit()
@@ -100,6 +130,11 @@ async def update_capability(
     fields = data.model_dump(exclude_unset=True)
     if fields.get("parent_id") is not None:
         await _forbid_forest_cycle(session, capability_id, fields["parent_id"])
+    # Only a real rename is checked: a case-only one keeps its identity, and an
+    # edit that resends the same name must not trip over an older duplicate.
+    new_name = fields.get("name")
+    if new_name is not None and slugify(new_name) != slugify(capability.name):
+        await _refuse_name_clash(session, new_name, exclude_id=capability_id)
     for key, value in fields.items():
         setattr(capability, key, value)
     await session.commit()

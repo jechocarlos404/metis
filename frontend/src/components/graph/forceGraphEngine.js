@@ -69,6 +69,8 @@ const DEFAULTS = {
   scaleExtent: [0.2, 2.5],
   renderTauMs: 70, // low-pass time constant for the render-position smoothing
   reducedMotion: false,
+  // Screen px to keep clear on the left when framing, for an overlay such as a key.
+  fitInsetLeft: () => 0,
 };
 
 const TICK_MS = 1000 / 60;
@@ -378,14 +380,15 @@ export function createForceGraph(opts) {
     const xMax = Math.max(...pts.map((p) => p.x)) + pad;
     const yMin = Math.min(...pts.map((p) => p.y)) - pad;
     const yMax = Math.max(...pts.map((p) => p.y)) + pad;
-    const w = svgEl.clientWidth || 1;
+    const inset = o.fitInsetLeft();
+    const w = Math.max(1, (svgEl.clientWidth || 1) - inset);
     const h = svgEl.clientHeight || 1;
     const spanX = Math.max(1, xMax - xMin);
     const spanY = Math.max(1, yMax - yMin);
     const k = Math.min(o.scaleExtent[1], Math.max(o.scaleExtent[0], Math.min(w / spanX, h / spanY)));
     const cx = (xMin + xMax) / 2;
     const cy = (yMin + yMax) / 2;
-    animateTransform(zoomIdentity.translate(w / 2 - cx * k, h / 2 - cy * k).scale(k), duration);
+    animateTransform(zoomIdentity.translate(inset + w / 2 - cx * k, h / 2 - cy * k).scale(k), duration);
   }
 
   function zoomBy(factor) {

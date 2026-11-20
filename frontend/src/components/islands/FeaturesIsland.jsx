@@ -413,7 +413,7 @@ export default function FeaturesIsland({ canWrite = true }) {
           <>
             {products.length > 0 && (
               <Select aria-label="Product" value={activeProduct} onChange={(e) => changeProduct(e.target.value)} style={{ width: 200 }}
-                options={[...(tab === "graph" ? [] : [{ value: "", label: "All products" }]),
+                options={[tab === "graph" ? { value: "", label: "All products: the graph draws one at a time", disabled: true } : { value: "", label: "All products" },
                   ...productOptions(products),
                   { value: "unattributed", label: "No product" }]} />
             )}

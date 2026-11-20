@@ -14,7 +14,7 @@ import { CapabilityPicker } from "../shared/CapabilityPicker.jsx";
 // steps, and where the path breaks.
 
 const CAPS = {
-  fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: "var(--tracking-caps)",
+  fontFamily: "var(--font-mono)", fontSize: "var(--text-2xs)", letterSpacing: "var(--tracking-caps)",
   textTransform: "uppercase", color: "var(--text-secondary)",
 };
 const PANEL = {

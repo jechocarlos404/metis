@@ -119,6 +119,10 @@ export const NEED = {
   none: { label: "missing", tone: "danger", hint: "no product in metis has it" },
 };
 
+/** The NEED key for a capability match or inventory entry (null: no match).
+ *  `ours` false covers two cases; external_products tells them apart. */
+export const needKey = (c) => (c?.ours ? "ours" : c?.external_products?.length ? "elsewhere" : "none");
+
 /** One-line headline for a coverage report, the same wording everywhere. */
 export function coverageHeadline(report) {
   return `We have ${report.existing} of the ${report.needed} capabilities needed · ${report.mature} proven (beta or stable)`;

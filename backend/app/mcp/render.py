@@ -255,9 +255,16 @@ def _end(lines: list[str], href: str) -> str:
     return "\n".join(lines)
 
 
+def _not_ours(c: dict) -> str:
+    """`ours` false means one of two things; external_products tells which."""
+    if c["ours"]:
+        return ""
+    return ", external only" if c["external_products"] else ", nobody has it"
+
+
 def _candidates(candidates: list[dict]) -> str:
     return ", ".join(
-        f"{c['slug']} ({c['maturity']}{'' if c['ours'] else ', external only'})"
+        f"{c['slug']} ({c['maturity']}{_not_ours(c)})"
         for c in candidates
     )
 
@@ -292,17 +299,17 @@ def capability_inventory(rows: list[dict], query: str | None, limit: int = 50) -
         q = query.lower()
         rows = [r for r in rows if q in r["name"].lower() or q in r["slug"]]
     shown = rows[: max(0, limit)]
-    in_use = sum(1 for r in rows if r["ours"] and r["features"])
-    unbuilt = sum(1 for r in rows if r["ours"] and not r["features"])
-    outside = sum(1 for r in rows if not r["ours"])
+    in_use = sum(1 for r in rows if r["ours"])
+    outside = sum(1 for r in rows if not r["ours"] and r["external_products"])
+    unbuilt = len(rows) - in_use - outside
     head = (
         f"{len(rows)} of {total} capabilit(ies) match {query!r}"
         if query
         else f"{total} capabilit(ies)"
     )
     lines = [
-        f"{head}: {in_use} ours with features, {unbuilt} ours with no feature yet, "
-        f"{outside} known only from external products; showing {len(shown)}.",
+        f"{head}: {in_use} ours, {outside} known only from external products, "
+        f"{unbuilt} that nobody has yet; showing {len(shown)}.",
         "",
     ]
     lines += _table(
@@ -313,7 +320,11 @@ def capability_inventory(rows: list[dict], query: str | None, limit: int = 50) -
                 f"{r['features']} feature(s)",
                 f"ours in: {_names(r['products'])}" if r["products"] else "ours in: —",
                 f"external: {_names(r['external_products'])}" if r["external_products"] else "",
-                "" if r["ours"] else "external only — not ours",
+                ""
+                if r["ours"]
+                else "external only — not ours"
+                if r["external_products"]
+                else "nobody has it — not ours",
             ]
             for r in shown
         ]
@@ -334,10 +345,15 @@ def _need(need: dict) -> list[str]:
             f"  ours           {need['name']} → {match['slug']} "
             f"({match['maturity']}; in {where})"
         ]
-    if match:
+    if match and match["external_products"]:
         return [
             f"  external only  {need['name']} → {match['slug']} "
             f"(only in {_names(match['external_products'])}) — exists, not ours"
+        ]
+    if match:
+        return [
+            f"  nobody has it  {need['name']} → {match['slug']} "
+            "(no feature realizes it) — not ours"
         ]
     lines = [f"  no match       {need['name']}"]
     if need["candidates"]:
@@ -447,8 +463,10 @@ def capability(
         f"{entry['features']} feature(s) of ours realize {slug} across "
         f"{len(entry['products'])} product(s); maturity {entry['maturity']}.",
     ]
-    if not entry["ours"]:
+    if not entry["ours"] and entry["external_products"]:
         lines.append("Known only from external products: it exists, we don't have it.")
+    elif not entry["ours"]:
+        lines.append("Nobody has it yet: no feature realizes it, so it isn't ours.")
     description = entry.get("description")
     lines.append(entry["name"] + (f" — {description}" if description else ""))
     lines += [

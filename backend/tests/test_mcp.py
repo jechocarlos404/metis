@@ -431,13 +431,15 @@ async def test_inventory_is_most_reused_first_and_filters_in_order(api):
     await _world(*api)
     text = await server._dispatch("capability_inventory", {})
     _conventions(text)
+    # A capability no feature realizes isn't ours, and nobody else has it either.
     assert text.startswith(
-        "5 capabilit(ies): 3 ours with features, 1 ours with no feature yet, "
-        "1 known only from external products"
+        "5 capabilit(ies): 3 ours, 1 known only from external products, "
+        "1 that nobody has yet"
     )
     rows = [line.split()[0] for line in text.splitlines()[2:7]]
-    assert rows[-1] == "weather-forecast"
+    assert rows[-2:] == ["weather-forecast", "route-planner"]
     assert "external only — not ours" in text
+    assert "nobody has it — not ours" in text
 
     text = await server._dispatch("capability_inventory", {"q": "data"})
     assert text.startswith("1 of 5 capabilit(ies) match 'data'")

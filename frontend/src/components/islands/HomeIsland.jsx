@@ -2,7 +2,7 @@ import React from "react";
 import { PageHeader } from "../shell/PageHeader.jsx";
 import { Badge, Button, Input } from "../../ds";
 import { api } from "../../lib/api.js";
-import { VERDICT, count, freshness } from "../../lib/words.js";
+import { NEED, VERDICT, count, freshness, needKey } from "../../lib/words.js";
 import { CapabilityPicker } from "../shared/CapabilityPicker.jsx";
 import { CoverageReport } from "../shared/coverage.jsx";
 import GetStartedIsland from "./GetStartedIsland.jsx";
@@ -97,7 +97,7 @@ function IdeaChecker({ inventory, canWrite }) {
 
   const options = React.useMemo(() => inventory.map((c) => ({
     id: c.id, name: c.name, slug: c.slug,
-    hint: c.ours ? (c.products.length ? `in ${count(c.products.length, "product")}` : "ours, in no product") : "only elsewhere",
+    hint: c.ours ? (c.products.length ? `in ${count(c.products.length, "product")}` : "ours, in no product") : NEED[needKey(c)].label,
   })), [inventory]);
 
   const setRow = (key, patch) => setRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...patch } : r)));

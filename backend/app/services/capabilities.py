@@ -454,8 +454,9 @@ def ours_clause():
 @dataclass(frozen=True)
 class Usage:
     """Who realizes a capability, over its submap. `ours` is the inventory's
-    whole question: false only when features realize it and every one of them
-    belongs to an external product — then we know it exists, not that we have it."""
+    whole question: true only when at least one of our features realizes it.
+    False when only external products do (we know it exists, not that we have
+    it) and when nothing does (a name nobody builds)."""
 
     products: list[ProductRef]
     external_products: list[ProductRef]
@@ -469,7 +470,6 @@ async def _usage(session: AsyncSession) -> dict[uuid.UUID, Usage]:
     children = await _children_index(session)
     by_id = {p.id: p for p in (await session.scalars(select(Product))).all()}
     ours_f: dict[uuid.UUID, set[uuid.UUID]] = defaultdict(set)
-    ext_f: dict[uuid.UUID, set[uuid.UUID]] = defaultdict(set)
     ours_p: dict[uuid.UUID, set[uuid.UUID]] = defaultdict(set)
     ext_p: dict[uuid.UUID, set[uuid.UUID]] = defaultdict(set)
     rows = await session.execute(
@@ -479,7 +479,8 @@ async def _usage(session: AsyncSession) -> dict[uuid.UUID, Usage]:
     )
     for capability_id, feature_id, product_id in rows:
         external = product_id is not None and by_id[product_id].external
-        (ext_f if external else ours_f)[capability_id].add(feature_id)
+        if not external:
+            ours_f[capability_id].add(feature_id)
         if product_id is not None:
             (ext_p if external else ours_p)[capability_id].add(product_id)
 
@@ -490,12 +491,11 @@ async def _usage(session: AsyncSession) -> dict[uuid.UUID, Usage]:
     for capability in (c for group in children.values() for c in group):
         submap = _submap_ids(capability.id, children)
         ours_features = gather(ours_f, submap)
-        external_features = gather(ext_f, submap)
         usage[capability.id] = Usage(
             products=_refs(gather(ours_p, submap), by_id),
             external_products=_refs(gather(ext_p, submap), by_id),
             features=len(ours_features),
-            ours=bool(ours_features) or not external_features,
+            ours=bool(ours_features),
         )
     return usage
 
@@ -537,8 +537,9 @@ async def coverage(session: AsyncSession, request: CoverageRequest) -> CoverageR
     """How much of a product idea we already have. Needs resolve by exact slug
     only — a wrong match would overstate what we have, which is worse than an
     honest gap — and every unresolved need lists near names to confirm. A
-    capability known only from external products resolves (so you see who has
-    it) but counts as missing: knowing it exists is not having it."""
+    capability that none of our features realize resolves (so you see who has
+    it, if anyone) but counts as missing: knowing it exists, or having named
+    it, is not having it."""
     capabilities = await list_capabilities(session)
     by_slug = {c.slug: c for c in capabilities}
     usage = await _usage(session)
@@ -654,7 +655,9 @@ async def health(session: AsyncSession) -> list[HealthFinding]:
     usage = await _usage(session)
     for capability in capabilities:
         # Known only from someone else's product: not our promise to keep.
-        if not usage[capability.id].ours:
+        # One nothing realizes isn't ours either, but is still ours to explain.
+        u = usage[capability.id]
+        if not u.ours and u.external_products:
             continue
         in_scope = sum(
             counts_by_capability.get(cid, 0)

@@ -79,7 +79,8 @@ class InventoryEntry(CapabilityRead):
     """A capability and who uses it, over its submap — derived from the
     features realizing it, never stored, never from bundles. `products` and
     `features` are ours; `external_products` are someone else's that have it.
-    `ours` is false only when every realizing feature is external."""
+    `ours` is true only when at least one realizing feature is ours: false when
+    every realizing feature is external, and when nothing realizes it."""
 
     ours: bool
     products: list[ProductRef]
@@ -103,7 +104,9 @@ class CapabilityMatch(BaseModel):
     slug: str
     name: str
     maturity: CapabilityMaturity
-    #: False when only external products realize it: it exists, we don't have it.
+    #: True only when one of our features realizes it. False when only external
+    #: products do (it exists, we don't have it) or when nothing does — tell the
+    #: two apart by `external_products`.
     ours: bool
     products: list[ProductRef]
     external_products: list[ProductRef]

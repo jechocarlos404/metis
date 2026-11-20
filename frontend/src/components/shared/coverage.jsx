@@ -1,6 +1,6 @@
 import React from "react";
 import { Badge } from "../../ds";
-import { MATURITY, NEED, VERDICT, coverageHeadline, scoreGroups } from "../../lib/words.js";
+import { MATURITY, NEED, VERDICT, coverageHeadline, needKey, scoreGroups } from "../../lib/words.js";
 import { Term } from "./Term.jsx";
 
 export const MATURITY_TONES = {
@@ -78,7 +78,7 @@ export function CoverageReport({ report, onCandidate }) {
 }
 
 function NeedRow({ need, onCandidate }) {
-  const kind = need.match ? (need.match.ours ? "ours" : "elsewhere") : "none";
+  const kind = needKey(need.match);
   const n = NEED[kind];
   const chip = { font: "inherit", fontSize: 11, color: "var(--text-accent)", background: "var(--accent-wash)", border: "none", borderRadius: "var(--radius-pill)", padding: "1px 8px", cursor: "pointer", textDecoration: "none" };
   return (

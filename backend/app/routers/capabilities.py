@@ -109,6 +109,9 @@ async def impact(
 
 @router.get("/{capability_id}/motivations", response_model=list[GoalRead])
 async def motivations(capability_id: uuid.UUID, session: AsyncSession = Depends(get_db)):
+    # 404 like /scope and /rollup: an empty list must mean "no goal motivates
+    # it", never "no such capability".
+    await capability_service.get_capability(session, capability_id)
     return await capability_service.motivating_goals(session, capability_id)
 
 

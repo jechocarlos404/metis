@@ -479,6 +479,19 @@ def no_product(value: str) -> str:
     )
 
 
+def own_product(product: dict) -> str:
+    """Our own products are not scored, as on the desktop: a product's own
+    features are what make its capabilities ours, so the score measures itself."""
+    return _end(
+        [
+            f"0 features scored: {product['slug']} is ours, and product_score scores "
+            "only external products. For one of ours, ready_features says what can "
+            "start next and recheck what a change touches.",
+        ],
+        f"/products?product={product['id']}",
+    )
+
+
 def capability(
     entry: dict, features: list[dict], goals: list[dict], rollup: dict, products: list[dict]
 ) -> str:

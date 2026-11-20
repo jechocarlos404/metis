@@ -532,11 +532,23 @@ async def test_product_score_groups_sum_to_the_total(api):
     ) in text
     assert "Lower bound" in text
     assert text.endswith(f"Open: /products?product={w['rival'].id}")
-    by_id = await server._dispatch("product_score", {"product": str(w["climb"].id)})
-    assert by_id.startswith("2/2 feature(s) of can-i-climb buildable")
+    by_id = await server._dispatch("product_score", {"product": str(w["rival"].id)})
+    assert by_id.startswith("0/3 feature(s) of rival buildable")
     assert (await server._dispatch("product_score", {"product": "Rival"})).startswith(
         "0 products have id or slug 'Rival'"
     )
+
+
+async def test_own_products_are_not_scored(api):
+    """As on the desktop: an own product's features make its capabilities ours,
+    so its score would only measure itself."""
+    w = await _world(*api)
+    for value in ("can-i-climb", str(w["climb"].id)):
+        text = await server._dispatch("product_score", {"product": value})
+        _conventions(text)
+        assert text.startswith("0 features scored: can-i-climb is ours")
+        assert "buildable" not in text
+        assert text.endswith(f"Open: /products?product={w['climb'].id}")
 
 
 async def test_capability_says_who_why_and_how_far(api):

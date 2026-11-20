@@ -247,12 +247,13 @@ TOOLS = [
     Tool(
         name="product_score",
         description=(
-            "How much of a product (ours or external) we could build from what "
+            "How much of an external product we could build from what "
             "we have: its features split into four groups that sum to the "
             "total — buildable, partly known, not described, missing a "
             "capability. A lower bound. Then the capabilities we lack, ranked by "
             "how many features each alone would cover, and the three products of "
-            "ours that already have the most of what it names."
+            "ours that already have the most of what it names. Our own products "
+            "are not scored."
         ),
         inputSchema={
             "type": "object",
@@ -429,6 +430,8 @@ async def _dispatch(name: str, args: dict) -> str:
         product = await _product(args["product"])
         if product is None:
             return render.no_product(args["product"])
+        if not product["external"]:
+            return render.own_product(product)
         return render.product_score(
             await client.get(f"/api/products/{_safe_id(product['id'])}/coverage")
         )

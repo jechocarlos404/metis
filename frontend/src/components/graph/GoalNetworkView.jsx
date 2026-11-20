@@ -168,7 +168,9 @@ function GoalNode({ node, isSelected, isTabStop, isDimmed, onSelect, onHoverChan
         stroke={ring} strokeWidth={isSelected ? 2 : 1}
         strokeDasharray={!isOrg && node.capCount === 0 ? "3,3" : undefined} />
       <circle cx={NODE_W / 2 - 12} cy={-NODE_H / 2 + 12} r={3} fill={STATUS_DOT[goal.status] || STATUS_DOT.pending} />
-      <CardLabel name={goal.title} x={-NODE_W / 2 + 12} fill={isOrg ? "var(--text-inverse)" : "var(--text-heading)"} />
+      {/* Faded, the box fades but the name stays readable (base.css): dark on a faded org box, grey on a product's. */}
+      <CardLabel name={goal.title} x={-NODE_W / 2 + 12}
+        fill={isDimmed ? (isOrg ? "var(--text-heading)" : "var(--text-secondary)") : isOrg ? "var(--text-inverse)" : "var(--text-heading)"} />
     </g>
   );
 }

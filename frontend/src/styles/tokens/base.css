@@ -91,6 +91,8 @@ main:focus { outline: none; }
    <g> makes the browser blend each card separately and drags drop to ~50fps. */
 .graph-node > * { transition: fill-opacity var(--dur-med) var(--ease-out), stroke-opacity var(--dur-med) var(--ease-out); }
 .graph-node.is-dim > * { fill-opacity: 0.25; stroke-opacity: 0.25; }
+/* A faded goal's box fades, its name stays readable (GoalNetworkView picks its colour). */
+.graph-goal-network .graph-node.is-dim > text { fill-opacity: 1; }
 
 /* Agent replies rendered from markdown (ChatIsland). */
 .chat-md > :first-child { margin-top: 0; }

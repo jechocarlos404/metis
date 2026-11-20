@@ -247,10 +247,8 @@ export default function GoalsIsland({ canWrite = true }) {
                     )}
                     {org.description && <div style={{ fontSize: "var(--text-sm)", color: "var(--aegean-4)", marginTop: 4 }}>{org.description}</div>}
                     {org.success_criteria && <div style={{ fontSize: "var(--text-xs)", color: "var(--aegean-4)", marginTop: 2 }}>Success: {org.success_criteria}</div>}
+                    <div style={{ fontSize: "var(--text-xs)", color: "var(--aegean-4)", marginTop: 4 }}>{orgCapabilityCount(org)}</div>
                   </div>
-                  <span style={{ fontSize: "var(--text-xs)", color: "var(--aegean-4)" }}>
-                    {orgCapabilityCount(org)}
-                  </span>
                   <StatusBadge status={org.status} />
                   {canWrite && (
                     <IconButton size="sm" label={`Edit ${org.title}`} style={{ color: "var(--aegean-4)" }}

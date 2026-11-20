@@ -26,6 +26,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.agents import orchestrator
+from app.agents import proposals as proposal_service
 from app.agents.prompts import AGENT_PROMPTS, PROPOSALS_NOTE, SYNTHESIS_PROMPT
 from app.agents.tools import WRITE_TOOLS, ToolContext, ToolError, execute_tool, tools_for
 from app.llm.base import NoProviderError
@@ -49,7 +50,8 @@ def summarize_result(output: str) -> str:
     try:
         data = json.loads(output)
     except (TypeError, ValueError):
-        return (output or "")[:200]
+        # Text (a coverage answer): its first line is the headline.
+        return (output or "").split("\n", 1)[0][:200]
     if isinstance(data, dict) and "error" in data:
         return f"error: {data['error']}"[:200]
     if isinstance(data, list):
@@ -61,6 +63,8 @@ def summarize_result(output: str) -> str:
             return f"{label}: {extra}"[:200] if extra else str(label)[:200]
         parts = []
         for key, value in data.items():
+            if key == "id" or key.endswith("_id"):
+                continue  # a UUID: nobody reads it, and the card names things instead
             label = key.replace("_", " ")
             if isinstance(value, list):
                 parts.append(f"{label}: {len(value)}")
@@ -246,8 +250,11 @@ async def run_specialist(
                 steps.append(step)
                 await save()
                 if step["changes"]:
-                    output = await _propose(sessionmaker, message_id, call)
-                    step.update(status="proposed", summary="waiting for your approval")
+                    output, proposed = await _propose(sessionmaker, message_id, call)
+                    if proposed:
+                        step.update(status="proposed", summary="waiting for your approval")
+                    else:
+                        step.update(status="failed", summary=summarize_result(output))
                 else:
                     output, status, new_viz = await _read(ctx, agent_name, call, message_id)
                     viz_blocks.extend(new_viz)
@@ -287,16 +294,28 @@ async def _read(ctx: ToolContext, agent_name: str, call: ToolCallEvent, message_
         await ctx.session.rollback()
 
 
-async def _propose(sessionmaker, message_id, call: ToolCallEvent) -> str:
+async def _propose(sessionmaker, message_id, call: ToolCallEvent) -> tuple[str, bool]:
+    """Save a write as a proposal, its references pinned to the rows the
+    person will see on the card and approval will act on. A reference that
+    fits no row, or several, is refused back to the agent instead."""
     with anyio.CancelScope(shield=True):
         async with sessionmaker() as session:
-            session.add(ChatProposal(message_id=message_id, tool_name=call.name, arguments=call.arguments))
+            try:
+                arguments = await proposal_service.pin(session, message_id, call.name, call.arguments)
+            except ToolError as e:
+                return json.dumps({"error": f"Not proposed: {e}"}), False
+            except Exception:
+                # Model output is untrusted: whatever it was, this one change
+                # is refused and the rest of the reply goes on.
+                log.exception("Pinning %s on reply %s failed", call.name, message_id)
+                return json.dumps({"error": "Not proposed: its references couldn't be read."}), False
+            session.add(ChatProposal(message_id=message_id, tool_name=call.name, arguments=arguments))
             await session.commit()
     return json.dumps({
         "proposed": True,
         "status": "awaiting the user's approval",
         "note": "Not applied yet. The user approves or rejects it after you finish.",
-    })
+    }), True
 
 
 async def mark_interrupted(sessionmaker) -> None:

@@ -236,6 +236,22 @@ async def test_dependents_separate_breaks_from_drift(db):
 
 
 @pytest.mark.asyncio
+async def test_dependents_without_a_stack_is_plain_usage(db):
+    """A product with no stack has nothing to be off: it just uses the
+    technology, with no slot and no claim about whether it would break."""
+    async with db() as session:
+        product = Product(slug="taskmaster", name="Taskmaster")
+        session.add(product)
+        await session.commit()
+        neo4j = await make_tech(session, "neo4j")
+        await stack_service.record_usage(
+            session, product.id, ProductTechnologyWrite(tech_id=neo4j.id)
+        )
+        [usage] = await tech_service.dependents(session, neo4j.id)
+        assert (usage.slot_id, usage.required, usage.off_stack) == (None, False, False)
+
+
+@pytest.mark.asyncio
 async def test_exposure_modes_are_independent(db):
     """Question 3. Each death mode stands alone: a deprecated stance surfaces
     with no version rows at all, and a bus factor of one surfaces regardless of
@@ -274,6 +290,30 @@ async def test_exposure_modes_are_independent(db):
             "bolt-driver": ["stance"],
             "left-pad": ["bus_factor"],
         }
+
+
+@pytest.mark.asyncio
+async def test_lifecycle_counts_what_exposure_cannot_judge(db):
+    """No end-of-life date and no maintainer count means exposure can never
+    flag it, so an empty exposure list is not a clean bill for it."""
+    async with db() as session:
+        assert await tech_service.lifecycle(session) == {"technologies": 0, "unknown": 0}
+        dated = await make_tech(session, "postgres")
+        await tech_service.create_version(
+            session, dated.id, VersionCreate(label="17", eol_on=date.today() + timedelta(days=2000))
+        )
+        team = await tech_service.create_vendor(
+            session, VendorCreate(name="a team", kind=VendorKind.individual, bus_factor=4)
+        )
+        counted = await make_tech(session, "left-pad")
+        await tech_service.update_technology(session, counted.id, TechnologyUpdate(vendor_id=team.id))
+        await make_tech(session, "neo4j")
+        nameless = await tech_service.create_vendor(
+            session, VendorCreate(name="nobody counted", kind=VendorKind.individual)
+        )
+        unknown = await make_tech(session, "qdrant")
+        await tech_service.update_technology(session, unknown.id, TechnologyUpdate(vendor_id=nameless.id))
+        assert await tech_service.lifecycle(session) == {"technologies": 4, "unknown": 2}
 
 
 @pytest.mark.asyncio

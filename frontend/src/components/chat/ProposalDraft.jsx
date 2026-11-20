@@ -1,8 +1,16 @@
 import React from "react";
+import { EDGE } from "../../lib/words.js";
+import { Term } from "../shared/Term.jsx";
+import { display, fieldRows, objects } from "./proposal-words.js";
 
 // A proposed change shown as the draft it is, so it can be reviewed before
 // anyone approves it: PRDs as epics → stories → tickets, tickets and
-// strategies in full. Anything else falls back to its fields.
+// strategies in full. Anything else falls back to its fields. `named` is the
+// same arguments with each reference (goal, capability, feature, product,
+// ticket) replaced by its name; what the agent passed stays in `title`.
+// Arguments are model output: every value goes through display() and every
+// list through objects(), so a wrong shape shows as text instead of breaking
+// the page.
 
 const LABEL = { fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: "var(--tracking-caps)", textTransform: "uppercase", color: "var(--text-secondary)" };
 const BODY = { fontSize: "var(--text-xs)", color: "var(--text-body)", lineHeight: "var(--leading-body)", whiteSpace: "pre-wrap" };
@@ -12,13 +20,13 @@ function Field({ label, children }) {
   return (
     <div>
       <div style={LABEL}>{label}</div>
-      <div style={BODY}>{Array.isArray(children) ? children.join(", ") : String(children)}</div>
+      <div style={BODY}>{display(children)}</div>
     </div>
   );
 }
 
 function Budget({ value }) {
-  if (!value) return null;
+  if (typeof value !== "string" || !value) return null;
   return (
     <span title="Context budget: how much one coding session it needs" style={{ fontFamily: "var(--font-mono)", fontSize: 10, padding: "0 5px", borderRadius: "var(--radius-xs)", border: `1px solid ${value === "L" ? "var(--danger-fg)" : "var(--border-default)"}`, color: value === "L" ? "var(--danger-fg)" : "var(--text-secondary)" }}>
       {value}
@@ -30,7 +38,7 @@ function TicketDraft({ t, open = false }) {
   return (
     <details open={open || undefined} style={{ fontSize: "var(--text-xs)" }}>
       <summary style={{ cursor: "pointer", color: "var(--text-heading)" }}>
-        {t.title || "(untitled ticket)"} <Budget value={t.context_budget} />
+        {display(t.title) || "(untitled ticket)"} <Budget value={t.context_budget} />
       </summary>
       <div style={{ display: "flex", flexDirection: "column", gap: 6, padding: "6px 0 4px 14px" }}>
         <Field label="Description">{t.description}</Field>
@@ -44,29 +52,29 @@ function TicketDraft({ t, open = false }) {
 }
 
 function PrdDraft({ args }) {
-  const doc = args.document ?? {};
-  const epics = doc.epics ?? [];
-  const tickets = epics.flatMap((e) => (e.stories ?? []).flatMap((s) => s.tickets ?? []));
+  const doc = objects([args.document])[0] ?? {};
+  const epics = objects(doc.epics);
+  const tickets = epics.flatMap((e) => objects(e.stories).flatMap((s) => objects(s.tickets)));
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
       <div style={BODY}>
-        PRD draft for <strong>{args.product}</strong>: {epics.length} epic{epics.length === 1 ? "" : "s"}, {tickets.length} ticket{tickets.length === 1 ? "" : "s"}.
+        PRD draft for <strong>{display(args.product)}</strong>: {epics.length} epic{epics.length === 1 ? "" : "s"}, {tickets.length} ticket{tickets.length === 1 ? "" : "s"}.
         {" "}It replaces the product's current draft while that draft's tickets are all still planned.
       </div>
-      {doc.summary && <div style={BODY}>{doc.summary}</div>}
+      {doc.summary && <div style={BODY}>{display(doc.summary)}</div>}
       {epics.map((e, i) => (
         <div key={i} style={{ borderLeft: "1px solid var(--border-default)", paddingLeft: 10, display: "flex", flexDirection: "column", gap: 4 }}>
           <div style={{ fontSize: "var(--text-xs)", fontWeight: "var(--weight-semibold)", color: "var(--text-heading)" }}>
-            Epic: {e.title}{e.capability ? <span style={{ fontWeight: "normal", color: "var(--text-secondary)" }}> · capability: {e.capability}</span> : null}
+            Epic: {display(e.title)}{e.capability ? <span style={{ fontWeight: "normal", color: "var(--text-secondary)" }}> · capability: {display(e.capability)}</span> : null}
           </div>
-          {e.acceptance_criteria && <div style={{ ...BODY, color: "var(--text-secondary)" }}>Done when: {e.acceptance_criteria}</div>}
-          {(e.stories ?? []).map((s, j) => (
+          {e.acceptance_criteria && <div style={{ ...BODY, color: "var(--text-secondary)" }}>Done when: {display(e.acceptance_criteria)}</div>}
+          {objects(e.stories).map((s, j) => (
             <div key={j} style={{ paddingLeft: 10, display: "flex", flexDirection: "column", gap: 2 }}>
               <div style={{ fontSize: "var(--text-xs)", color: "var(--text-heading)" }}>
-                Story: {s.title}{s.feature ? <span style={{ color: "var(--text-secondary)" }}> · feature: {s.feature}</span> : null}
+                Story: {display(s.title)}{s.feature ? <span style={{ color: "var(--text-secondary)" }}> · feature: {display(s.feature)}</span> : null}
               </div>
               <div style={{ paddingLeft: 10, display: "flex", flexDirection: "column", gap: 2 }}>
-                {(s.tickets ?? []).map((t, k) => <TicketDraft key={k} t={t} />)}
+                {objects(s.tickets).map((t, k) => <TicketDraft key={k} t={t} />)}
               </div>
             </div>
           ))}
@@ -79,10 +87,10 @@ function PrdDraft({ args }) {
 function StrategyDraft({ args }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-      <div style={BODY}>Delivery strategy for <strong>{args.product}</strong></div>
+      <div style={BODY}>Delivery strategy for <strong>{display(args.product)}</strong></div>
       <ol style={{ margin: 0, paddingLeft: 18, ...BODY }}>
-        {(args.phases ?? []).map((p, i) => (
-          <li key={i}>{p.name}{p.start != null ? ` · starts at ${p.start}` : ""}{p.length != null ? ` · lasts ${p.length}` : ""}</li>
+        {objects(args.phases).map((p, i) => (
+          <li key={i}>{display(p.name)}{p.start != null ? ` · starts at ${display(p.start)}` : ""}{p.length != null ? ` · lasts ${display(p.length)}` : ""}</li>
         ))}
       </ol>
       <Field label="Why">{args.rationale}</Field>
@@ -90,26 +98,39 @@ function StrategyDraft({ args }) {
   );
 }
 
-function Fields({ args }) {
+function Fields({ args, named }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-      {Object.entries(args ?? {}).map(([k, v]) => (
-        <Field key={k} label={k.replace(/_/g, " ")}>{typeof v === "object" && !Array.isArray(v) ? JSON.stringify(v) : v}</Field>
+      {fieldRows(args, named).filter((r) => r.text !== "").map((r) => (
+        <div key={r.key}>
+          <div style={LABEL}>{r.label}</div>
+          <div style={BODY}><span title={r.raw ?? undefined}>{r.text}</span></div>
+        </div>
       ))}
     </div>
   );
 }
 
-export function ProposalDraft({ tool, args }) {
-  if (tool === "create_prd_draft") return <PrdDraft args={args} />;
-  if (tool === "create_delivery_strategy") return <StrategyDraft args={args} />;
+function LinkDraft({ named }) {
+  return (
+    <div style={BODY}>
+      <strong>{display(named.src)}</strong> <Term dict={EDGE} value={typeof named.kind === "string" ? named.kind : "DEPENDS_ON"} /> <strong>{display(named.dst)}</strong>
+    </div>
+  );
+}
+
+export function ProposalDraft({ tool, args, named }) {
+  const shown = named ?? args ?? {};
+  if (tool === "create_prd_draft") return <PrdDraft args={shown} />;
+  if (tool === "create_delivery_strategy") return <StrategyDraft args={shown} />;
+  if (tool === "link_features") return <LinkDraft named={shown} />;
   if (tool === "create_ticket") {
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-        <div style={BODY}>New ticket for <strong>{args.product}</strong></div>
-        <TicketDraft t={args} open />
+        <div style={BODY}>New ticket for <strong>{display(shown.product)}</strong>{shown.epic_id ? ` · epic: ${display(shown.epic_id)}` : ""}{shown.story_id ? ` · story: ${display(shown.story_id)}` : ""}</div>
+        <TicketDraft t={shown} open />
       </div>
     );
   }
-  return <Fields args={args} />;
+  return <Fields args={args} named={named} />;
 }

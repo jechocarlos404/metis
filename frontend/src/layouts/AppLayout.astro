@@ -43,11 +43,12 @@ const groups = [
   },
   {
     label: "Build & buy",
-    // Closed by default; open when the current page is inside it. Decided by
-    // path, not by the items, so a page under /tech opens it even if the
-    // presence call failed.
+    // Closed by default; open when the current page is inside it, or once
+    // technologies or stacks exist, so the item that arrives with them is
+    // seen. The path check keeps a page under /tech open even if the presence
+    // call failed.
     collapsible: true,
-    open: ["/features", "/tech", "/stacks"].some(under),
+    open: hasTech || hasStacks || ["/features", "/tech", "/stacks"].some(under),
     items: [
       { href: "/features", label: "Features", icon: "network" },
       hasTech && { href: "/tech", label: "Technology", icon: "circuit-board" },

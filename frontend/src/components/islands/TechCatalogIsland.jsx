@@ -90,7 +90,7 @@ function Skeleton({ columns, rows = 12 }) {
 
 const EMPTY = { margin: 16, padding: "var(--space-4)", border: "1px dashed var(--border-default)", borderRadius: "var(--radius-sm)", color: "var(--text-secondary)", fontSize: "var(--text-sm)" };
 
-export default function TechCatalogIsland({ initialView = "catalog", initialQuery = "", initialKind = "", initialLayer = "", initialAdoption = "" }) {
+export default function TechCatalogIsland({ initialView = "catalog", initialQuery = "", initialKind = "", initialLayer = "", initialAdoption = "", canWrite = false }) {
   const [view, setView] = React.useState(initialView);
   const [q, setQ] = React.useState(initialQuery);
   const [kind, setKind] = React.useState(initialKind);
@@ -99,7 +99,7 @@ export default function TechCatalogIsland({ initialView = "catalog", initialQuer
   const [offset, setOffset] = React.useState(0);
   const [page, setPage] = React.useState(null);
   const [exposure, setExposure] = React.useState(null);
-  const [techTotal, setTechTotal] = React.useState(null);
+  const [lifecycle, setLifecycle] = React.useState(null); // {technologies, unknown}
   const [windowDays, setWindowDays] = React.useState(180);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState(null);
@@ -142,12 +142,13 @@ export default function TechCatalogIsland({ initialView = "catalog", initialQuer
     if (view !== "exposure") return;
     let live = true;
     setLoading(true);
-    // The catalog size tells "nothing recorded" apart from "nothing at risk".
-    Promise.all([api(`/exposure?window_days=${windowDays}`), api("/tech?limit=1")])
-      .then(([e, t]) => {
+    // "Nothing at risk" only means something for technologies with an
+    // end-of-life date or a maintainer count; the rest can never show up here.
+    Promise.all([api(`/exposure?window_days=${windowDays}`), api("/tech/lifecycle")])
+      .then(([e, l]) => {
         if (!live) return;
         setExposure(e);
-        setTechTotal(t.total);
+        setLifecycle(l);
       })
       .catch((e) => live && setError(e.detail ?? e.message))
       .finally(() => live && setLoading(false));
@@ -160,14 +161,21 @@ export default function TechCatalogIsland({ initialView = "catalog", initialQuer
   const rows = page?.rows ?? [];
   const facets = page?.facet_counts ?? {};
   const exposed = exposure?.answer.length ?? 0;
+  const techTotal = lifecycle?.technologies ?? null;
+  const unknown = lifecycle?.unknown ?? 0;
+  const judged = (techTotal ?? 0) - unknown;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0, overflowY: "auto" }}>
       <PageHeader
-        title="Tech"
+        title="Technology"
         meta={
           view === "exposure"
-            ? `${exposed} at risk · ${formatAsOf(exposure?.as_of)}`
+            ? [
+                exposed === 0 && techTotal > 0 && judged === 0 ? "no lifecycle data" : `${exposed} at risk`,
+                unknown > 0 && !(exposed === 0 && judged === 0) && `${unknown} without lifecycle data`,
+                formatAsOf(exposure?.as_of),
+              ].filter(Boolean).join(" · ")
             : loading ? "loading" : count(total, "technology", "technologies")
         }
       />
@@ -211,7 +219,9 @@ export default function TechCatalogIsland({ initialView = "catalog", initialQuer
                   <div style={EMPTY}>
                     {q || kind || layer || adoption
                       ? "No technology matches these filters."
-                      : "No technologies recorded yet. They appear here once they're added through the metis API."}
+                      : canWrite
+                        ? <>No technologies yet. They come in with a product's seed file, imported from <a href="/settings">Settings → Seed files</a>.</>
+                        : "No technologies yet. They appear once an editor imports a product's seed file that lists them."}
                   </div>
                 ) : (
                   rows.map((r) => (
@@ -290,7 +300,9 @@ export default function TechCatalogIsland({ initialView = "catalog", initialQuer
                   <div style={EMPTY}>
                     {techTotal === 0
                       ? "No technologies recorded, so nothing to check."
-                      : `Nothing expires or loses support within ${windowDays} days.`}
+                      : judged === 0
+                        ? `No end-of-life dates or maintainer counts are recorded for ${techTotal === 1 ? "this technology" : `these ${techTotal} technologies`}, so this can't tell whether any is at risk.`
+                        : `Nothing expires or loses support within ${windowDays} days among the ${count(judged, "technology", "technologies")} with an end-of-life date or maintainer count.${unknown > 0 ? ` The other ${unknown} have neither recorded.` : ""}`}
                   </div>
                 ) : (
                   exposure.answer.map((r) => (

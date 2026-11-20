@@ -112,21 +112,82 @@ export const VERDICT = {
   unknown: { label: "not described", tone: "neutral", hint: "nobody has named the capabilities it needs yet" },
 };
 
-/** Where one capability need stands against the inventory. */
+/** Where one capability stands against the inventory. "Ours" takes a
+ *  finished (done) feature: planned and in-progress work isn't having it.
+ *  "missing" is never a capability's word: it is a feature's or a step's. */
 export const NEED = {
-  ours: { label: "ours", tone: "ok", hint: "one of our features realizes it" },
+  ours: { label: "ours", tone: "ok", hint: "a finished feature of one of our products realizes it" },
   elsewhere: { label: "only elsewhere", tone: "warn", hint: "only products we don't own have it, so it isn't ours" },
-  none: { label: "missing", tone: "danger", hint: "no product in metis has it" },
+  none: { label: "not built yet", tone: "danger", hint: "no finished feature in metis realizes it" },
 };
 
 /** The NEED key for a capability match or inventory entry (null: no match).
  *  `ours` false covers two cases; external_products tells them apart. */
 export const needKey = (c) => (c?.ours ? "ours" : c?.external_products?.length ? "elsewhere" : "none");
 
+/** For a "missing" feature or step: the NEED key every capability it lacks
+ *  shares ("elsewhere" when each is known from a product we don't own, "none"
+ *  when none is), or null for a mix. Takes the needs' matches (null for an
+ *  unmatched name). Shown beside "missing", it says why. */
+export function lackingKey(matches) {
+  const keys = new Set(matches.map(needKey).filter((k) => k !== "ours"));
+  return keys.size === 1 ? [...keys][0] : null;
+}
+
+/** "A", "A and B", "A, B and C". */
+export const andList = (names) =>
+  names.length <= 1 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+
 /** One-line headline for a coverage report, the same wording everywhere. */
 export function coverageHeadline(report) {
   return `We have ${report.existing} of the ${report.needed} capabilities needed · ${report.mature} proven (beta or stable)`;
 }
+
+// ---- A scored product (GET /products/{id}/coverage) ----
+// The product page and its Share snapshot both say it with these, so the two
+// can't drift apart. Only someone else's product is scored: ours would only
+// be scoring themselves.
+
+/** The answer first: how much we have, and whether anything is buildable. */
+export function scoreHeadline(score) {
+  if (!score.report) return null;
+  return `${coverageHeadline(score.report)}${score.buildable.length === 0 ? ". Nothing is buildable yet." : ""}`;
+}
+
+/** Under "missing": how many of those also have capabilities nobody named. */
+export function incompleteNote(score) {
+  const n = score.missing_incomplete.length;
+  if (n === 0) return null;
+  return `${n === score.missing.length ? `All ${n}` : `${n} of these`} also have capabilities nobody has named yet, so adding what's named may not be enough.`;
+}
+
+export const gapsTitle = (gaps) => `${count(gaps.length, "capability", "capabilities")} we don't have, most useful first`;
+/** After a missing capability's name in the ranked list. */
+export function gapNote(gap) {
+  return [
+    `needed by ${count(gap.features, "feature")}`,
+    gap.only_gap > 0 ? `the only gap in ${gap.only_gap} of them` : null,
+    gap.elsewhere.length > 0 ? `also in ${andList(gap.elsewhere.map((p) => p.name))}` : "in no other product",
+  ].filter(Boolean).join(" · ");
+}
+export const GAP_HINT = "The only gap: adding it covers every capability named for that feature, whose list may be incomplete.";
+
+export const CLOSEST_TITLE = "Closest of our products";
+/** Closest products with ties on one line: [{ products, capabilities }]. */
+export function closestGroups(closest) {
+  const groups = [];
+  for (const c of closest) {
+    const last = groups[groups.length - 1];
+    if (last && last.capabilities === c.capabilities) last.products.push(c.product);
+    else groups.push({ products: [c.product], capabilities: c.capabilities });
+  }
+  return groups;
+}
+/** After a closest group's names. */
+export const closestNote = (group, score) =>
+  `${group.products.length === 1 ? "has" : "have"} ${group.capabilities} of the ${score.report.needed} capabilities ${score.product.name}'s features name`;
+
+export const NOTHING_TO_SCORE = "Nothing to score yet: none of its features names a capability.";
 
 /** A scored product's features by VERDICT key (GET /products/{id}/coverage).
  *  The API partitions them, so the groups sum to total_features. */

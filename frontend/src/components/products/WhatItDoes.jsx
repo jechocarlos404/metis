@@ -1,14 +1,15 @@
 import React from "react";
 import { Select, StatusBadge, Tag } from "../../ds";
-import { count } from "../../lib/words.js";
+import { NOTHING_TO_SCORE, count } from "../../lib/words.js";
 import { BuildNext, CoverageReport, ProductScore } from "../shared/coverage.jsx";
 
 const heading = { fontSize: "var(--text-sm)", fontWeight: "var(--weight-semibold)", color: "var(--text-heading)", marginBottom: 8 };
 const muted = { fontSize: "var(--text-sm)", color: "var(--text-secondary)" };
 const panel = { background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)" };
 
-// The product's profile: how much of it we could build, its features by
-// capability, the journeys that pass through it, and hand-added capabilities.
+// The product's profile: how much of it we could build (someone else's only),
+// its features by capability, the journeys that pass through it, and
+// hand-added capabilities.
 export function WhatItDoes({ product, features, score, capabilities, journeys, bundles, canWrite, onAddBundle, onRemoveBundle }) {
   const capById = React.useMemo(() => new Map(capabilities.map((c) => [c.id, c])), [capabilities]);
   if (features == null) {
@@ -42,22 +43,32 @@ export function WhatItDoes({ product, features, score, capabilities, journeys, b
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-      <section style={panel}>
-        <div style={{ padding: "12px 16px", fontSize: "var(--text-sm)", fontWeight: "var(--weight-semibold)", color: "var(--text-heading)" }}>
-          {product.external ? `How much of ${product.name} we could build` : "Coverage"}
-        </div>
-        {score == null && <div role="status" style={{ padding: "0 16px 14px", fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>Scoring…</div>}
-        {score === false && <div style={{ padding: "0 16px 14px", fontSize: "var(--text-xs)", color: "var(--danger-fg)" }}>Couldn't score this product.</div>}
-        {score && <ProductScore score={score} />}
-        {score && product.external && <BuildNext score={score} />}
-        {score && score.report && (
-          <details style={{ borderTop: "1px solid var(--border-hairline)" }}>
-            <summary style={{ padding: "10px 16px", cursor: "pointer", fontSize: "var(--text-xs)", color: "var(--text-accent)" }}>Capability by capability</summary>
-            <CoverageReport report={score.report} />
-          </details>
-        )}
-        {score && !score.report && <div style={{ padding: "0 16px 14px", fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>No capability links known for this product yet.</div>}
-      </section>
+      {/* Only someone else's product is scored: ours would score themselves. */}
+      {product.external && (
+        <section style={panel}>
+          <div style={{ padding: "12px 16px", fontSize: "var(--text-sm)", fontWeight: "var(--weight-semibold)", color: "var(--text-heading)" }}>
+            How much of {product.name} we could build
+          </div>
+          {score == null && <div role="status" style={{ padding: "0 16px 14px", fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>Scoring…</div>}
+          {score === false && <div style={{ padding: "0 16px 14px", fontSize: "var(--text-xs)", color: "var(--danger-fg)" }}>Couldn't score this product.</div>}
+          {score && <ProductScore score={score} />}
+          {score && <BuildNext score={score} />}
+          {score && score.report && (
+            <details style={{ borderTop: "1px solid var(--border-hairline)" }}>
+              <summary style={{ padding: "10px 16px", cursor: "pointer", fontSize: "var(--text-xs)", color: "var(--text-accent)" }}>Capability by capability</summary>
+              <CoverageReport report={score.report} scored={product} />
+            </details>
+          )}
+          {score && !score.report && (
+            <div style={{ padding: "0 16px 14px", fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>
+              {NOTHING_TO_SCORE}{" "}
+              {canWrite ? (
+                <>Pick a capability for each on <a href={`/features?product=${product.id}`}>Features</a>, or import a seed file that names them from <a href="/settings">Settings</a>.</>
+              ) : "An editor or admin can name them."}
+            </div>
+          )}
+        </section>
+      )}
 
       <section>
         <div style={heading}>Features by capability</div>

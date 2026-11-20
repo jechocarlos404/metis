@@ -1,41 +1,46 @@
 import React from "react";
 import { StatusBadge } from "../../ds";
 import { count } from "../../lib/words.js";
+import { ownedTrees } from "../graph/goal-facts.js";
 
-// A product serves one goal (Product.goal_id), which may sit under an org goal.
-// Its own goals are the ones the goals API says belong to it (product_id):
-// that goal, the goal it is part of, and their other goals no other product
-// points into. They list first; below, folded: other goals that motivate a
-// capability one of this product's features realizes (direct links only:
-// feature -> capability <- goal).
+// A product's own goals are the ones the goals API says belong to it
+// (product_id), drawn as the tree they form, whichever of them the product
+// points at (Product.goal_id): Steps points at PG-61 and owns OG-60 with
+// PG-61 and PG-62 under it, the same shape as the Goals list. Below, folded:
+// other goals that motivate a capability one of this product's features
+// realizes (direct links only: feature -> capability <- goal).
 export function ProductGoals({ product, goals, features, capabilities, motivations, canWrite }) {
-  const goal = goals.find((g) => g.id === product.goal_id);
-  const parent = goal && goals.find((g) => g.id === goal.parent_goal_id);
-  const subgoals = goals.filter((g) => g.product_id === product.id && g.id !== goal?.id && g.id !== parent?.id);
+  let trees = ownedTrees(product.id, goals);
+  // A goal two of our products point at belongs to neither; still show the one it points at.
+  const pointed = goals.find((g) => g.id === product.goal_id);
+  if (trees.length === 0 && pointed && !product.external) trees = [{ goal: pointed, children: [] }];
   const own = new Set([product.goal_id, ...goals.filter((g) => g.product_id === product.id).map((g) => g.id)]);
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      {goal ? (
-        <div style={{ background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", padding: "12px 16px", display: "flex", flexDirection: "column", gap: 6 }}>
-          <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-            <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-secondary)" }}>{goal.display_id}</span>
-            <a href={`/goals?goal=${goal.id}`} style={{ flex: "1 1 180px", minWidth: 0, fontSize: "var(--text-sm)", fontWeight: "var(--weight-semibold)", color: "var(--text-heading)" }}>{goal.title}</a>
-            <StatusBadge status={goal.status} />
+      {trees.length > 0 ? trees.map(({ goal, children }) => {
+        const parent = goals.find((g) => g.id === goal.parent_goal_id);
+        return (
+          <div key={goal.id} style={{ background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", padding: "12px 16px", display: "flex", flexDirection: "column", gap: 6 }}>
+            <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+              <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-secondary)" }}>{goal.display_id}</span>
+              <a href={`/goals?goal=${goal.id}`} style={{ flex: "1 1 180px", minWidth: 0, fontSize: "var(--text-sm)", fontWeight: "var(--weight-semibold)", color: "var(--text-heading)" }}>{goal.title}</a>
+              <StatusBadge status={goal.status} />
+            </div>
+            {goal.description && <div style={{ fontSize: "var(--text-sm)", color: "var(--text-body)" }}>{goal.description}</div>}
+            {goal.success_criteria && <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>Done when: {goal.success_criteria}</div>}
+            {parent && (
+              <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>
+                Part of <a href={`/goals?goal=${parent.id}`}>{parent.title}</a>
+              </div>
+            )}
+            {children.length > 0 && (
+              <div style={{ borderTop: "1px solid var(--border-hairline)", marginTop: 4, paddingTop: 10, display: "flex", flexDirection: "column", gap: 8 }}>
+                {children.map(({ goal: g, depth }) => <GoalRow key={g.id} goal={g} indent={depth - 1} />)}
+              </div>
+            )}
           </div>
-          {goal.description && <div style={{ fontSize: "var(--text-sm)", color: "var(--text-body)" }}>{goal.description}</div>}
-          {goal.success_criteria && <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>Done when: {goal.success_criteria}</div>}
-          {parent && (
-            <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>
-              Part of <a href={`/goals?goal=${parent.id}`}>{parent.title}</a>
-            </div>
-          )}
-          {subgoals.length > 0 && (
-            <div style={{ borderTop: "1px solid var(--border-hairline)", marginTop: 4, paddingTop: 10, display: "flex", flexDirection: "column", gap: 8 }}>
-              {subgoals.map((g) => <GoalRow key={g.id} goal={g} />)}
-            </div>
-          )}
-        </div>
-      ) : (
+        );
+      }) : (
         <div style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>
           {product.external ? "Someone else's product: metis doesn't record its goals." : <>
             No goals for this product yet.
@@ -48,10 +53,10 @@ export function ProductGoals({ product, goals, features, capabilities, motivatio
   );
 }
 
-function GoalRow({ goal: g, children }) {
+function GoalRow({ goal: g, indent = 0, children }) {
   return (
     // Wraps the status under the title at phone width rather than squeezing it to a word per line.
-    <div style={{ display: "flex", flexWrap: "wrap", gap: "4px 10px", alignItems: "baseline", fontSize: "var(--text-sm)" }}>
+    <div style={{ display: "flex", flexWrap: "wrap", gap: "4px 10px", alignItems: "baseline", fontSize: "var(--text-sm)", paddingLeft: indent * 16 }}>
       <span style={{ flex: "none", width: "3.5rem", fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-secondary)" }}>{g.display_id}</span>
       <span style={{ flex: "1 1 180px", minWidth: 0 }}>
         <a href={`/goals?goal=${g.id}`}>{g.title}</a>

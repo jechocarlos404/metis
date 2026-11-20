@@ -18,3 +18,28 @@ export function deleteEffects(goal, goals, capsByGoal, products) {
     children: goals.filter((g) => g.parent_goal_id === goal.id),
   };
 }
+
+/**
+ * The goals a product owns (the goals API's product_id), as the tree they
+ * form: each owned goal whose parent it doesn't own starts a tree, and its
+ * owned goals follow it, depth first, in the API's order.
+ * Returns [{ goal, children: [{ goal, depth }] }], depth 1 directly under it.
+ */
+export function ownedTrees(productId, goals) {
+  const own = goals.filter((g) => g.product_id === productId);
+  const ids = new Set(own.map((g) => g.id));
+  const seen = new Set();
+  const below = (id, depth, out) => {
+    for (const g of own) {
+      if (g.parent_goal_id !== id || seen.has(g.id)) continue;
+      seen.add(g.id);
+      out.push({ goal: g, depth });
+      below(g.id, depth + 1, out);
+    }
+    return out;
+  };
+  return own.filter((g) => !ids.has(g.parent_goal_id)).map((root) => {
+    seen.add(root.id);
+    return { goal: root, children: below(root.id, 1, []) };
+  });
+}

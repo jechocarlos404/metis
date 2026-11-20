@@ -2,7 +2,7 @@ import { slugify } from "./words.js";
 
 // Home's idea check, pre-filled from a link: /home?idea=<name>&caps=<slug>,<slug>,...
 // (the MCP check_idea tool ends with one). Each cap is an exact slug or an
-// exact name; anything else stays as typed and reads "missing". Never fuzzy.
+// exact name; anything else stays as typed and reads "not built yet". Never fuzzy.
 // idea and caps are the decoded query values (readParam), or null.
 export function parseIdeaParams(idea, caps, inventory) {
   const picked = [];

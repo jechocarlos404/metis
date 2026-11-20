@@ -271,7 +271,7 @@ def score_text(score) -> str:
     if not score.buildable and score.partly:
         lines.append(
             "Nothing counts as buildable yet: its features still have capabilities nobody has "
-            "named. Partly known is the useful number here."
+            "named."
         )
     lacking = {
         f.name: [n.match.name if n.match else n.name for n in f.capabilities if not (n.match and n.match.ours)]
@@ -298,7 +298,7 @@ def score_text(score) -> str:
     if gaps:
         lines += ["", f"{_count(len(gaps), 'capability', 'capabilities')} we don't have, most useful first:"]
         for i, g in enumerate(gaps, 1):
-            covers = f"; adding it covers everything named for {g.only_gap} of them" if g.only_gap else ""
+            covers = f" · the only gap in {g.only_gap} of them" if g.only_gap else ""
             where = f"also in {', '.join(p.name for p in g.elsewhere)}" if g.elsewhere else "in no other product"
             lines.append(f"{i}. {g.name} · needed by {_count(g.features, 'feature')}{covers} · {where}")
     if score.closest_products:
@@ -309,8 +309,8 @@ def score_text(score) -> str:
         ]
     lines += [
         "",
-        "\"Adding it covers everything named\" is not \"buildable\": a feature whose capability list "
-        "is incomplete never counts as buildable, so at best it becomes partly known.",
+        "\"The only gap\" is not \"buildable\": a feature whose capability list is incomplete "
+        "never counts as buildable, so adding its only gap makes it partly known at best.",
     ]
     return "\n".join(lines)
 

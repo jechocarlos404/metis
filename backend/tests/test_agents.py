@@ -664,7 +664,7 @@ async def test_existing_product_coverage_says_what_the_product_page_says(db):
         "- Plan offline (we don't have: Route Planning, Heatmaps)",
         "1 not described — nobody has named the capabilities it needs yet.",
         "2 capabilities we don't have, most useful first:",
-        "1. Route Planning · needed by 2 features; adding it covers everything named for 1 of them · in no other product",
+        "1. Route Planning · needed by 2 features · the only gap in 1 of them · in no other product",
         "2. Heatmaps · needed by 1 feature · in no other product",
         "- Atlas has 2 of the 4 capabilities Rival's features name",
     ]:

@@ -53,6 +53,7 @@ export default function FeaturesIsland({ canWrite = true }) {
   const changeProduct = (v) => { setProductFilter(v); writeParams({ product: v }, { push: true }); };
   const [draft, setDraft] = React.useState(EMPTY_DRAFT);
   const [edgeDraft, setEdgeDraft] = React.useState({ kind: "DEPENDS_ON", targetId: "" });
+  const [edgeError, setEdgeError] = React.useState(null); // shown under the relationship picker
   const [saving, setSaving] = React.useState(false);
   const [confirmingDelete, setConfirmingDelete] = React.useState(false);
   const [error, setError] = React.useState(null);
@@ -137,6 +138,7 @@ export default function FeaturesIsland({ canWrite = true }) {
 
   React.useEffect(() => {
     setRecheck(null);
+    setEdgeError(null);
     refreshDetail(selected);
   }, [selected, refreshDetail]);
 
@@ -369,7 +371,7 @@ export default function FeaturesIsland({ canWrite = true }) {
 
   const addEdge = async () => {
     if (!selected || !edgeDraft.targetId) return;
-    setError(null);
+    setEdgeError(null);
     try {
       await api("/features/edges", {
         method: "POST",
@@ -379,22 +381,21 @@ export default function FeaturesIsland({ canWrite = true }) {
       await load();
       await refreshDetail(selected);
     } catch (e) {
-      setError(e instanceof ApiError && e.status === 422 && String(e.message).includes("cycle")
-        ? "That would make a circular dependency, so it was not added."
-        : String(e.message));
+      // A refused loop says, in plain words, which chain it would close.
+      setEdgeError(String(e.message));
     }
   };
 
   const removeEdge = async (srcId, dstId, kind) => {
     const edge = edgeList.find((e) => e.src_id === srcId && e.dst_id === dstId && e.kind === kind);
     if (!edge) return;
-    setError(null);
+    setEdgeError(null);
     try {
       await api(`/features/edges/${edge.id}`, { method: "DELETE" });
       await load();
       await refreshDetail(selected);
     } catch (e) {
-      setError(String(e.message));
+      setEdgeError(String(e.message));
     }
   };
 
@@ -411,12 +412,12 @@ export default function FeaturesIsland({ canWrite = true }) {
         actions={
           <>
             {products.length > 0 && (
-              <Select value={activeProduct} onChange={(e) => changeProduct(e.target.value)} style={{ width: 200 }}
+              <Select aria-label="Product" value={activeProduct} onChange={(e) => changeProduct(e.target.value)} style={{ width: 200 }}
                 options={[...(tab === "graph" ? [] : [{ value: "", label: "All products" }]),
                   ...productOptions(products),
                   { value: "unattributed", label: "No product" }]} />
             )}
-            <Input placeholder="Find features like…" style={{ width: 220 }} inputStyle={{ height: 30 }}
+            <Input aria-label="Find features" placeholder="Find features like…" style={{ width: 220 }} inputStyle={{ height: 30 }}
               value={query}
               onChange={(e) => {
                 setQuery(e.target.value);
@@ -538,7 +539,8 @@ export default function FeaturesIsland({ canWrite = true }) {
                 ownGoalRoots={ownGoalRoots}
                 allNodes={layout.nodes}
                 edgeDraft={edgeDraft}
-                onEdgeDraft={setEdgeDraft}
+                onEdgeDraft={(d) => { setEdgeDraft(d); setEdgeError(null); }}
+                edgeError={edgeError}
                 onAddEdge={addEdge}
                 onRemoveEdge={removeEdge}
                 recheck={recheck}
@@ -598,6 +600,27 @@ export default function FeaturesIsland({ canWrite = true }) {
 
 const EMPTY_DRAFT = { name: "", description: "", capabilityIds: [], unknownCapabilities: false, productId: "", layer: "service", priority: "3", status: "pending" };
 
+// The relationship picker, one group per product: this feature's own first,
+// then the rest by name, "No product" last; features by name inside each.
+function pickerGroups(nodes, selfId, ownProduct, productById) {
+  const groups = new Map();
+  for (const n of nodes) {
+    if (n.id === selfId) continue;
+    const pid = n.product_ids[0] ?? "";
+    if (!groups.has(pid)) groups.set(pid, []);
+    groups.get(pid).push(n);
+  }
+  const label = (pid) => {
+    const p = productById.get(pid);
+    const name = p ? `${p.name}${p.external ? " (external)" : ""}` : "No product";
+    return pid === ownProduct && p ? `${name} (this product)` : name;
+  };
+  const rank = (pid) => (pid === ownProduct ? 0 : pid === "" ? 2 : 1);
+  return [...groups]
+    .map(([pid, ns]) => [pid, label(pid), ns.sort((a, b) => a.name.localeCompare(b.name))])
+    .sort((a, b) => rank(a[0]) - rank(b[0]) || a[1].localeCompare(b[1]));
+}
+
 function capabilityNames(ids, capabilityById) {
   const names = (ids ?? []).map((c) => capabilityById.get(c)?.name).filter(Boolean);
   return names.length ? names.join(", ") : "none";
@@ -632,7 +655,7 @@ function FeatureLink({ feature, onSelect, active, style }) {
   );
 }
 
-function FeaturePanel({ detail, canWrite, onEdit, onGuessConfirmed, onSelect, productIds, productById, capabilityById, journeys, why, goalParent, ownGoalRoots, allNodes, edgeDraft, onEdgeDraft, onAddEdge, onRemoveEdge, recheck, onRecheck, onClearRecheck }) {
+function FeaturePanel({ detail, canWrite, onEdit, onGuessConfirmed, onSelect, productIds, productById, capabilityById, journeys, why, goalParent, ownGoalRoots, allNodes, edgeDraft, onEdgeDraft, edgeError, onAddEdge, onRemoveEdge, recheck, onRecheck, onClearRecheck }) {
   const layer = detail.facets?.layer;
   return (
     <>
@@ -709,12 +732,18 @@ function FeaturePanel({ detail, canWrite, onEdit, onGuessConfirmed, onSelect, pr
           <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 4 }}>
             <Select label="This feature" value={edgeDraft.kind} onChange={(e) => onEdgeDraft({ ...edgeDraft, kind: e.target.value })}
               options={EDGE_KINDS.map((k) => ({ value: k, label: plain(EDGE, k) }))} />
-            <Select value={edgeDraft.targetId} onChange={(e) => onEdgeDraft({ ...edgeDraft, targetId: e.target.value })}
-              options={[{ value: "", label: "Pick a feature…" },
-                ...allNodes.filter((n) => n.id !== detail.id).map((n) => ({ value: n.id, label: n.name }))]} />
+            <Select aria-label="Other feature" value={edgeDraft.targetId} onChange={(e) => onEdgeDraft({ ...edgeDraft, targetId: e.target.value })}>
+              <option value="">Pick a feature…</option>
+              {pickerGroups(allNodes, detail.id, productIds[0] ?? "", productById).map(([pid, label, nodes]) => (
+                <optgroup key={pid} label={label}>
+                  {nodes.map((n) => <option key={n.id} value={n.id}>{n.name}</option>)}
+                </optgroup>
+              ))}
+            </Select>
             <Button size="sm" variant="secondary" disabled={!edgeDraft.targetId} onClick={onAddEdge} style={{ gap: 6 }}>
               <Icon name="plus" size={13} />Add relationship
             </Button>
+            {edgeError && <div role="alert" style={{ ...NOTE, color: "var(--danger-fg)" }}>{edgeError}</div>}
           </div>
         )}
       </div>
@@ -926,7 +955,7 @@ function PlanView({ ready, cycles, topoOrder, topoError, selectedId, onSelect, c
         <section style={PLAN_CARD}>
           <div style={PLAN_TITLE}>Smallest version that reaches a feature</div>
           <div style={NOTE}>Pick a feature to see what it needs and what can wait.</div>
-          <Select value={cutTarget} onChange={(e) => onPickCutTarget(e.target.value)}
+          <Select aria-label="Feature to reach" value={cutTarget} onChange={(e) => onPickCutTarget(e.target.value)}
             options={[{ value: "", label: "Pick a feature…" }, ...cutTargetOptions.map((n) => ({ value: n.id, label: n.name }))]} />
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
             <Button size="sm" variant="accent" disabled={!cutTarget || cutting} onClick={onRunCut}>

@@ -177,16 +177,23 @@ class FeatureGraph:
                 g.add_edge(dst, src)
         return g
 
-    def would_create_cycle(self, src: uuid.UUID, dst: uuid.UUID, kind: EdgeKind | str) -> bool:
+    def would_create_cycle(
+        self, src: uuid.UUID, dst: uuid.UUID, kind: EdgeKind | str
+    ) -> list[uuid.UUID] | None:
         """Write-time guard: would adding src --kind--> dst close a precedence
-        cycle? RELATES_TO never can. Unknown nodes can't be on a cycle yet."""
+        cycle? Returns the existing chain it would close (each feature needs
+        the next), else None. RELATES_TO never can. Unknown nodes can't be on
+        a cycle yet."""
         if str(kind) not in PRECEDENCE_KINDS:
-            return False
+            return None
         if not (self._g.has_node(src) and self._g.has_node(dst)):
-            return False
+            return None
         need_from, need_to = (src, dst) if str(kind) == str(EdgeKind.DEPENDS_ON) else (dst, src)
         # Adding need_from -> need_to cycles iff need_to already reaches need_from.
-        return nx.has_path(self._precedence_subgraph(), need_to, need_from)
+        try:
+            return nx.shortest_path(self._precedence_subgraph(), need_to, need_from)
+        except nx.NetworkXNoPath:
+            return None
 
     def impact(self, feature_id: uuid.UUID) -> dict[str, list[dict[str, Any]]]:
         """dependents = blast radius (who breaks); dependencies = what it needs."""

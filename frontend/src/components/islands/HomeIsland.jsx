@@ -201,7 +201,7 @@ function IdeaChecker({ inventory, canWrite }) {
           <div style={QUIET}>{count(skipped, "feature")} with no capabilities picked {skipped === 1 ? "is" : "are"} not in the check.</div>
         )}
       </div>
-      {report && <CoverageReport report={report} onCandidate={useCandidate} />}
+      {report && <CoverageReport report={report} onCandidate={useCandidate} verdicts />}
     </section>
   );
 }

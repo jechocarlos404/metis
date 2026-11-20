@@ -17,10 +17,14 @@ export function CapabilityPicker({ id = "capability-picker", options, value, onC
   const [open, setOpen] = React.useState(false);
   const picked = new Set(value.map(slugify));
   const q = query.trim().toLowerCase();
+  // Suggestions ignore accents, so "Café" lists "Cafe" to pick. Only a
+  // suggestion: what counts as the same name (exact, picked) stays exact.
+  const fold = (s) => s.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
+  const fq = fold(q);
   const matches = q
     ? options
-        .filter((o) => !picked.has(slugify(o.name)) && o.name.toLowerCase().includes(q))
-        .sort((a, b) => Number(!a.name.toLowerCase().startsWith(q)) - Number(!b.name.toLowerCase().startsWith(q)) || a.name.localeCompare(b.name))
+        .filter((o) => !picked.has(slugify(o.name)) && fold(o.name).includes(fq))
+        .sort((a, b) => Number(!fold(a.name).startsWith(fq)) - Number(!fold(b.name).startsWith(fq)) || a.name.localeCompare(b.name))
         .slice(0, 8)
     : [];
   const exact = options.some((o) => slugify(o.name) === slugify(q));

@@ -93,7 +93,7 @@ export default function FeaturesIsland({ canWrite = true }) {
       setTopoOrder(null);
       setTopoError(e instanceof ApiError && e.status === 409 ? "cycle" : "failed");
     }
-    setSelected((sel) => sel && data.nodes.some((n) => n.id === sel) ? sel : data.nodes[0]?.id ?? null);
+    setSelected((sel) => sel && data.nodes.some((n) => n.id === sel) ? sel : null);
   }, []);
 
   const capabilityById = React.useMemo(
@@ -223,6 +223,14 @@ export default function FeaturesIsland({ canWrite = true }) {
   // A cycle anywhere stops the build order, so show every cycle when it does.
   const visibleCycles = activeProduct && topoError !== "cycle" ? cycles.filter((c) => c.some((f) => matchesProduct(f.id))) : cycles;
 
+  // The panel only shows a feature the current product filter and search
+  // show too. Nothing picked yet: open the first one in view.
+  const inView = (id) => shownTab === "directory" ? directory.some((n) => n.id === id) : matchesProduct(id);
+  const firstInView = (shownTab === "directory" ? directory : visibleLayout.nodes)[0]?.id;
+  React.useEffect(() => {
+    if (loaded && !selected && firstInView) setSelected(firstInView);
+  }, [loaded, selected, firstInView]);
+
   const runRecheck = async () => {
     if (!selected) return;
     setError(null);
@@ -266,8 +274,10 @@ export default function FeaturesIsland({ canWrite = true }) {
   }, [cut, showCut]);
 
   const openNew = () => {
-    // Start blank: openEdit leaves the last feature in the draft. Keep only the product, as a create does.
-    setDraft((d) => ({ ...EMPTY_DRAFT, productId: d.productId }));
+    // Start blank: openEdit leaves the last feature in the draft. The product
+    // is the one on screen; with every product shown, the last one used.
+    const onScreen = productById.has(activeProduct) ? activeProduct : "";
+    setDraft((d) => ({ ...EMPTY_DRAFT, productId: activeProduct ? onScreen : d.productId }));
     setConfirmingDelete(false);
     setError(null);
     setDialog({ mode: "new" });
@@ -512,7 +522,7 @@ export default function FeaturesIsland({ canWrite = true }) {
         </div>
         )}
           <aside style={{ width: 300, flex: "none", margin: "20px 20px 20px 0", background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", padding: 16, display: "flex", flexDirection: "column", gap: 14, overflowY: "auto" }}>
-            {detail ? (
+            {detail && inView(detail.id) ? (
               <FeaturePanel
                 detail={detail}
                 canWrite={canWrite}

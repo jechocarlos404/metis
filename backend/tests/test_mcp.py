@@ -452,14 +452,14 @@ async def test_inventory_is_most_reused_first_and_filters_in_order(api):
     text = await server._dispatch("capability_inventory", {})
     _conventions(text)
     # A capability no feature realizes isn't ours, and nobody else has it either.
-    assert text.startswith(
-        "5 capabilit(ies): 3 ours, 1 known only from external products, "
-        "1 that nobody has yet"
-    )
+    assert text.startswith("5 capabilit(ies): 3 ours, 1 external only, 1 not built yet")
     rows = [line.split()[0] for line in text.splitlines()[2:7]]
     assert rows[-2:] == ["weather-forecast", "route-planner"]
     assert "external only — not ours" in text
-    assert "nobody has it — not ours" in text
+    assert "not built yet — not ours" in text
+    # Slug and exact name both: a seed file reuses a capability by its name.
+    route = next(line for line in text.splitlines() if line.startswith("route-planner"))
+    assert route.split("  ")[0:1] == ["route-planner"] and '"Route planner"' in route
 
     text = await server._dispatch("capability_inventory", {"q": "data"})
     assert text.startswith("1 of 5 capabilit(ies) match 'data'")
@@ -484,7 +484,7 @@ async def test_check_idea_never_counts_a_near_name(api):
     assert any(line.strip().startswith("ours") and "strava-import (ga" in line for line in lines)
     assert any(line.strip().startswith("external only") and "rival" in line for line in lines)
     miss = next(i for i, line in enumerate(lines) if line.strip() == "no match       Elevaton data")
-    assert "near names, unconfirmed: elevation-data" in lines[miss + 1]
+    assert 'near names, unconfirmed: elevation-data "Elevation data"' in lines[miss + 1]
     assert "Not ours (2): Weather forecast, Elevaton data" in text
     # Home's idea check, pre-filled: matched needs by slug, the rest as typed.
     assert lines[-1] == (
@@ -496,7 +496,8 @@ async def test_check_idea_never_counts_a_near_name(api):
     )
     assert unbuilt.startswith("0/1 distinct capabilit(ies) are ours")
     assert (
-        "  nobody has it  Route planner → route-planner (no feature realizes it) — not ours"
+        "  not built yet  Route planner → route-planner "
+        "(no finished feature of ours realizes it) — not ours"
         in unbuilt.splitlines()
     )
 
@@ -565,7 +566,7 @@ async def test_capability_says_who_why_and_how_far(api):
     assert "Evidence (2 path(s), as exported): app/strava/sync.py, app/strava/oauth.py" in text
 
     weather = await server._dispatch("capability", {"slug": "weather-forecast"})
-    assert "Known only from external products" in weather
+    assert "Not ours: no finished feature of ours realizes it." in weather
     assert "External products that have it: rival" in weather
     assert "No goal motivates it directly" in weather
 

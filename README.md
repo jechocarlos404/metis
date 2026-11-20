@@ -144,7 +144,8 @@ capability says nothing about whose feature this is.
 A product can be someone else's (`external`): you know its features as a user and
 map them to the capabilities they need, declaring `unknown_capabilities` where you
 can't tell. External products show what exists in the world; they never count as what
-*we* can do — coverage of an idea counts only capabilities our own features realize. `GET /api/products/{id}/coverage` scores an existing product the same way: which of
+*we* can do — a capability is ours only when a finished (`done`) feature of one of
+our own products realizes it, and coverage of an idea counts only those. `GET /api/products/{id}/coverage` scores an existing product the same way: which of
 its features we could build from what we have — a lower bound, since a feature with
 unknown capabilities never counts as buildable. Every feature lands in exactly one
 group: `buildable`, `partly` (every *named* capability is ours, but the list is

@@ -142,7 +142,11 @@ export function createForceGraph(opts) {
   let currentTransform = zoomIdentity;
 
   // ---------------------------------------------------------------- zoom --
+  // Extent from the client box, as every fit here measures: d3's default
+  // reads the svg's width length, which throws while it isn't laid out
+  // (a tween step as Group by switches).
   const zoomBehavior = d3zoom()
+    .extent(() => [[0, 0], [svgEl.clientWidth || 1, svgEl.clientHeight || 1]])
     .scaleExtent(o.scaleExtent)
     .on("zoom", (event) => {
       if (event.sourceEvent) {

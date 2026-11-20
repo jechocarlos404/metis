@@ -55,7 +55,10 @@ then copy it over both.
   feature names its product with `product_ref`. A product can be someone else's
   (`"external": true`) — known only from the outside, as a user. Its features say
   what it does; they never count as our work, and capabilities only external
-  features realize never count as ours.
+  features realize never count as ours. A capability is ours when a finished
+  (`done`) feature of one of our own products realizes it; one only planned or
+  in-progress features realize is not built yet, and setting a feature's
+  `status` to `done` is what makes its capabilities ours.
 - **Capabilities are shared across products.** Identity is the slug, on
   purpose: names that differ only in case or punctuation ("Keyword search",
   "Keyword Search") are the same capability, and any other difference makes a
@@ -314,7 +317,7 @@ satisfies. A technology is shared across products, like a capability.
   every overwrite per feature with the old and new value, long text trimmed
   to where it differs, for example
   `feature "Export a PRD": status in_progress → done; description "Exports a PRD." → "Exports a PRD as Markdown."`
-  (the app shows the status in plain words), and the import reports the same. A field the file leaves out is left alone,
+  (the app shows the status in plain words, and both full texts on hover), and the import reports the same. A field the file leaves out is left alone,
   and the feature's name, priority, priority rationale and facets never change:
   a file that only adds links (a gaps file, say) should leave out `status` and
   `description`. Its `capability_guesses` are still loaded, so a product's next

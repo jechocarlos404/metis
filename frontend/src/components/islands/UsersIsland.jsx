@@ -1,15 +1,17 @@
 import React from "react";
 import { PageHeader } from "../shell/PageHeader.jsx";
-import { Badge, Button, Dialog, Icon, IconButton, Input, Select, Switch, DeleteConfirm } from "../../ds";
+import { Badge, Button, Dialog, Icon, IconButton, Input, Select, Switch, DeleteConfirm, Toast } from "../../ds";
 import { api } from "../../lib/api.js";
 import { pressable } from "../../lib/pressable.js";
 import { ROLE_WORDS, roleCan, roleLabel } from "../shell/roles.js";
 
 const ROLES = ["admin", "editor", "viewer"].map((r) => ({ value: r, label: roleLabel(r) }));
 const ROLE_TONES = { admin: "accent", editor: "ok", viewer: "neutral" };
+const NO_ROLE = "No role yet, so this person sees nothing until you give them one.";
+const displayName = (u) => [u.first_name, u.last_name].filter(Boolean).join(" ") || u.username;
 
 const TH = {
-  fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: "var(--tracking-caps)",
+  fontFamily: "var(--font-mono)", fontSize: "var(--text-2xs)", letterSpacing: "var(--tracking-caps)",
   textTransform: "uppercase", color: "var(--text-secondary)",
 };
 const COLS = "1fr 1fr 90px 90px 40px";
@@ -25,6 +27,13 @@ export default function UsersIsland() {
   const [saving, setSaving] = React.useState(false);
   const [dialogError, setDialogError] = React.useState(null);
   const [confirmingDelete, setConfirmingDelete] = React.useState(false);
+  const [toast, setToast] = React.useState(null);
+
+  React.useEffect(() => {
+    if (!toast) return undefined;
+    const id = setTimeout(() => setToast(null), 6000);
+    return () => clearTimeout(id);
+  }, [toast]);
 
   const editing = dialog?.mode === "edit" ? users.find((u) => u.id === dialog.id) : null;
 
@@ -49,7 +58,7 @@ export default function UsersIsland() {
       email: u.email ?? "",
       firstName: u.first_name ?? "",
       lastName: u.last_name ?? "",
-      role: u.role ?? "viewer",
+      role: u.role ?? "", // no role stays no role until the admin picks one
       enabled: u.enabled,
     });
     setNewPassword("");
@@ -88,7 +97,7 @@ export default function UsersIsland() {
             email: draft.email.trim() || null,
             first_name: draft.firstName.trim() || null,
             last_name: draft.lastName.trim() || null,
-            role: draft.role,
+            role: draft.role || null,
             enabled: draft.enabled,
           },
         });
@@ -114,6 +123,10 @@ export default function UsersIsland() {
       setNewPassword("");
       setDialogError(null);
       setDialog(null);
+      setToast({
+        title: `Password set for ${editing.username}`,
+        detail: newPasswordTemp ? "They choose a new one the next time they sign in." : undefined,
+      });
     } catch (e) {
       setDialogError(String(e.message));
     } finally {
@@ -159,7 +172,8 @@ export default function UsersIsland() {
         <div style={{ padding: "8px 24px", fontSize: "var(--text-sm)", color: "var(--danger-fg)" }}>{error}</div>
       )}
       <div style={{ flex: 1, overflowY: "auto", margin: 20, minWidth: 0 }}>
-        <div style={{ background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", overflow: "hidden" }}>
+        <div style={{ background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", overflowX: "auto" }}>
+          <div style={{ minWidth: 560 }}>
           <div style={{ display: "grid", gridTemplateColumns: COLS, padding: "8px 16px", borderBottom: "1px solid var(--border-hairline)", ...TH }}>
             <span>User</span><span>Email</span><span>Role</span><span>Status</span><span />
           </div>
@@ -169,7 +183,7 @@ export default function UsersIsland() {
                 borderBottom: i < users.length - 1 ? "1px solid var(--border-hairline)" : "none", cursor: "pointer", fontSize: "var(--text-sm)" }}>
               <span style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
                 <span style={{ color: "var(--text-heading)", fontWeight: "var(--weight-medium)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {[u.first_name, u.last_name].filter(Boolean).join(" ") || u.username}
+                  {displayName(u)}
                 </span>
                 {u.username !== u.email && (
                   <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -178,11 +192,11 @@ export default function UsersIsland() {
                 )}
               </span>
               <span style={{ color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{u.email || "—"}</span>
-              <span title={u.role ? roleCan(u.role) : "No role yet, so this person sees nothing until you give them one."}>{u.role ? <Badge tone={ROLE_TONES[u.role]}>{roleLabel(u.role)}</Badge> : <Badge tone="warn">no role</Badge>}</span>
+              <span title={u.role ? roleCan(u.role) : NO_ROLE}>{u.role ? <Badge tone={ROLE_TONES[u.role]}>{roleLabel(u.role)}</Badge> : <Badge tone="warn">no role</Badge>}</span>
               <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: u.enabled ? "var(--ok-fg)" : "var(--text-secondary)" }}>
                 {u.enabled ? "enabled" : "disabled"}
               </span>
-              <IconButton size="sm" label="Edit user" onClick={(e) => { e.stopPropagation(); openEdit(u); }}>
+              <IconButton size="sm" label={`Edit ${displayName(u)}`} onClick={(e) => { e.stopPropagation(); openEdit(u); }}>
                 <Icon name="pencil" size={13} />
               </IconButton>
             </div>
@@ -190,6 +204,7 @@ export default function UsersIsland() {
           {users.length === 0 && !error && (
             <div style={{ padding: 16, fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>No users yet. Add one with New user above.</div>
           )}
+          </div>
         </div>
       </div>
 
@@ -230,8 +245,9 @@ export default function UsersIsland() {
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             <Select label="Role" value={draft.role}
-              onChange={(e) => setDraft({ ...draft, role: e.target.value })} options={ROLES} />
-            <span style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>{roleCan(draft.role)}</span>
+              onChange={(e) => setDraft({ ...draft, role: e.target.value })}
+              options={draft.role ? ROLES : [{ value: "", label: "No role", disabled: true }, ...ROLES]} />
+            <span style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>{draft.role ? roleCan(draft.role) : NO_ROLE}</span>
           </div>
 
           {dialog?.mode === "new" ? (
@@ -259,6 +275,11 @@ export default function UsersIsland() {
           )}
         </div>
       </Dialog>
+      {toast && (
+        <div style={{ position: "fixed", bottom: 20, right: 20, zIndex: 200, maxWidth: "calc(100vw - 40px)" }}>
+          <Toast tone="ok" title={toast.title} detail={toast.detail} onDismiss={() => setToast(null)} style={{ width: "auto", maxWidth: 340 }} />
+        </div>
+      )}
     </>
   );
 }

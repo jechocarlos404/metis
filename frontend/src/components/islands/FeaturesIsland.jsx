@@ -396,10 +396,12 @@ export default function FeaturesIsland({ canWrite = true }) {
   const removeFeature = async () => {
     setSaving(true);
     setError(null);
-    const name = detail.name; // detail clears with the selection
+    const { id, name } = detail; // detail clears with the selection
     try {
-      await api(`/features/${detail.id}`, { method: "DELETE" });
+      await api(`/features/${id}`, { method: "DELETE" });
       setDialog(null);
+      // Out of the search results too, or the panel reopens on the deleted one.
+      setResults((r) => r && r.filter((n) => n.id !== id));
       setSelected(null);
       setPanelOpen(false);
       await load();

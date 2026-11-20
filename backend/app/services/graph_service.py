@@ -211,7 +211,8 @@ class FeatureGraph:
         retest: same-product features sharing a confirmed capability, rare
         shared capabilities first (score = sum of 1 / product features using
         it). A capability used by more than half of the product's features, and
-        by at least 6, is broad: counted, not listed. elsewhere: our other
+        by at least 6, is broad: counted, not listed, and the count is that same
+        number (this feature and its breaks included). elsewhere: our other
         products with the same capabilities, information only. Crosses the
         bridge explicitly; capability_ids are confirmed links, never guesses."""
         if not self._g.has_node(feature_id):
@@ -263,7 +264,7 @@ class FeatureGraph:
                 {
                     "id": str(c),
                     "name": capability_names.get(c, str(c)),
-                    "features": len(users[c] - skip),
+                    "features": len(users[c]),
                 }
                 for c in broad_ids
             ),

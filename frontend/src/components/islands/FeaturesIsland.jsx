@@ -763,7 +763,7 @@ function RecheckList({ recheck, onSelect, onClear }) {
       )}
       {broad.map((c) => (
         <div key={c.id} style={SMALL_NOTE}>
-          Also built on {c.name}, used by {count(c.features, "other feature")} here. Retest those only if the change touches it.
+          Also built on {c.name}, used by {count(c.features - 1, "other feature")} here. Retest those only if the change touches it.
         </div>
       ))}
       {elsewhere.length > 0 && (

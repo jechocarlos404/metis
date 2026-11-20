@@ -2,6 +2,9 @@ import React from "react";
 import { PageHeader } from "../shell/PageHeader.jsx";
 import { Badge, Input, Select, Toast } from "../../ds";
 import { api } from "../../lib/api.js";
+import { AGENT } from "../../lib/words.js";
+
+const LABEL = { fontFamily: "var(--font-mono)", fontSize: "var(--text-2xs)", letterSpacing: "var(--tracking-caps)", textTransform: "uppercase", color: "var(--text-secondary)", marginBottom: 8 };
 
 export default function AdminIsland() {
   const [providers, setProviders] = React.useState([]);
@@ -49,43 +52,41 @@ export default function AdminIsland() {
       <PageHeader title="AI models" meta="The provider and model each Chat agent uses" />
       <div style={{ flex: 1, overflowY: "auto", padding: 24, display: "flex", flexDirection: "column", gap: 20 }}>
         {providers.length > 0 && !providers.some((p) => p.available) && (
-          <div role="status" style={{ maxWidth: 560, padding: "12px 16px", background: "var(--warn-bg)", border: "1px solid var(--border-default)", borderRadius: "var(--radius-md)", fontSize: "var(--text-sm)", color: "var(--text-body)" }}>
+          <div role="status" style={{ maxWidth: 640, padding: "12px 16px", background: "var(--warn-bg)", border: "1px solid var(--border-default)", borderRadius: "var(--radius-md)", fontSize: "var(--text-sm)", color: "var(--text-body)" }}>
             No AI provider is connected, so Chat can't answer yet. Whoever runs the metis server adds a provider key
             (<code>ANTHROPIC_API_KEY</code>, <code>OPENAI_API_KEY</code> or <code>OPENROUTER_API_KEY</code>) to its <code>.env</code> file
             and restarts it, or starts Ollama where <code>OLLAMA_BASE_URL</code> points. This page notices within 10 seconds.
           </div>
         )}
-        <div style={{ maxWidth: 560 }}>
-          <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: "var(--tracking-caps)", textTransform: "uppercase", color: "var(--text-secondary)", marginBottom: 8 }}>
-            Providers
-          </div>
+        <div style={{ maxWidth: 640 }}>
+          <div style={LABEL}>Providers</div>
           <div style={{ background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", overflow: "hidden" }}>
             {providers.map((p, i) => (
-              <div key={p.name} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 16px", borderBottom: i < providers.length - 1 ? "1px solid var(--border-hairline)" : "none" }}>
+              <div key={p.name} style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 12, padding: "10px 16px", borderBottom: i < providers.length - 1 ? "1px solid var(--border-hairline)" : "none" }}>
                 <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--text-heading)", width: 100 }}>{p.name}</span>
-                <span style={{ flex: 1, fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>{p.available ? p.label : p.detail}</span>
+                <span style={{ flex: "1 1 160px", minWidth: 0, fontSize: "var(--text-xs)", color: "var(--text-secondary)", overflowWrap: "anywhere" }}>{p.available ? p.label : p.detail}</span>
                 <Badge tone={p.available ? "ok" : "neutral"}>{p.available ? "available" : "unavailable"}</Badge>
               </div>
             ))}
           </div>
         </div>
 
-        <div style={{ maxWidth: 560 }}>
-          <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: "var(--tracking-caps)", textTransform: "uppercase", color: "var(--text-secondary)", marginBottom: 8 }}>
-            Agents
-          </div>
+        <div style={{ maxWidth: 640 }}>
+          <div style={LABEL}>Agents</div>
           <div style={{ background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", overflow: "hidden" }}>
             {configs.map((c, i) => {
               const models = modelsFor(c.provider);
               const status = statusFor(c.provider);
               const offline = status ? !status.available : false;
+              const agent = AGENT[c.agent_name] ?? c.agent_name;
               return (
-                <div key={c.agent_name} style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 16px", borderBottom: i < configs.length - 1 ? "1px solid var(--border-hairline)" : "none" }}>
-                  <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--text-heading)", flex: 1, display: "flex", alignItems: "center", gap: 8 }}>
-                    {c.agent_name}
+                <div key={c.agent_name} style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 10, padding: "12px 16px", borderBottom: i < configs.length - 1 ? "1px solid var(--border-hairline)" : "none" }}>
+                  {/* The badge sits under the name so it never squeezes the pickers. */}
+                  <span style={{ flex: "1 1 160px", minWidth: 0, display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 4 }}>
+                    <span title={c.agent_name} style={{ fontSize: "var(--text-sm)", fontWeight: "var(--weight-medium)", color: "var(--text-heading)" }}>{agent}</span>
                     {offline && <Badge tone="warn">provider unavailable</Badge>}
                   </span>
-                  <Select value={c.provider} style={{ width: 130 }}
+                  <Select aria-label={`Provider for ${agent}`} value={c.provider} style={{ width: 130 }}
                     onChange={(e) => update(c.agent_name, e.target.value, "")}
                     options={providers.map((p) => ({
                       value: p.name,
@@ -93,11 +94,11 @@ export default function AdminIsland() {
                       disabled: !p.available,
                     }))} />
                   {models.length > 0 ? (
-                    <Select value={c.model} style={{ width: 200 }}
+                    <Select aria-label={`Model for ${agent}`} value={c.model} style={{ width: 200 }}
                       onChange={(e) => update(c.agent_name, c.provider, e.target.value)}
                       options={models.includes(c.model) ? models : [c.model, ...models]} />
                   ) : (
-                    <Input mono value={c.model} style={{ width: 200 }} inputStyle={{ height: 34 }}
+                    <Input aria-label={`Model for ${agent}`} mono value={c.model} style={{ width: 200 }} inputStyle={{ height: 34 }}
                       placeholder="model id"
                       onChange={(e) => {
                         markSave(c.agent_name, null);

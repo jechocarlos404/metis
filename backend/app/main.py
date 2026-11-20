@@ -3,9 +3,11 @@ from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.encoders import jsonable_encoder
+from fastapi.exception_handlers import http_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.auth import (
     Principal,
@@ -119,6 +121,23 @@ async def validation_error(request, exc: RequestValidationError) -> JSONResponse
     return JSONResponse({"detail": said, "errors": errors}, status_code=422)
 
 
+async def http_error(request, exc: StarletteHTTPException):
+    """`detail` is a sentence here too. A refusal raised with more to say
+    (a dict with a `message`) keeps the rest one key over: a name clash names
+    the row it clashes with under `existing`. In-process callers still get the
+    dict. The write boundary's 403 keeps its `{error, message, href}` detail:
+    the MCP server and the seed scripts parse it."""
+    detail = exc.detail
+    if not isinstance(detail, dict) or "message" not in detail or "error" in detail:
+        return await http_exception_handler(request, exc)
+    rest = {key: value for key, value in detail.items() if key != "message"}
+    if {"slug", "name"} <= rest.keys():
+        rest = {"existing": {"slug": rest.pop("slug"), "name": rest.pop("name")}, **rest}
+    return JSONResponse(
+        {"detail": detail["message"], **rest}, status_code=exc.status_code, headers=exc.headers
+    )
+
+
 async def surface_first(request: Request, principal: Principal = Depends(current_user)) -> None:
     """The write boundary before an admin route's role check: off the desktop
     a write is refused as a human action, whatever the caller's role."""
@@ -130,6 +149,7 @@ def create_app() -> FastAPI:
     settings = get_settings()
     app = FastAPI(title="Metis API", version="0.1.0", lifespan=lifespan)
     app.add_exception_handler(RequestValidationError, validation_error)
+    app.add_exception_handler(StarletteHTTPException, http_error)
     # Added before CORS, so CORS wraps it and a 413 still carries its headers.
     app.add_middleware(BodyLimit)
     app.add_middleware(

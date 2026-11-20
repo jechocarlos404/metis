@@ -164,8 +164,8 @@ export default function CapabilityIsland({ slug, canWrite = false }) {
       setSaved(changes.length ? `Saved: ${changes.join(", ")}.` : "Saved. Nothing changed.");
       await load();
     } catch (e) {
-      setDialogError(e.status === 409 && e.detail?.slug
-        ? <>{e.detail.message}. <a href={`/capabilities/${e.detail.slug}`}>Open {e.detail.name}</a></>
+      setDialogError(e.status === 409 && e.existing?.slug
+        ? <>{e.detail}. <a href={`/capabilities/${e.existing.slug}`}>Open {e.existing.name}</a></>
         : String(e.message));
     } finally {
       setSaving(false);

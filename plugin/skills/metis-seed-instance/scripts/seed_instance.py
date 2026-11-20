@@ -606,15 +606,17 @@ class Loader:
                 added.append(c["name"])
                 continue
             status, body = self.api.post("/api/capabilities", prune(payload))
-            detail = body.get("detail") if isinstance(body, dict) else None
+            # The clash names the row under `existing`; an older instance put
+            # it in `detail` itself.
+            existing = body.get("existing") or body.get("detail") if isinstance(body, dict) else None
             if status == 201:
                 self.cap_ids[c["ref"]] = body["id"]
                 self.note("capabilities", "created")
                 added.append(c["name"])
-            elif status == 409 and isinstance(detail, dict) and isinstance(detail.get("slug"), str):
+            elif status == 409 and isinstance(existing, dict) and isinstance(existing.get("slug"), str):
                 # Created since the list was read: the same slug is the same capability.
                 row = next(
-                    (r for r in self.api.get("/api/capabilities") if r["slug"] == detail["slug"]), None
+                    (r for r in self.api.get("/api/capabilities") if r["slug"] == existing["slug"]), None
                 )
                 if row is None:
                     sys.exit(f"error: POST /api/capabilities for {c['name']!r} returned 409 "

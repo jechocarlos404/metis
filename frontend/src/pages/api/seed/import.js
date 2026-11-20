@@ -592,9 +592,9 @@ class Loader {
         this.capIds.set(capability.ref, body.id);
         this.note("capabilities", "created");
         added.push(capability.name);
-      } else if (status === 409 && typeof body?.detail?.slug === "string") {
+      } else if (status === 409 && typeof body?.existing?.slug === "string") {
         // Created since the list was read: the same slug is the same capability.
-        const row = (await this.api.get("/api/capabilities")).find((c) => c.slug === body.detail.slug);
+        const row = (await this.api.get("/api/capabilities")).find((c) => c.slug === body.existing.slug);
         if (!row) throw new Error(`POST /api/capabilities for ${capability.name} returned 409 for a slug no capability has: ${JSON.stringify(body)}`);
         this.reuseCapability(capability, row);
       } else {

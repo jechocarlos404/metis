@@ -20,12 +20,11 @@ from app.db import get_db
 from app.main import create_app
 from app.models import Capability
 
+# `detail` is a sentence, as on every refusal; the row it clashes with is
+# one key over.
 CLASH = {
-    "detail": {
-        "message": '"User Authentication" already exists',
-        "slug": "user-authentication",
-        "name": "User Authentication",
-    }
+    "detail": '"User Authentication" already exists',
+    "existing": {"slug": "user-authentication", "name": "User Authentication"},
 }
 
 
@@ -72,11 +71,8 @@ async def test_renamed_capability_still_guards_its_new_name(client):
     res = await _create(client, "user authentication")
     assert res.status_code == 409
     assert res.json() == {
-        "detail": {
-            "message": '"User Authentication" already exists',
-            "slug": "login",
-            "name": "User Authentication",
-        }
+        "detail": '"User Authentication" already exists',
+        "existing": {"slug": "login", "name": "User Authentication"},
     }
 
 

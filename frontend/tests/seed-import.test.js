@@ -62,7 +62,7 @@ class FakeMetis {
       this.capabilities.push(...this.racing.filter(clashes));
       this.racing = this.racing.filter((c) => !clashes(c));
       const held = this.capabilities.find(clashes);
-      if (held) return [409, { detail: { message: `"${held.name}" already exists`, slug: held.slug, name: held.name } }];
+      if (held) return [409, { detail: `"${held.name}" already exists`, existing: { slug: held.slug, name: held.name } }];
       const row = { id: this.id("cap"), slug, parent_id: null, ...body };
       this.capabilities.push(row);
       return [201, row];

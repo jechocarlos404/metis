@@ -2,7 +2,7 @@ import React from "react";
 import { Badge } from "../../ds";
 import {
   CLOSEST_TITLE, GAP_HINT, MATURITY, NEED, VERDICT, closestGroups, closestNote, count, coverageHeadline, gapNote, gapsTitle,
-  incompleteNote, needKey, scoreGroups, scoreHeadline,
+  incompleteNote, needKey, scoreGroups, scoreHeadline, verdictOf,
 } from "../../lib/words.js";
 import { Term } from "./Term.jsx";
 
@@ -128,7 +128,7 @@ export function CoverageReport({ report, onCandidate, scored, verdicts = false }
           <div style={{ display: "flex", gap: 8, alignItems: "baseline" }}>
             <span style={{ fontSize: "var(--text-sm)", fontWeight: "var(--weight-medium)", color: "var(--text-heading)" }}>{f.name}</span>
             {verdicts && (() => {
-              const v = VERDICT[f.existing === f.total ? "buildable" : "missing"];
+              const v = verdictOf(f.existing === f.total ? "buildable" : "missing", f.capabilities.map((n) => n.match));
               return <span title={v.hint}><Badge tone={v.tone}>{v.label}</Badge></span>;
             })()}
             <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>{f.existing} of {f.total} ours</span>

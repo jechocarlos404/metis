@@ -2,7 +2,7 @@ import React from "react";
 import { PageHeader } from "../shell/PageHeader.jsx";
 import { Badge, Button, DeleteConfirm, Input } from "../../ds";
 import { api } from "../../lib/api.js";
-import { MATURITY, NEED, VERDICT, andList, count, lackingKey, needKey, plain, statusLabel } from "../../lib/words.js";
+import { MATURITY, NEED, VERDICT, andList, count, needKey, plain, statusLabel, verdictOf } from "../../lib/words.js";
 import { readParam, useParamRestore, writeParams } from "../../lib/url-state.js";
 import { CoverageReport } from "../shared/coverage.jsx";
 import { CapabilityPicker } from "../shared/CapabilityPicker.jsx";
@@ -36,13 +36,6 @@ const VERDICT_KEY = { buildable: "buildable", known_covered: "partly", missing: 
 const stepKind = (step) => (step.live ? "live" : VERDICT_KEY[step.verdict] ?? "unknown");
 const needKind = (need) => needKey(need.match);
 const stepMatches = (step) => (step.coverage?.capabilities ?? []).map((n) => n.match);
-// A missing step whose every lacking capability is known elsewhere says so.
-function verdictOf(kind, matches) {
-  const v = VERDICT[kind];
-  return kind === "missing" && lackingKey(matches) === "elsewhere"
-    ? { ...v, label: `${v.label} · ${NEED.elsewhere.label}`, hint: NEED.elsewhere.hint, elsewhere: true }
-    : v;
-}
 
 const STEP_W = 176;
 const STEP_H = 92;

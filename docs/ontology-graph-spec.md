@@ -209,5 +209,7 @@ noted. Deviations and deferrals, with reasons:
 - **Deferred:** `BUNDLES` + the Product-as-bundle entity (single-product today; the
   `Product` model remains the Spec document), the `Product → Spec` rename, and the
   `drift(snapshot)` differ (pins are stored, the diff endpoint is not yet built).
-- **No migration scripts:** the schema is `create_all` on boot; existing dev volumes
-  need a reset (`docker compose down -v`) to pick up the new tables.
+- **No migration scripts:** the schema is `create_all` on boot, which adds new
+  tables but never a column to an existing one; each added column has an idempotent
+  `add column if not exists` step in `backend/app/db.py`. Never reset the volume to
+  pick up a change: it holds the only copy of the data (README, Quick start).

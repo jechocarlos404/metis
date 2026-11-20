@@ -98,10 +98,24 @@ surface, so writes work exactly as they do in the real app (see
 A fresh instance is empty: metis holds only real data, loaded from seed files
 exported from actual repositories (`metis-export`, then `metis-seed-instance`).
 There is no demo data, and nothing a repo only describes — plans, specs, or code
-it ships without running — is recorded as existing. The schema is `create_all` on boot — after pulling a
-schema change, reset the dev volume (`docker compose down -v`). Realm import only
-runs on a fresh Keycloak data directory; to re-import users/roles, recreate the
-Keycloak container without a persisted volume (compose already does that).
+it ships without running — is recorded as existing. So once you have loaded seed
+files, the `pgdata` volume holds the only copy of that work: never reset it
+(`docker compose down -v` deletes it). Back it up before anything risky, and restore
+the same way:
+
+```sh
+docker compose exec -T postgres pg_dump -U metis -Fc metis > metis-$(date +%F).dump
+docker compose exec -T postgres pg_restore -U metis -d metis --clean --if-exists < metis-YYYY-MM-DD.dump
+```
+
+There are no migrations. On boot the backend runs `create_all`, which adds missing
+tables but never a column to a table that already exists; each column added since
+has its own idempotent `add column if not exists` step in `backend/app/db.py`. If a
+change you pull adds a column without such a step, add the step (or run the
+`alter table` by hand) rather than resetting the volume.
+
+Realm import only runs on a fresh Keycloak data directory; to re-import users/roles,
+recreate the Keycloak container without a persisted volume (compose already does that).
 
 The app runs with zero LLM keys — chat replies with a clear "provider not configured"
 notice, and everything else works. Add any subset of provider credentials to `.env`
@@ -423,18 +437,21 @@ All optional — see `.env.example`:
 | `OLLAMA_BASE_URL` | Ollama; compose default reaches host Ollama at `host.docker.internal:11434` |
 | `AUTH_ENABLED` | `false` makes every request an admin on the desktop surface — scripts only |
 | `METIS_MCP_SSE_TOKEN` | Required for the MCP server's SSE mode |
+| `METIS_MCP_CLIENT_SECRET` | The `metis-mcp` Keycloak client's secret, which the MCP server signs in with (dev default `dev-mcp-secret`) |
 | `ANTHROPIC_MODELS` etc. | Override the model dropdowns (comma-separated) |
 
 ## Development
 
 ```sh
-# database
-docker compose up -d postgres
+# database, and Keycloak: the backend checks every token against it and the
+# frontend signs in through it (or set AUTH_ENABLED=false in .env for scripts)
+docker compose up -d postgres keycloak
 
-# backend (Python 3.11+)
+# backend (Python 3.11+). Settings come from the environment or a .env in the
+# current directory, so point it at the root one.
 cd backend
 python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
-.venv/bin/uvicorn app.main:app --reload --port 8000
+.venv/bin/uvicorn app.main:app --reload --port 8000 --env-file ../.env
 
 # tests (uses a metis_test database on the compose postgres)
 .venv/bin/python -m pytest

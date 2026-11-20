@@ -343,8 +343,8 @@ async def test_preview_warns_about_subtree_and_buy_plane(db):
         e = await seed_estate(session)
         preview = await admin_cascade.preview(session, [ref("capabilities", e["parent"].id)])
 
-    assert any("descendant capabilities" in w for w in preview.warnings)
-    assert any("buy plane" in w for w in preview.warnings)
+    assert "Also deletes 1 capability under a selected one: feature search." in preview.warnings
+    assert any("1 row of technology data" in w for w in preview.warnings)
     assert any(t.plane == "buy" and t.table == "tech_satisfactions" for t in preview.total_deletes)
 
 
@@ -466,6 +466,11 @@ async def test_cascade_endpoints_round_trip_over_http(db, client):
     preview = (await client.post("/api/admin/data/cascade-preview", json=body)).json()
     assert preview["total_rows"] == 10
     assert preview["rows"][0]["label"] == "feature intelligence"
+    # Every row with a name is named, not just the selected one.
+    names = {t["table"]: t["names"] for t in preview["total_deletes"]}
+    assert names["capabilities"] == ["feature intelligence", "feature search"]
+    assert names["features"] == ["index corpus", "rank results"]
+    assert names["feature_capabilities"] == []  # link rows are counted, not named
 
     result = (await client.post("/api/admin/data/cascade-delete", json=body)).json()
     assert result["total"] == 10
@@ -511,3 +516,47 @@ async def test_a_feature_declaring_unknown_capabilities_survives_losing_its_last
             session, [ref("capabilities", known.id)]
         )
         assert Feature not in to_delete or feature.id not in to_delete[Feature]
+
+
+@pytest.mark.asyncio
+async def test_preview_names_a_child_goal_nobody_ticked(db):
+    async with db() as session:
+        org = Goal(goal_type=GoalType.org, title="temp org goal")
+        session.add(org)
+        await session.commit()
+        child = Goal(goal_type=GoalType.product, title="temp product goal", parent_goal_id=org.id)
+        session.add(child)
+        await session.commit()
+        preview = await admin_cascade.preview(session, [ref("goals", org.id)])
+
+    goals = next(t for t in preview.total_deletes if t.table == "goals")
+    assert (goals.count, goals.names) == (2, ["temp org goal", "temp product goal"])
+    assert preview.warnings == ["Also deletes 1 goal under a selected one: temp product goal."]
+
+
+@pytest.mark.asyncio
+async def test_deleting_a_product_deletes_its_features_never_detaches_them(db):
+    """A feature left with no product counts as ours, so a product's features
+    go with it, the same as the guarded product delete."""
+    async with db() as session:
+        product = Product(slug="ext", name="Outside product", external=True)
+        session.add(product)
+        await session.commit()
+        cap = await make_capability(session, "Their capability")
+        feature = await feature_service.create_feature(
+            session, FeatureCreate(name="their feature", capability_ids=[cap.id], product_id=product.id)
+        )
+        graph = FeatureGraph(db)
+        await graph.load()
+
+        preview = await admin_cascade.preview(session, [ref("products", product.id)])
+        features = next(t for t in preview.total_deletes if t.table == "features")
+        assert (features.count, features.names) == (1, ["their feature"])
+        assert all(t.table != "features" for t in preview.total_detaches)
+
+        await admin_cascade.execute(session, [ref("products", product.id)], graph)
+        assert graph._dirty is True
+
+    async with db() as session:
+        assert await session.get(Feature, feature.id) is None
+        assert await session.get(Capability, cap.id) is not None

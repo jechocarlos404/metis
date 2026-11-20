@@ -111,7 +111,8 @@ CHILDREN: dict[type, tuple[ChildSpec, ...]] = {
     ),
     Product: (
         ChildSpec(ProductBundle, "product_id", "delete", "ontology"),
-        ChildSpec(Feature, "product_id", "detach", "ontology"),  # features outlive their product
+        # Features go with their product: detached, one would count as ours.
+        ChildSpec(Feature, "product_id", "delete", "ontology"),
         ChildSpec(ProductDecomposition, "product_id", "delete", "delivery"),
         ChildSpec(Epic, "product_id", "delete", "delivery"),
         ChildSpec(Ticket, "product_id", "delete", "delivery"),
@@ -369,30 +370,57 @@ async def _label(session: AsyncSession, model: type, row_id: uuid.UUID) -> str:
     return str(row_id)[:8]
 
 
+def _n(n: int, one: str, many: str) -> str:
+    return f"{n} {one if n == 1 else many}"
+
+
+async def _names(session: AsyncSession, model: type, ids: set[uuid.UUID]) -> dict[uuid.UUID, str]:
+    """Each row's name, for the tables whose rows have one (NAME_COLUMN)."""
+    column = NAME_COLUMN.get(model)
+    if column is None or not ids:
+        return {}
+    rows = await session.execute(select(model.id, getattr(model, column)).where(model.id.in_(ids)))
+    return {row_id: name or str(row_id)[:8] for row_id, name in rows}
+
+
 def _warnings(
-    refs: list[RowRef], to_delete: dict[type, set[uuid.UUID]]
+    refs: list[RowRef],
+    to_delete: dict[type, set[uuid.UUID]],
+    names: dict[type, dict[uuid.UUID, str]],
 ) -> list[str]:
     out: list[str] = []
-    seeded = {(ENTITY_MODELS[r.entity], r.id) for r in refs}
+    selected = {r.id for r in refs}
 
-    for model, noun in ((Capability, "capabilities"), (Goal, "goals")):
-        extra = len(to_delete.get(model, set())) - sum(1 for m, _ in seeded if m is model)
-        if extra > 0:
-            out.append(
-                f"{extra} descendant {noun} are included — deleting a parent would "
-                f"otherwise silently re-root its children to top level."
-            )
+    # The rows under a selected one, by name: nobody ticked them.
+    for model, one, many in ((Capability, "capability", "capabilities"), (Goal, "goal", "goals")):
+        extra = sorted(
+            (names.get(model, {}).get(i, str(i)[:8]) for i in to_delete.get(model, set()) - selected),
+            key=str.lower,
+        )
+        if extra:
+            out.append(f"Also deletes {_n(len(extra), one, many)} under a selected one: {', '.join(extra)}.")
 
     buy = sum(len(ids) for m, ids in to_delete.items() if LABELS[m][1] == "buy")
     if buy:
         out.append(
-            f"{buy} row(s) on the buy plane will be deleted — technology supply "
-            f"disappears from under any stack that relied on it."
+            f"Deletes {_n(buy, 'row', 'rows')} of technology data, so any stack "
+            f"that relied on it loses that supply."
         )
     return out
 
 
-async def preview(session: AsyncSession, refs: list[RowRef]) -> CascadePreview:
+class NamedCount(TableCount):
+    """A table's share of the closure. `names` lists every row by name for the
+    tables whose rows have one; link rows are only counted."""
+
+    names: list[str] = []
+
+
+class NamedPreview(CascadePreview):
+    total_deletes: list[NamedCount]
+
+
+async def preview(session: AsyncSession, refs: list[RowRef]) -> NamedPreview:
     to_delete, detach, missing = await compute_closure(session, refs)
     missing_ids = {r.id for r in missing}
 
@@ -416,13 +444,21 @@ async def preview(session: AsyncSession, refs: list[RowRef]) -> CascadePreview:
             )
         )
 
+    names = {m: await _names(session, m, ids) for m, ids in to_delete.items()}
+    by_table = {m.__tablename__: m for m in to_delete}
     totals = {m: len(ids) for m, ids in to_delete.items()}
-    return CascadePreview(
+    return NamedPreview(
         rows=rows,
-        total_deletes=_counts(totals),
+        total_deletes=[
+            NamedCount(
+                **t.model_dump(),
+                names=sorted(names[by_table[t.table]].values(), key=str.lower),
+            )
+            for t in _counts(totals)
+        ],
         total_detaches=_counts(detach),
         total_rows=sum(totals.values()),
-        warnings=_warnings(refs, to_delete),
+        warnings=_warnings(refs, to_delete, names),
     )
 
 

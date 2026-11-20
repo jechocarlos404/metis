@@ -4,7 +4,7 @@ import { Button, Dialog, Icon, IconButton, Input, PriorityBadge, Select, StatusB
 import { api } from "../../lib/api.js";
 import { readParam, useParamRestore, writeParams } from "../../lib/url-state.js";
 import { GoalNetworkView } from "../graph/GoalNetworkView.jsx";
-import { NEED, PRIORITY_HINT, andList, count, needKey, statusLabel } from "../../lib/words.js";
+import { DONE_WHEN, NEED, PRIORITY_HINT, andList, count, needKey, statusLabel } from "../../lib/words.js";
 import { capabilityCount, deleteEffects } from "../graph/goal-facts.js";
 
 const EMPTY_DRAFT = { goal_type: "product", parent_goal_id: "", title: "", description: "", success_criteria: "", priority: "3", status: "pending" };
@@ -255,7 +255,7 @@ export default function GoalsIsland({ canWrite = true }) {
                       </div>
                     )}
                     {org.description && <div style={{ fontSize: "var(--text-sm)", color: "var(--aegean-4)", marginTop: 4 }}>{org.description}</div>}
-                    {org.success_criteria && <div style={{ fontSize: "var(--text-xs)", color: "var(--aegean-4)", marginTop: 2 }}>Success: {org.success_criteria}</div>}
+                    {org.success_criteria && <div style={{ fontSize: "var(--text-xs)", color: "var(--aegean-4)", marginTop: 2 }}>{DONE_WHEN}: {org.success_criteria}</div>}
                     {/* The same count the Network panel shows (goal-facts.js). */}
                     <div style={{ fontSize: "var(--text-xs)", color: "var(--aegean-4)", marginTop: 4 }}>{capabilityCount(org, goals, capsByGoal).text}</div>
                   </div>
@@ -369,7 +369,7 @@ export default function GoalsIsland({ canWrite = true }) {
             onChange={(e) => setDraft({ ...draft, description: e.target.value })}
           />
           <Input
-            label="Success criteria"
+            label={DONE_WHEN}
             value={draft.success_criteria}
             onChange={(e) => setDraft({ ...draft, success_criteria: e.target.value })}
             placeholder="Jira, Linear, Notion round-trip by Q4"
@@ -443,7 +443,7 @@ function GoalList({ goals, productById, capsByGoal, highlightStyle, editButton, 
                   <div style={{ fontSize: "var(--text-sm)", color: "var(--text-body)", marginTop: 2 }}>{g.description}</div>
                 )}
                 {g.success_criteria && (
-                  <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", marginTop: 2 }}>Success: {g.success_criteria}</div>
+                  <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", marginTop: 2 }}>{DONE_WHEN}: {g.success_criteria}</div>
                 )}
                 <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", marginTop: 4, display: "flex", gap: 6, flexWrap: "wrap" }}>
                   {caps.length === 0 ? (

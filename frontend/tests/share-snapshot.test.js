@@ -82,4 +82,17 @@ describe("Share snapshot", () => {
     assert.match(out, /Goals Walk more planned Count steps in progress Share a streak planned/);
     assert.doesNotMatch(out, /Someone else's/);
   });
+
+  test("a product that points at a product goal: the same tree as its Goals tab, headed by the org goal it owns (A43)", () => {
+    // Steps points at PG-61 and owns OG-60 with PG-61 and PG-62 under it.
+    const steps = { ...ours, id: "steps", name: "Steps", goal_id: "pg61" };
+    const goals = [
+      { id: "og60", title: "Walk more", status: "pending", parent_goal_id: null, product_id: "steps", success_criteria: "People walk daily" },
+      { id: "pg61", title: "Count steps", status: "in_progress", parent_goal_id: "og60", product_id: "steps" },
+      { id: "pg62", title: "Share a streak", status: "pending", parent_goal_id: "og60", product_id: "steps" },
+    ];
+    const out = text(snapshotHtml({ product: steps, goals, features, capabilities, score: null }));
+    assert.match(out, /Goals Walk more planned Done when: People walk daily Count steps in progress Share a streak planned/);
+    assert.doesNotMatch(out, /Part of/);
+  });
 });

@@ -2,9 +2,10 @@
 // without a metis login. Built only from what the profile already loaded, and
 // only from named fields: no ids, no links, no guesses, no repo paths.
 import {
-  CLOSEST_TITLE, NEED, NOTHING_TO_SCORE, VERDICT, andList, closestGroups, closestNote, count, gapNote, gapsTitle,
+  CLOSEST_TITLE, DONE_WHEN, NEED, NOTHING_TO_SCORE, VERDICT, andList, closestGroups, closestNote, count, gapNote, gapsTitle,
   incompleteNote, scoreGroups, scoreHeadline, slugify, statusLabel,
 } from "../../lib/words.js";
+import { productGoalTrees } from "../graph/goal-facts.js";
 
 const ENTITIES = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
 export const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (c) => ENTITIES[c]);
@@ -59,21 +60,24 @@ function groupFeatures(features, capabilities) {
   return { grouped, unnamed };
 }
 
-// The product's goal first, then its other goals: the ones the goals API says
-// belong to it (product_id), as the product's Goals tab lists them.
+// The goal trees the product's Goals tab draws (productGoalTrees()): each
+// head goal, then the goals under it (A43).
 function goalSection(product, goals) {
-  const goal = goals.find((g) => g.id === product.goal_id);
-  if (!goal) return "";
-  const parent = goals.find((g) => g.id === goal.parent_goal_id);
-  const others = goals.filter((g) => g.product_id === product.id && g.id !== goal.id && g.id !== parent?.id);
-  return `<h2>${others.length > 0 ? "Goals" : "Goal"}</h2>
-<div class="card">
+  const trees = productGoalTrees(product, goals);
+  if (trees.length === 0) return "";
+  const total = trees.reduce((n, t) => n + 1 + t.children.length, 0);
+  const cards = trees.map(({ goal, children }) => {
+    const parent = goals.find((g) => g.id === goal.parent_goal_id);
+    return `<div class="card">
   <h3>${esc(goal.title)} <span class="tag">${esc(statusLabel(goal.status))}</span></h3>
   ${goal.description ? `<p>${esc(goal.description)}</p>` : ""}
-  ${goal.success_criteria ? `<p class="muted">Done when: ${esc(goal.success_criteria)}</p>` : ""}
+  ${goal.success_criteria ? `<p class="muted">${esc(DONE_WHEN)}: ${esc(goal.success_criteria)}</p>` : ""}
   ${parent ? `<p class="muted">Part of: ${esc(parent.title)}</p>` : ""}
-  ${others.map((g) => `<div class="row"><span class="name">${esc(g.title)}</span><span class="status">${esc(statusLabel(g.status))}</span></div>`).join("")}
+  ${children.map(({ goal: g, depth }) => `<div class="row"${depth > 1 ? ` style="padding-left: ${(depth - 1) * 16}px"` : ""}><span class="name">${esc(g.title)}</span><span class="status">${esc(statusLabel(g.status))}</span></div>`).join("")}
 </div>`;
+  });
+  return `<h2>${total > 1 ? "Goals" : "Goal"}</h2>
+${cards.join("\n")}`;
 }
 
 // The product page's score, in its words (lib/words.js) and order. Only

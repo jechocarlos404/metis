@@ -78,9 +78,10 @@ class ProductRef(BaseModel):
 class InventoryEntry(CapabilityRead):
     """A capability and who uses it, over its submap — derived from the
     features realizing it, never stored, never from bundles. `products` and
-    `features` are ours; `external_products` are someone else's that have it.
-    `ours` is true only when at least one realizing feature is ours: false when
-    every realizing feature is external, and when nothing realizes it."""
+    `features` are ours, whatever their status; `external_products` are
+    someone else's that have it. `ours` is true only when a finished (done)
+    feature of ours realizes it: false while ours are planned or in progress,
+    when every realizing feature is external, and when nothing realizes it."""
 
     ours: bool
     products: list[ProductRef]
@@ -104,10 +105,11 @@ class CapabilityMatch(BaseModel):
     slug: str
     name: str
     maturity: CapabilityMaturity
-    #: True only when one of our features realizes it. False when only external
-    #: products do (it exists, we don't have it) or when nothing does — tell the
-    #: two apart by `external_products`.
+    #: True only when a finished (done) feature of ours realizes it. False when
+    #: only external products have it (it exists, we don't have it) or when no
+    #: finished feature does — tell the two apart by `external_products`.
     ours: bool
+    #: Our products realizing it, whatever their features' status.
     products: list[ProductRef]
     external_products: list[ProductRef]
 
@@ -133,7 +135,7 @@ class CoverageReport(BaseModel):
     needed: int
     existing: int
     #: Distinct needs we have (a match that isn't ours — external only, or
-    #: realized by no feature — counts as missing).
+    #: realized by no finished feature — counts as missing).
     #: `mature`: those of ours at beta or ga — built and proven, not just named.
     mature: int
     missing: list[str]
@@ -157,7 +159,8 @@ class MissingCapability(BaseModel):
 
 class ClosestProduct(BaseModel):
     product: ProductRef
-    #: How many of the capabilities the scored product's features name it realizes.
+    #: How many of the capabilities the scored product's features name it has
+    #: built (a finished feature realizes them).
     capabilities: int
 
 
@@ -187,6 +190,6 @@ class ProductCoverage(BaseModel):
     #: Every named capability that isn't ours, most useful first: by `only_gap`,
     #: then `features`, then name.
     missing_capabilities: list[MissingCapability]
-    #: Up to three of our products, never this one, that realize the most of
-    #: the capabilities its features name (`report.needed` is the whole).
+    #: Up to three of our products, never this one, that have built the most
+    #: of the capabilities its features name (`report.needed` is the whole).
     closest_products: list[ClosestProduct]

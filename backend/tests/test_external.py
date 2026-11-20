@@ -82,6 +82,27 @@ async def test_declared_unknown_is_not_a_health_finding(db):
 
 
 @pytest.mark.asyncio
+async def test_what_we_are_still_building_stays_ours_to_explain(db):
+    """Health skips what only someone else has, not what we're building: an
+    unfinished feature of ours keeps it on our list, though it isn't ours yet."""
+    async with db() as session:
+        s = await estate(session)
+        await feature_service.create_feature(
+            session,
+            FeatureCreate(
+                name="Our leaderboards",
+                product_id=s["ours"].id,
+                capability_ids=[s["segments"].id],
+                status=WorkStatus.in_progress,
+            ),
+        )
+        findings = {(f.kind, f.subject_name) for f in await capability_service.health(session)}
+        entry = {e.name: e for e in await capability_service.inventory(session)}["Segment leaderboards"]
+    assert entry.ours is False
+    assert ("unmotivated_capability", "Segment leaderboards") in findings
+
+
+@pytest.mark.asyncio
 async def test_inventory_separates_ours_from_external(db):
     async with db() as session:
         await estate(session)
@@ -254,7 +275,12 @@ async def test_what_to_build_next_is_ranked_and_the_closest_product_named(db):
         async def feature(name, prod, caps):
             await feature_service.create_feature(
                 session,
-                FeatureCreate(name=name, product_id=prod.id, capability_ids=[c[n].id for n in caps]),
+                FeatureCreate(
+                    name=name,
+                    product_id=prod.id,
+                    capability_ids=[c[n].id for n in caps],
+                    status=WorkStatus.done,
+                ),
             )
 
         await feature("Plan", climb, ["Route planning", "Base maps"])
@@ -289,3 +315,4 @@ async def test_what_to_build_next_is_ranked_and_the_closest_product_named(db):
     # Our own product lacks nothing, and is never its own closest product.
     assert own.missing_capabilities == []
     assert [(p.product.name, p.capabilities) for p in own.closest_products] == [("Atlas", 1)]
+

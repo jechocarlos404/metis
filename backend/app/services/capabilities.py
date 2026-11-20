@@ -480,8 +480,10 @@ def name_closeness(column, name: str):
 
 
 def ours_clause():
-    """The one rule for "ours": a feature is ours unless its product is
-    external. A feature with no product is internal work, so ours."""
+    """Our features: a feature is ours unless its product is external. A
+    feature with no product is internal work, so ours. Any status — this is
+    the work progress rolls up over. Whether a *capability* is ours is
+    stricter (a finished feature of ours realizes it): see `_usage`."""
     return or_(
         Feature.product_id.is_(None),
         Feature.product_id.in_(select(Product.id).where(Product.external.is_(False))),
@@ -491,14 +493,17 @@ def ours_clause():
 @dataclass(frozen=True)
 class Usage:
     """Who realizes a capability, over its submap. `ours` is the inventory's
-    whole question: true only when at least one of our features realizes it.
-    False when only external products do (we know it exists, not that we have
-    it) and when nothing does (a name nobody builds)."""
+    whole question: true only when a finished (done) feature of ours realizes
+    it. Planned and in-progress work doesn't count: it isn't built yet. False
+    when only external products have it (we know it exists, not that we have
+    it) and when nothing of ours is finished."""
 
-    products: list[ProductRef]
+    products: list[ProductRef]  # our products realizing it, any status
     external_products: list[ProductRef]
-    features: int  # our features only
+    features: int  # our features only, any status
     ours: bool
+    #: Our products whose finished features realize it: the ones that have it.
+    built: frozenset[uuid.UUID] = frozenset()
 
 
 async def _usage(session: AsyncSession) -> dict[uuid.UUID, Usage]:
@@ -507,17 +512,23 @@ async def _usage(session: AsyncSession) -> dict[uuid.UUID, Usage]:
     children = await _children_index(session)
     by_id = {p.id: p for p in (await session.scalars(select(Product))).all()}
     ours_f: dict[uuid.UUID, set[uuid.UUID]] = defaultdict(set)
+    done_f: dict[uuid.UUID, set[uuid.UUID]] = defaultdict(set)
     ours_p: dict[uuid.UUID, set[uuid.UUID]] = defaultdict(set)
+    done_p: dict[uuid.UUID, set[uuid.UUID]] = defaultdict(set)
     ext_p: dict[uuid.UUID, set[uuid.UUID]] = defaultdict(set)
     rows = await session.execute(
-        select(FeatureCapability.capability_id, Feature.id, Feature.product_id).join(
-            Feature, Feature.id == FeatureCapability.feature_id
-        )
+        select(
+            FeatureCapability.capability_id, Feature.id, Feature.product_id, Feature.status
+        ).join(Feature, Feature.id == FeatureCapability.feature_id)
     )
-    for capability_id, feature_id, product_id in rows:
+    for capability_id, feature_id, product_id, status in rows:
         external = product_id is not None and by_id[product_id].external
         if not external:
             ours_f[capability_id].add(feature_id)
+            if status == WorkStatus.done:
+                done_f[capability_id].add(feature_id)
+                if product_id is not None:
+                    done_p[capability_id].add(product_id)
         if product_id is not None:
             (ext_p if external else ours_p)[capability_id].add(product_id)
 
@@ -527,12 +538,12 @@ async def _usage(session: AsyncSession) -> dict[uuid.UUID, Usage]:
     usage: dict[uuid.UUID, Usage] = {}
     for capability in (c for group in children.values() for c in group):
         submap = _submap_ids(capability.id, children)
-        ours_features = gather(ours_f, submap)
         usage[capability.id] = Usage(
             products=_refs(gather(ours_p, submap), by_id),
             external_products=_refs(gather(ext_p, submap), by_id),
-            features=len(ours_features),
-            ours=bool(ours_features),
+            features=len(gather(ours_f, submap)),
+            ours=bool(gather(done_f, submap)),
+            built=frozenset(gather(done_p, submap)),
         )
     return usage
 
@@ -571,17 +582,19 @@ async def inventory(session: AsyncSession) -> list[InventoryEntry]:
     return entries
 
 
-async def coverage(session: AsyncSession, request: CoverageRequest) -> CoverageReport:
+async def coverage(
+    session: AsyncSession, request: CoverageRequest, usage: dict[uuid.UUID, Usage] | None = None
+) -> CoverageReport:
     """How much of a product idea we already have. Needs resolve by exact slug
     only — a wrong match would overstate what we have, which is worse than an
     honest gap — and every unresolved need lists near names to confirm. A
-    capability that none of our features realize resolves (so you see who has
-    it, if anyone) but counts as missing: knowing it exists, or having named
-    it, is not having it."""
+    capability no finished feature of ours realizes resolves (so you see who
+    has it, if anyone) but counts as missing: knowing it exists, naming it or
+    still building it is not having it."""
     capabilities = await list_capabilities(session)
     # A rename keeps the slug, so a capability is also found by its current name.
     by_slug = {slugify(c.name): c for c in capabilities} | {c.slug: c for c in capabilities}
-    usage = await _usage(session)
+    usage = usage if usage is not None else await _usage(session)
 
     def as_match(c: Capability) -> CapabilityMatch:
         u = usage[c.id]
@@ -694,9 +707,10 @@ async def health(session: AsyncSession) -> list[HealthFinding]:
     usage = await _usage(session)
     for capability in capabilities:
         # Known only from someone else's product: not our promise to keep.
-        # One nothing realizes isn't ours either, but is still ours to explain.
+        # One nothing realizes isn't ours either, but is still ours to explain,
+        # and so is one we're still building.
         u = usage[capability.id]
-        if not u.ours and u.external_products:
+        if not u.features and u.external_products:
             continue
         in_scope = sum(
             counts_by_capability.get(cid, 0)
@@ -766,7 +780,9 @@ async def health(session: AsyncSession) -> list[HealthFinding]:
 
 
 async def score_items(
-    session: AsyncSession, items: list[tuple[str, list[str]]]
+    session: AsyncSession,
+    items: list[tuple[str, list[str]]],
+    usage: dict[uuid.UUID, Usage] | None = None,
 ) -> tuple[CoverageReport | None, list[FeatureCoverage | None]]:
     """Run (name, capability names) items through coverage() and hand each item
     its own FeatureCoverage by position — never by name, since two items may
@@ -780,6 +796,7 @@ async def score_items(
         CoverageRequest(
             features=[IdeaFeature(name=items[i][0], capabilities=items[i][1]) for i in indices]
         ),
+        usage,
     )
     for k, i in enumerate(indices):
         scored[i] = report.features[k]
@@ -798,8 +815,9 @@ async def product_coverage(session: AsyncSession, product_id: uuid.UUID) -> Prod
         )
     )
     names = {c.id: c.name for c in await list_capabilities(session)}
+    usage = await _usage(session)
     report, scored = await score_items(
-        session, [(f.name, [names[c] for c in f.capability_ids]) for f in features]
+        session, [(f.name, [names[c] for c in f.capability_ids]) for f in features], usage
     )
     # One pass, by position, so the groups partition the features — the same
     # precedence a journey step's verdict uses.
@@ -815,7 +833,7 @@ async def product_coverage(session: AsyncSession, product_id: uuid.UUID) -> Prod
                 groups["missing_incomplete"].append(f.name)
         else:
             groups["partly" if f.unknown_capabilities else "buildable"].append(f.name)
-    missing_capabilities, closest_products = _what_to_build(scored, product.id)
+    missing_capabilities, closest_products = _what_to_build(scored, product.id, usage)
     return ProductCoverage(
         product=ProductRef.model_validate(product),
         total_features=len(features),
@@ -827,12 +845,13 @@ async def product_coverage(session: AsyncSession, product_id: uuid.UUID) -> Prod
 
 
 def _what_to_build(
-    scored: list[FeatureCoverage | None], product_id: uuid.UUID
+    scored: list[FeatureCoverage | None], product_id: uuid.UUID, usage: dict[uuid.UUID, Usage]
 ) -> tuple[list[MissingCapability], list[ClosestProduct]]:
     """From the matches coverage() already made, never a second lookup: the
     capabilities we lack, ranked by how many features each alone would cover,
-    and the products of ours that already have the most of what's named.
-    Needs are keyed by slug, as coverage() resolves them."""
+    and the products of ours that already have the most of what's named —
+    "have" as ours means it, through a finished feature. Needs are keyed by
+    slug, as coverage() resolves them."""
     gaps: dict[str, MissingCapability] = {}
     ours: dict[uuid.UUID, tuple[ProductRef, set[str]]] = {}
     for fc in scored:
@@ -842,8 +861,9 @@ def _what_to_build(
         for need in fc.capabilities:
             key = need.match.slug if need.match else slugify(need.name)
             if need.match and need.match.ours:
+                built = usage[need.match.id].built
                 for p in need.match.products:
-                    if p.id != product_id:
+                    if p.id != product_id and p.id in built:
                         ours.setdefault(p.id, (p, set()))[1].add(key)
             else:
                 lacking[key] = need

@@ -3,7 +3,9 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { LABEL_PX, READABLE_SCALE, fitTransform, openTransform, revealTransform } from "../src/components/graph/graph-data.js";
+import {
+  GOAL_LINES, LABEL_PX, READABLE_SCALE, centreTransform, fitTransform, openTransform, readableUnion, revealTransform, wrapLabel,
+} from "../src/components/graph/graph-data.js";
 
 const screen = (t, x) => x * t.k + t.x;
 const screenY = (t, y) => y * t.k + t.y;
@@ -64,4 +66,59 @@ test("reveal leaves a card in view alone and brings one out of view to the left 
   const below = revealTransform(t, { x0: 100, y0: 3000, x1: 250, y1: 3060 }, 400, 300);
   assert.equal(below.x, 0);
   assert.equal(screenY(below, 3030), 150);
+});
+
+const inside = (t, b, x0, y0, x1, y1) =>
+  screen(t, b.x0) >= x0 - 0.01 && screen(t, b.x1) <= x1 + 0.01 && screenY(t, b.y0) >= y0 - 0.01 && screenY(t, b.y1) <= y1 + 0.01;
+
+test("Fit keeps every node out of the strip the controls sit in, on any side (C29, C12)", () => {
+  // At 768 the folded key covered the top-left goal: the key's strip is kept clear now.
+  const b = { x0: 0, y0: 0, x1: 2000, y1: 1400 };
+  const t = fitTransform(b, 670, 418, { top: 46 });
+  assert.ok(inside(t, b, 0, 46, 670, 418));
+  const all = fitTransform(b, 600, 500, { top: 40, right: 30, bottom: 20, left: 10 });
+  assert.ok(inside(all, b, 10, 40, 570, 480));
+});
+
+test("a goal picked from the list is centred in the frame the controls leave (A10)", () => {
+  const box = { x0: 900, y0: 400, x1: 1048, y1: 472 };
+  const t = centreTransform(box, 1, 670, 418, { top: 46 });
+  assert.equal(t.k, 1);
+  assert.equal((screen(t, box.x0) + screen(t, box.x1)) / 2, 335);
+  assert.equal((screenY(t, box.y0) + screenY(t, box.y1)) / 2, 46 + (418 - 46) / 2);
+});
+
+test("a selected goal opens centred at full size when the whole network can't be read", () => {
+  const b = { x0: 0, y0: 0, x1: 3000, y1: 2000 };
+  const goal = { x0: 2000, y0: 1500, x1: 2148, y1: 1572 };
+  const t = openTransform(b, 600, 400, { top: 40 }, 2.5, goal, true);
+  assert.equal(t.k, 1);
+  assert.equal((screen(t, goal.x0) + screen(t, goal.x1)) / 2, 300);
+  assert.equal((screenY(t, goal.y0) + screenY(t, goal.y1)) / 2, 220);
+});
+
+test("a grouped graph opens on as many of its hubs as show whole and readable (B35)", () => {
+  const b = { x0: -1000, y0: -600, x1: 1000, y1: 600 };
+  // Most used first; the two on the left sit close, the first far right.
+  const hubs = [{ x0: 400, y0: 0, x1: 548, y1: 40 }, { x0: -10, y0: -200, x1: 138, y1: -160 }, { x0: -10, y0: 0, x1: 138, y1: 40 }];
+  // 300 px wide: no two across 400 units, so the pair that does fit wins.
+  const narrow = readableUnion(hubs, 300, 600);
+  assert.deepEqual(narrow, { x0: -10, y0: -200, x1: 138, y1: 40 });
+  const t = openTransform(b, 300, 600, 0, 2.5, narrow, true);
+  assert.ok(t.k >= READABLE_SCALE && t.k <= 1);
+  for (const h of hubs.slice(1)) assert.ok(inside(t, h, 0, 0, 300, 600));
+  // Wide, all of them.
+  assert.deepEqual(readableUnion(hubs, 900, 600), { x0: -10, y0: -200, x1: 548, y1: 40 });
+  assert.equal(readableUnion([], 900, 600), null);
+});
+
+test("a goal card holds the whole name the first-run network cut (C35)", () => {
+  for (const name of [
+    "Turn Tagomoto website visitors into App Store downloads",
+    "Grow adoption of Tagomoto: Home Organizer",
+    "Publish Tagomoto's privacy policy and terms of service",
+  ]) {
+    const lines = wrapLabel(name, 19, GOAL_LINES);
+    assert.equal(lines.join(" "), name);
+  }
 });

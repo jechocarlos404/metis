@@ -5,6 +5,10 @@
 // edge-trim math (forceGraphEngine.js) always agree with what's drawn.
 export const NODE_W = 148;
 export const NODE_H = 56;
+// A goal card is taller: goal names run long, and four lines keep 44 of the
+// 48 real ones whole where two lines kept 4.
+export const GOAL_H = 72;
+export const GOAL_LINES = 4;
 
 // Card names are LABEL_PX graph units tall. Zoomed out past READABLE_SCALE
 // they would draw under 11px, so the engine hides them instead (.graph-far)
@@ -12,32 +16,74 @@ export const NODE_H = 56;
 export const LABEL_PX = 11.5;
 export const READABLE_SCALE = Math.ceil((11 / LABEL_PX) * 100) / 100;
 
+// The px a view keeps clear on each side of the canvas for the controls drawn
+// over it (the key, the zoom buttons): {top, right, bottom, left}. A plain
+// number is the left side alone.
+function frame(inset, w, h) {
+  const { top = 0, right = 0, bottom = 0, left = 0 } = typeof inset === "number" ? { left: inset } : inset ?? {};
+  return { top, left, w: Math.max(1, w - left - right), h: Math.max(1, h - top - bottom) };
+}
+
 /**
  * The view that shows every node: `bounds` {x0, y0, x1, y1} in graph units
- * framed in a `w` x `h` px canvas with `inset` px kept clear on the left.
+ * framed in a `w` x `h` px canvas, the `inset` kept clear (see frame()).
  * Never limited by a zoom floor, so nothing is cut off. Returns {k, x, y}.
  */
 export function fitTransform(bounds, w, h, inset = 0, maxK = 2.5) {
-  const frameW = Math.max(1, w - inset);
-  const k = Math.min(maxK, frameW / Math.max(1, bounds.x1 - bounds.x0), Math.max(1, h) / Math.max(1, bounds.y1 - bounds.y0));
+  const f = frame(inset, w, h);
+  const k = Math.min(maxK, f.w / Math.max(1, bounds.x1 - bounds.x0), f.h / Math.max(1, bounds.y1 - bounds.y0));
+  return centreTransform(bounds, k, w, h, inset);
+}
+
+/** `box` centred in the frame at scale `k`. */
+export function centreTransform(box, k, w, h, inset = 0) {
+  const f = frame(inset, w, h);
   return {
     k,
-    x: inset + frameW / 2 - ((bounds.x0 + bounds.x1) / 2) * k,
-    y: Math.max(1, h) / 2 - ((bounds.y0 + bounds.y1) / 2) * k,
+    x: f.left + f.w / 2 - ((box.x0 + box.x1) / 2) * k,
+    y: f.top + f.h / 2 - ((box.y0 + box.y1) / 2) * k,
   };
 }
 
 /**
- * The view a graph opens on. Everything, when names are readable that way;
- * otherwise names at full size (scale 1) from the drawing's top-left corner,
- * so its first column is not cut off. A `focus` box (the selected card) out
- * of that view is brought in, as revealTransform() does.
+ * The view a graph opens on. Everything, when names are readable that way.
+ * Otherwise, with a `focus` box to `centre` (the selected goal, or the hubs a
+ * grouped graph is grouped by), that box centred, as large as fits between
+ * the readable scale and 1. Otherwise names at full size (scale 1) from the
+ * drawing's top-left corner, so its first column is not cut off, and a
+ * `focus` box (the selected card) out of that view brought in, as
+ * revealTransform() does.
  */
-export function openTransform(bounds, w, h, inset = 0, maxK = 2.5, focus = null) {
+export function openTransform(bounds, w, h, inset = 0, maxK = 2.5, focus = null, centre = false) {
   const fit = fitTransform(bounds, w, h, inset, maxK);
   if (fit.k >= READABLE_SCALE) return fit;
-  const t = { k: 1, x: inset - bounds.x0, y: -bounds.y0 };
+  if (focus && centre) return centreTransform(focus, Math.max(READABLE_SCALE, fitTransform(focus, w, h, inset, 1).k), w, h, inset);
+  const f = frame(inset, w, h);
+  const t = { k: 1, x: f.left - bounds.x0, y: f.top - bounds.y0 };
   return (focus && revealTransform(t, focus, w, h, inset)) || t;
+}
+
+/**
+ * The box around as many of `boxes` as the frame shows together at a
+ * readable scale: a grouped graph's hubs, most used first, so a narrow screen
+ * opens on the groups it can show whole rather than on the middle of all of
+ * them, cutting each. Each box in turn seeds a set that takes every later
+ * one that still fits; the largest set wins, the earliest seed on a tie.
+ */
+export function readableUnion(boxes, w, h, inset = 0) {
+  const join = (a, b) => ({ x0: Math.min(a.x0, b.x0), y0: Math.min(a.y0, b.y0), x1: Math.max(a.x1, b.x1), y1: Math.max(a.y1, b.y1) });
+  let best = null;
+  for (const seed of boxes) {
+    let box = seed;
+    let n = 1;
+    for (const b of boxes) {
+      if (b === seed) continue;
+      const next = join(box, b);
+      if (fitTransform(next, w, h, inset, 1).k >= READABLE_SCALE) { box = next; n++; }
+    }
+    if (!best || n > best.n) best = { box, n };
+  }
+  return best?.box ?? null;
 }
 
 /**
@@ -46,17 +92,18 @@ export function openTransform(bounds, w, h, inset = 0, maxK = 2.5, focus = null)
  * it is centred. Null when it is already in view.
  */
 export function revealTransform(t, box, w, h, inset = 0) {
+  const f = frame(inset, w, h);
   const sx0 = box.x0 * t.k + t.x;
   const sx1 = box.x1 * t.k + t.x;
   const sy0 = box.y0 * t.k + t.y;
   const sy1 = box.y1 * t.k + t.y;
-  const inX = sx0 >= inset && sx1 <= w;
-  const inY = sy0 >= 0 && sy1 <= h;
+  const inX = sx0 >= f.left && sx1 <= f.left + f.w;
+  const inY = sy0 >= f.top && sy1 <= f.top + f.h;
   if (inX && inY) return null;
   return {
     k: t.k,
-    x: inX ? t.x : inset - box.x0 * t.k,
-    y: inY ? t.y : h / 2 - ((box.y0 + box.y1) / 2) * t.k,
+    x: inX ? t.x : f.left - box.x0 * t.k,
+    y: inY ? t.y : f.top + f.h / 2 - ((box.y0 + box.y1) / 2) * t.k,
   };
 }
 

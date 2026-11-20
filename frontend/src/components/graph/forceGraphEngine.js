@@ -23,7 +23,7 @@ import { forceSimulation, forceLink, forceManyBody, forceCollide, forceX, forceY
 import { select } from "d3-selection";
 import { zoom as d3zoom, zoomIdentity } from "d3-zoom";
 import { drag as d3drag } from "d3-drag";
-import { READABLE_SCALE, fitTransform, openTransform, revealTransform } from "./graph-data.js";
+import { READABLE_SCALE, centreTransform, fitTransform, openTransform, readableUnion, revealTransform } from "./graph-data.js";
 
 // Keeps card-shaped nodes from overlapping. A circle wide enough for a card
 // also pushes rows far apart vertically; this pushes each overlapping pair
@@ -70,8 +70,9 @@ const DEFAULTS = {
   scaleExtent: [0.2, 2.5],
   renderTauMs: 70, // low-pass time constant for the render-position smoothing
   reducedMotion: false,
-  // Screen px to keep clear on the left when framing, for an overlay such as a key.
-  fitInsetLeft: () => 0,
+  // Screen px to keep clear on each side when framing, for the controls drawn
+  // over the canvas: {top, right, bottom, left} (graph-data.js frame()).
+  frameInsets: () => 0,
 };
 
 const TICK_MS = 1000 / 60;
@@ -322,9 +323,9 @@ export function createForceGraph(opts) {
     for (const id of edgeEls.keys()) paintEdge(id);
 
     if (openPending && settled && draggingId == null) {
-      const { focusId } = openPending;
+      const { focus } = openPending;
       openPending = null;
-      openView(focusId);
+      openView(focus);
     }
     if (!settled || draggingId != null || transformAnimation) {
       rafHandle = requestAnimationFrame(frame);
@@ -400,31 +401,65 @@ export function createForceGraph(opts) {
   /** Every node in view, however small that makes them. */
   function fitToView(duration = 450) {
     const b = bounds();
-    if (b) frameTo(fitTransform(b, svgEl.clientWidth || 1, svgEl.clientHeight || 1, o.fitInsetLeft(), o.scaleExtent[1]), duration);
+    if (b) frameTo(fitTransform(b, svgEl.clientWidth || 1, svgEl.clientHeight || 1, o.frameInsets(), o.scaleExtent[1]), duration);
   }
 
-  /** The view a graph opens on: see openTransform(). `focusId` is kept in view. */
-  function openView(focusId, duration = 450) {
+  /**
+   * The view a graph opens on (openTransform()). `focus` is a card's id, kept
+   * in view, or {ids, centre}: as many of those cards as show at a readable
+   * scale, in order (readableUnion()), centred.
+   */
+  function openView(focus, duration = 450) {
     const b = bounds();
     if (!b) return;
-    const t = openTransform(b, svgEl.clientWidth || 1, svgEl.clientHeight || 1, o.fitInsetLeft(), o.scaleExtent[1],
-      focusId != null ? boxOf(focusId, 8) : null);
-    frameTo(t, duration);
+    const w = svgEl.clientWidth || 1;
+    const h = svgEl.clientHeight || 1;
+    const inset = o.frameInsets();
+    const { ids, centre = false } = focus == null ? { ids: [] } : typeof focus === "object" ? focus : { ids: [focus] };
+    const box = readableUnion(ids.map((id) => boxOf(id, 8)).filter(Boolean), w, h, inset);
+    frameTo(openTransform(b, w, h, inset, o.scaleExtent[1], box, centre), duration);
   }
 
-  function openWhenSettled(focusId) {
-    openPending = { focusId };
+  function openWhenSettled(focus) {
+    openPending = { focus };
     ensureLoopRunning();
   }
 
-  /** Pans to a card picked outside the canvas when it is out of view. Never mid-drag. */
+  /**
+   * Pans to a card picked outside the canvas when it is out of view. Never
+   * mid-drag. While the graph is still settling, the view it opens on keeps
+   * it in view instead, unless that view is a grouped graph's hubs (a feature
+   * selected for you on load must not pull the view off its goals).
+   */
   function reveal(id) {
+    if (draggingId != null) return;
+    if (openPending) {
+      if (!openPending.focus?.centre) openPending = { focus: id };
+      return;
+    }
     const box = boxOf(id, 8);
-    if (!box || draggingId != null) return;
-    const t = revealTransform(currentTransform, box, svgEl.clientWidth || 1, svgEl.clientHeight || 1, o.fitInsetLeft());
+    if (!box) return;
+    const t = revealTransform(currentTransform, box, svgEl.clientWidth || 1, svgEl.clientHeight || 1, o.frameInsets());
     if (!t) return;
     openPending = null;
     frameTo(t, 300);
+  }
+
+  /**
+   * Centres a card picked outside the canvas, its name readable (scale 1 or
+   * closer). Never mid-drag, so a card pressed on the canvas stays under the
+   * pointer. While the graph is still settling, it becomes what opens.
+   */
+  function centreOn(id) {
+    if (draggingId != null) return;
+    if (openPending) {
+      openPending = { focus: { ids: [id], centre: true } };
+      return;
+    }
+    const box = boxOf(id, 8);
+    if (!box) return;
+    const k = Math.min(o.scaleExtent[1], Math.max(1, currentTransform.k));
+    frameTo(centreTransform(box, k, svgEl.clientWidth || 1, svgEl.clientHeight || 1, o.frameInsets()), 300);
   }
 
   function zoomBy(factor) {
@@ -546,6 +581,7 @@ export function createForceGraph(opts) {
     openView,
     openWhenSettled,
     reveal,
+    centreOn,
     zoomBy,
     setReducedMotion,
     destroy,

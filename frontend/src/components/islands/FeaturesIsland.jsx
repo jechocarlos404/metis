@@ -81,8 +81,8 @@ export default function FeaturesIsland({ canWrite = true }) {
   const phone = pageWidth != null && pageWidth < 640;
   // The table needs about 760px beside the 300px panel; narrower, each row stacks.
   const compactRows = phone || (pageWidth != null && pageWidth - 360 < 760);
-  // A narrow graph folds its key (FeatureGraphView); the group buttons sit
-  // beside it, or at the foot of a phone's graph, where the top has no room.
+  // A narrow graph has no room for the group buttons beside its key, so they
+  // sit in a strip above the canvas, never over a feature (C30).
   const narrowGraph = pageWidth != null && pageWidth - (phone ? 40 : 360) < 560;
   const [saving, setSaving] = React.useState(false);
   const [confirmingDelete, setConfirmingDelete] = React.useState(false);
@@ -516,16 +516,16 @@ export default function FeaturesIsland({ canWrite = true }) {
       ) : (
       <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
         {panelShown ? null : tab === "graph" ? (
-          <div style={{ flex: 1, position: "relative", margin: 20, background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", overflow: "hidden", minWidth: 0 }}>
+          <div style={{ flex: 1, position: "relative", display: "flex", flexDirection: "column", margin: 20, background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", overflow: "hidden", minWidth: 0 }}>
             {group !== "order" && !hubs ? (
               <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>
                 {goals === false || motivations === false ? "Could not load the goals behind these features." : "Loading goals…"}
               </div>
             ) : (
               // A fresh graph per grouping and product: pins and hubs from another one would not fit this one.
-              <FeatureGraphView key={`${group}:${activeProduct}`}layout={visibleLayout} hubs={hubs} fitKey={activeProduct} selectedId={selected} onSelect={selectFeature} recheckStates={cutStates ? null : recheckStates} fadedIds={!cutStates && recheckStates ? new Set(visibleLayout.nodes.filter((n) => n.id !== selected && !recheckStates.has(n.id)).map((n) => n.id)) : null} cutStates={cutStates} />
+              <FeatureGraphView key={`${group}:${activeProduct}`} style={{ flex: 1, minHeight: 0 }} layout={visibleLayout} hubs={hubs} fitKey={activeProduct} selectedId={selected} onSelect={selectFeature} recheckStates={cutStates ? null : recheckStates} fadedIds={!cutStates && recheckStates ? new Set(visibleLayout.nodes.filter((n) => n.id !== selected && !recheckStates.has(n.id)).map((n) => n.id)) : null} cutStates={cutStates} />
             )}
-            <div role="group" aria-label="Group by" style={{ position: "absolute", ...(phone ? { bottom: 48, left: 10 } : narrowGraph ? { top: 10, left: 64 } : { top: 10, left: "50%", transform: "translateX(-50%)" }), display: "flex", alignItems: "center", gap: 8, fontFamily: "var(--font-mono)", fontSize: "var(--text-2xs)", color: "var(--text-secondary)" }}>
+            <div role="group" aria-label="Group by" style={{ ...(narrowGraph ? { position: "relative", order: -1, padding: "8px 10px", borderBottom: "1px solid var(--border-hairline)" } : { position: "absolute", top: 10, left: "50%", transform: "translateX(-50%)" }), display: "flex", alignItems: "center", gap: 8, fontFamily: "var(--font-mono)", fontSize: "var(--text-2xs)", color: "var(--text-secondary)" }}>
               {!narrowGraph && "Group by"}
               <div style={{ display: "inline-flex", border: "1px solid var(--border-control)", borderRadius: "var(--radius-sm)", overflow: "hidden", boxShadow: "var(--shadow-card)" }}>
                 {GROUPS.map((g, i) => (

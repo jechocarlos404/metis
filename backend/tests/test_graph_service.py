@@ -257,6 +257,31 @@ def test_capability_impact_follows_links_of_links_including_its_own_features():
     assert graph.capability_impact({cap_d})["dependencies"] == sorted({CAP_A, CAP_B, CAP_C}, key=str)
 
 
+def test_capability_impact_puts_a_capability_on_both_sides_without_a_cycle():
+    """The audit's Knowledge Graph page (A25): one feature built on two
+    capabilities needs another built on the same two, and a third capability's
+    features need and are needed by the first's. Both land on both lists, and
+    the features themselves form no cycle."""
+    kg, catalog, skills = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    graph = FeatureGraph(sessionmaker=None)
+    library = fake_feature(1, "keep a features library", capability_ids=(catalog, kg))
+    link = fake_feature(2, "link features", capability_ids=(catalog, kg))
+    organize = fake_feature(3, "organize skills", capability_ids=(skills, kg))
+    suggest = fake_feature(4, "suggest prerequisites", capability_id=skills)
+    profiles = fake_feature(5, "grade skills", capability_ids=(skills, kg))
+    spot = fake_feature(6, "spot rare skills", capability_id=kg)
+    for f in (library, link, organize, suggest, profiles, spot):
+        graph.upsert_node(f)
+    graph.add_edge(link.id, library.id, "DEPENDS_ON")
+    graph.add_edge(suggest.id, organize.id, "DEPENDS_ON")
+    graph.add_edge(spot.id, profiles.id, "DEPENDS_ON")
+
+    impact = graph.capability_impact({kg})
+    assert set(impact["dependents"]) == {catalog, skills}
+    assert set(impact["dependencies"]) == {catalog, skills}
+    assert graph.find_cycles() == []
+
+
 def test_layout_carries_the_features_own_product():
     product_id = uuid.uuid4()
     graph = FeatureGraph(sessionmaker=None)

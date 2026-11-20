@@ -2,7 +2,7 @@ import React from "react";
 import { PageHeader } from "../shell/PageHeader.jsx";
 import { Badge, Button, DeleteConfirm, Input } from "../../ds";
 import { api } from "../../lib/api.js";
-import { MATURITY, NEED, VERDICT, count, needKey, plain, statusLabel } from "../../lib/words.js";
+import { MATURITY, NEED, VERDICT, count, lackingKey, needKey, plain, statusLabel } from "../../lib/words.js";
 import { readParam, useParamRestore, writeParams } from "../../lib/url-state.js";
 import { CoverageReport } from "../shared/coverage.jsx";
 import { CapabilityPicker } from "../shared/CapabilityPicker.jsx";
@@ -35,6 +35,14 @@ const TONE = {
 const VERDICT_KEY = { buildable: "buildable", known_covered: "partly", missing: "missing", unknown: "unknown" };
 const stepKind = (step) => (step.live ? "live" : VERDICT_KEY[step.verdict] ?? "unknown");
 const needKind = (need) => needKey(need.match);
+const stepMatches = (step) => (step.coverage?.capabilities ?? []).map((n) => n.match);
+// A missing step whose every lacking capability is known elsewhere says so.
+function verdictOf(kind, matches) {
+  const v = VERDICT[kind];
+  return kind === "missing" && lackingKey(matches) === "elsewhere"
+    ? { ...v, label: `${v.label} · ${NEED.elsewhere.label}`, hint: NEED.elsewhere.hint, elsewhere: true }
+    : v;
+}
 
 const STEP_W = 176;
 const STEP_H = 92;
@@ -150,9 +158,11 @@ export default function JourneysIsland({ canWrite }) {
         actions={canWrite && !editing && <Button size="sm" variant="accent" onClick={startNew}>New idea or journey</Button>}
       />
       {error && <div style={{ padding: "8px 24px", color: "var(--danger-fg)", fontSize: "var(--text-xs)" }}>{error}</div>}
-      <div style={{ flex: 1, minHeight: 0, overflowY: "auto", display: "grid", gridTemplateColumns: "260px minmax(0,1fr)", gap: 16, padding: "16px 24px", alignItems: "start" }}>
-        <JourneyList journeys={journeys} selected={selected} onSelect={select} />
-        <div style={{ minWidth: 0 }}>
+      <div style={{ flex: 1, minHeight: 0, overflowY: "auto", display: "flex", flexWrap: "wrap", alignItems: "flex-start", alignContent: "flex-start", gap: 16, padding: "16px 24px" }}>
+        <div style={{ flex: "1 0 260px", maxWidth: "100%" }}>
+          <JourneyList journeys={journeys} selected={selected} onSelect={select} />
+        </div>
+        <div style={{ flex: "999 1 420px", minWidth: 0 }}>
           {editing && (
             <JourneyEditor
               key={editing.base.id ?? "new"}
@@ -344,20 +354,41 @@ function JourneyMap({ steps }) {
 
   const stepX = (i) => 16 + i * (STEP_W + GAP);
   const stepsWidth = stepX(steps.length - 1) + STEP_W + 16;
+  const width = Math.max(stepsWidth, 640);
 
   // Capability chips: packed left-to-right along the bottom, each as close as
-  // it can get to the centre of the steps that use it.
+  // it can get to the centre of the steps that use it, wrapping onto another
+  // row rather than running past the steps where nobody would scroll to them.
   const placed = [];
   let cursor = 16;
+  let row = 0;
   for (const c of caps) {
     const w = Math.min(200, 24 + c.need.name.length * 6.6);
     const ideal = stepX(c.center) + STEP_W / 2 - w / 2;
-    const x = Math.max(cursor, ideal);
-    placed.push({ ...c, x, w });
+    let x = Math.max(cursor, ideal);
+    if (x + w > width - 16 && cursor > 16) {
+      row += 1;
+      x = Math.min(Math.max(16, ideal), width - 16 - w);
+    }
+    placed.push({ ...c, x, w, y: CAP_Y + row * (CAP_H + 10) });
     cursor = x + w + 10;
   }
-  const width = Math.max(stepsWidth, cursor + 6);
-  const height = CAP_Y + CAP_H + 24;
+  const height = CAP_Y + (row + 1) * (CAP_H + 10) + 14;
+
+  // Many steps still run past the panel: say so instead of a silent scroll.
+  const scrollRef = React.useRef(null);
+  const [hidden, setHidden] = React.useState(0);
+  React.useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return undefined;
+    const measure = () => {
+      const visible = Math.floor((el.clientWidth - 16 + GAP) / (STEP_W + GAP));
+      setHidden(el.scrollWidth > el.clientWidth + 1 ? Math.max(0, steps.length - visible) : 0);
+    };
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, [steps.length, width]);
 
   const active = (stepIdx, capKey) => {
     if (!hover) return true;
@@ -371,8 +402,11 @@ function JourneyMap({ steps }) {
 
   return (
     <div style={{ ...PANEL, padding: "12px 0 4px" }}>
-      <div style={{ ...CAPS, padding: "0 16px 6px" }}>Steps and the capabilities they need. Hover either to trace it, click to open it.</div>
-      <div style={{ overflowX: "auto" }}>
+      <div style={{ ...CAPS, padding: "0 16px 6px" }}>
+        {count(steps.length, "step")} and the {count(placed.length, "capability", "capabilities")} they need. Point at or tab to either to trace it.
+        {hidden > 0 && ` Scroll sideways for ${count(hidden, "more step", "more steps")}.`}
+      </div>
+      <div ref={scrollRef} style={{ overflowX: "auto" }}>
         <svg width={width} height={height} style={{ display: "block", fontFamily: "var(--font-body)" }}>
           <defs>
             <marker id="jarrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
@@ -392,7 +426,7 @@ function JourneyMap({ steps }) {
             const x2 = c.x + c.w / 2;
             return (
               <path key={`${c.key}-${i}`}
-                d={`M${x1},${STEP_H} C${x1},${STEP_H + 60} ${x2},${CAP_Y - 60} ${x2},${CAP_Y}`}
+                d={`M${x1},${STEP_H} C${x1},${STEP_H + 60} ${x2},${c.y - 60} ${x2},${c.y}`}
                 fill="none" stroke={on && hover ? TONE[NEED[kind].tone].fg : "var(--border-default)"}
                 strokeWidth={on && hover ? 1.8 : 1} strokeDasharray={kind === "none" ? "3,3" : undefined}
                 opacity={on ? 1 : 0.15} />
@@ -408,7 +442,7 @@ function JourneyMap({ steps }) {
             const on = active(null, c.key);
             const enter = () => setHover({ kind: "cap", key: c.key });
             const chip = (
-              <g transform={`translate(${c.x},${CAP_Y})`} opacity={on ? 1 : 0.2}
+              <g transform={`translate(${c.x},${c.y})`} opacity={on ? 1 : 0.2}
                 onMouseEnter={enter} onMouseLeave={leave} style={{ cursor: c.need.match ? "pointer" : "default" }}>
                 <title>{`${c.need.match?.name ?? c.need.name}: ${capInfo(c.need)}`}</title>
                 <rect width={c.w} height={CAP_H} rx={CAP_H / 2} fill={t.bg} stroke={t.fg}
@@ -420,7 +454,7 @@ function JourneyMap({ steps }) {
             );
             return c.need.match
               ? <a key={c.key} href={`/capabilities/${c.need.match.slug}`} onFocus={enter} onBlur={leave}>{chip}</a>
-              : <React.Fragment key={c.key}>{chip}</React.Fragment>;
+              : <g key={c.key} tabIndex={0} onFocus={enter} onBlur={leave} onClick={enter}>{chip}</g>;
           })}
         </svg>
       </div>
@@ -433,6 +467,7 @@ function JourneyMap({ steps }) {
         {hoveredStep && (
           <span>
             <b style={{ color: "var(--text-heading)" }}>{hoveredStep.label}</b>: {stepWhere(hoveredStep)} · {VERDICT[stepKind(hoveredStep)].hint}
+            {verdictOf(stepKind(hoveredStep), stepMatches(hoveredStep)).elsewhere ? ` · ${NEED.elsewhere.label}` : ""}
             {hoveredStep.note ? ` · ${hoveredStep.note}` : ""}
           </span>
         )}
@@ -448,8 +483,16 @@ function truncate(text, n) {
   return text.length > n ? `${text.slice(0, Math.max(1, n - 1))}…` : text;
 }
 
+// "Hanko: Coffee… · in progress": shorten the product, never the status.
+function fitWhere(where, n) {
+  const i = where.lastIndexOf(" · ");
+  if (i < 0 || where.length <= n) return truncate(where, n);
+  const tail = where.slice(i);
+  return `${truncate(where.slice(0, i), Math.max(4, n - tail.length))}${tail}`;
+}
+
 function StepCard({ step, x, dim, onEnter, onLeave }) {
-  const v = VERDICT[stepKind(step)];
+  const v = verdictOf(stepKind(step), stepMatches(step));
   const t = TONE[v.tone];
   const f = step.feature;
   const where = stepWhere(step);
@@ -468,10 +511,12 @@ function StepCard({ step, x, dim, onEnter, onLeave }) {
           overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical",
         }}>{step.label}</div>
       </foreignObject>
-      <text x="14" y={STEP_H - 12} fontSize="10.5" fill="var(--text-secondary)">{truncate(where, 28)}</text>
+      <text x="14" y={STEP_H - 12} fontSize="10.5" fill="var(--text-secondary)">{fitWhere(where, 28)}</text>
     </g>
   );
-  return f ? <a href={`/features?feature=${f.id}`} onFocus={onEnter} onBlur={onLeave}>{card}</a> : card;
+  return f
+    ? <a href={`/features?feature=${f.id}`} onFocus={onEnter} onBlur={onLeave}>{card}</a>
+    : <g tabIndex={0} onFocus={onEnter} onBlur={onLeave} onClick={onEnter}>{card}</g>;
 }
 
 // Mirrors the backend's slugify: step needs resolve by exact slug.
@@ -528,6 +573,11 @@ function JourneyEditor({ base, draft: start, features, productById, inventory, o
   }, [query, features, productById]);
   const matches = allMatches.slice(0, 8);
 
+  // What each step's capabilities resolve to (null: no such capability).
+  const matchesOf = (s) => {
+    if (!s.feature_id) return s.needs.map((n) => bySlug.get(slugify(n)) ?? null);
+    return (featureById.get(s.feature_id)?.capability_ids ?? []).map((id) => byId.get(id) ?? null);
+  };
   // Live verdicts while composing, by the same rule the saved analysis uses.
   const kinds = draft.steps.map((s) => {
     if (!s.feature_id) return needsVerdict(s.needs.map((n) => bySlug.get(slugify(n))), false);
@@ -572,7 +622,7 @@ function JourneyEditor({ base, draft: start, features, productById, inventory, o
       {draft.steps.map((s, i) => {
         const f = s.feature_id ? featureById.get(s.feature_id) : null;
         const product = f ? productById.get(f.product_id) : null;
-        const v = VERDICT[kinds[i]];
+        const v = verdictOf(kinds[i], matchesOf(s));
         const elsewhere = s.feature_id ? [] : s.needs.filter((n) => needKey(bySlug.get(slugify(n))) === "elsewhere");
         return (
           <div key={i} style={{ display: "grid", gridTemplateColumns: "24px minmax(0,1fr) auto", gap: 8, alignItems: "start", padding: 10, border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-sm)", borderStyle: s.feature_id ? "solid" : "dashed" }}>
@@ -596,7 +646,7 @@ function JourneyEditor({ base, draft: start, features, productById, inventory, o
                   </span>
                 )}
                 {elsewhere.length > 0 && <>
-                  <span title={NEED.elsewhere.hint}><Badge tone={NEED.elsewhere.tone}>{NEED.elsewhere.label}</Badge></span>
+                  {!v.elsewhere && <span title={NEED.elsewhere.hint}><Badge tone={NEED.elsewhere.tone}>{NEED.elsewhere.label}</Badge></span>}
                   <span>{elsewhere.join(", ")}</span>
                 </>}
               </div>

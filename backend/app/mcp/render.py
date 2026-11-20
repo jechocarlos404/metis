@@ -589,9 +589,11 @@ def ready_features(
         lines.append("")
         return _end(lines, "/features")
     if pending:
-        lines.append(f"Nothing is ready: {pending} pending feature(s), each waits on one not done.")
+        lines.append(
+            f"Nothing is ready{scope}: {pending} pending feature(s), each waits on one not done."
+        )
     else:
-        lines.append("Nothing is pending: every feature of ours is in progress or done.")
+        lines.append(f"Nothing is pending{scope}: every feature of ours is in progress or done.")
     lines += [
         "To find what to build next, check an idea against what already exists with "
         "check_idea. Its Open: line pre-fills Home's idea check for the owner.",

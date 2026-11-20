@@ -203,7 +203,8 @@ function EmptyState({ canWrite }) {
       ) : (
         <div>
           Someone who can edit saves ideas from the idea check on <a href="/home" style={{ color: "var(--text-accent)" }}>Home</a>.
-          You can check an idea there yourself; it just won’t be saved.
+          You can check an idea there yourself; it just won’t be saved. A coding agent with the
+          metis plugin can also propose ideas with <code>metis-what-next</code>.
         </div>
       )}
     </div>

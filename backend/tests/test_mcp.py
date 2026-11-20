@@ -549,8 +549,12 @@ async def test_ready_features_filters_by_product(api):
     rival = await server._dispatch("ready_features", {"product": "rival"})
     assert rival.startswith("0 feature(s) ready to start in rival")
     # Rival's pending features are external, so none of ours is pending there.
-    assert "Nothing is pending" in rival and "check_idea" in rival
+    assert "Nothing is pending in rival: every feature of ours" in rival and "check_idea" in rival
     assert rival.endswith("Open: /home")
+
+    blocked = render.ready_features([], [], None, pending=2)
+    assert "Nothing is ready: 2 pending feature(s), each waits on one not done." in blocked
+    assert "check_idea" in blocked and blocked.endswith("Open: /home")
     assert (await server._dispatch("ready_features", {"product": "nope"})).startswith("0 products")
 
 

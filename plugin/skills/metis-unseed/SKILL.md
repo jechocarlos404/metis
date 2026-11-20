@@ -80,6 +80,9 @@ If the point was to replace the data, re-seed now with the
 - **Exit 2** means it finished but kept or failed some entities — read the
   warnings and resolve them (usually: the shared entity needs its foreign
   features re-pointed or deleted in the app first), then re-run.
+- **Never unseed a `metis-seed-gaps.json`.** It re-states a product's real
+  features so new links attach to them; unseeding it deletes those features.
+  Refuse, and point the owner to the desktop to remove a single link.
 - **Name collisions cut both ways.** An unrelated entity that happens to
   bear the same name as a seed entity WILL be targeted — the dry-run listing
   is the safety net; read it.

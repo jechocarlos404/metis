@@ -549,6 +549,14 @@ export async function POST({ request, locals }) {
     });
   }
 
+  // A gaps file re-states a product's real features so new links attach to
+  // them; removing it would delete those features. Same refusal as the skill.
+  if (doc?.source?.generated_by === "metis-fill-gaps") {
+    return new Response(JSON.stringify({
+      detail: "This is a metis-fill-gaps file. Removing it would delete the product's real features. Remove a single link on the feature instead.",
+    }), { status: 400, headers: { "content-type": "application/json" } });
+  }
+
   try {
     const result = await new Unseeder(new UpstreamApi(locals.accessToken), doc, dryRun).run();
     return new Response(JSON.stringify(result), {

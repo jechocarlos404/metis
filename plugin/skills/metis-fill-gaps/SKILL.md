@@ -136,3 +136,6 @@ each `curl`.
 - Rename a feature. The exact metis name is how the loader finds it; a new
   name makes a duplicate feature.
 - Mark a stub, plan or README-only behaviour as built on anything.
+- Suggest undoing a gaps file with metis-unseed. A gaps file re-states the
+  product's real features by name, so unseeding it deletes them. To undo a
+  link, remove it on the desktop.

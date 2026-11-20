@@ -15,10 +15,6 @@ const STATUS_DOT = { pending: "var(--text-secondary)", in_progress: "var(--warn-
 const linkDistance = (e) => (e.kind === "PART_OF" ? 170 : 320);
 const linkStrength = (e) => (e.kind === "PART_OF" ? 0.05 : 0.002);
 const sharesWidth = (w) => 0.6 + Math.min(w, 6) * 0.5;
-// At rest every shares line is drawn, faint, and fainter the fewer capabilities
-// it stands for, so the network shows what goals share before anything is
-// pointed at (A10); the goal pointed at or picked lights its own.
-const sharesRest = (w) => 0.12 + Math.min(w, 6) * 0.06;
 
 /** Goals linked by the capabilities they share, with a side panel for the selected goal. */
 export function GoalNetworkView({ goals, capsByGoal, selectedId, onSelect }) {
@@ -29,10 +25,13 @@ export function GoalNetworkView({ goals, capsByGoal, selectedId, onSelect }) {
   const edgeElsRef = React.useRef(new Map());
   const onSelectRef = React.useRef(onSelect);
   const canvasPickRef = React.useRef(null); // the goal last pressed on the canvas
+  const pickSeenRef = React.useRef(false);
   const hasFitRef = React.useRef(false);
   const keyRef = React.useRef(null);
   const toolbarRef = React.useRef(null);
+  const canvasRef = React.useRef(null);
   const [hoveredId, setHoveredId] = React.useState(null);
+  const [focusedId, setFocusedId] = React.useState(null); // the goal last focused on the canvas
 
   const data = React.useMemo(() => buildGoalNetwork(goals, capsByGoal), [goals, capsByGoal]);
   const adjacency = React.useMemo(() => buildAdjacency(data.edges), [data]);
@@ -75,19 +74,37 @@ export function GoalNetworkView({ goals, capsByGoal, selectedId, onSelect }) {
     engineRef.current?.update(data.nodes, data.edges);
     if (!hasFitRef.current && data.nodes.length) {
       hasFitRef.current = true;
-      const focus = selectedId != null ? { ids: [selectedId], centre: true } : null;
+      const focus = selectedId != null ? { pick: selectedId, near: [...(adjacency.get(selectedId) ?? [])] } : null;
       engineRef.current?.openView(focus, 0);
       engineRef.current?.openWhenSettled(focus); // the first frame sees unspread nodes
     }
   }, [data]);
 
-  // A goal picked in the side list (or by keyboard) is centred, its name
-  // readable; one pressed on the canvas stays under the pointer.
+  // A goal picked in the side list (or by keyboard) is framed with the goals
+  // it lights, so its lines show (C39), centred when they fit around it
+  // (A10); stacked under the list, the canvas then scrolls into view. One
+  // pressed on the canvas stays under the pointer.
   useIsomorphicLayoutEffect(() => {
     const pressed = canvasPickRef.current === selectedId;
     canvasPickRef.current = null;
-    if (selectedId != null && !pressed) engineRef.current?.centreOn(selectedId);
+    const opening = !pickSeenRef.current; // the URL's goal: the page opens at its top
+    pickSeenRef.current = true;
+    setFocusedId(null); // the canvas's tab stop is the picked goal again
+    if (selectedId == null || pressed) return;
+    engineRef.current?.framePick(selectedId, [...(adjacency.get(selectedId) ?? [])]);
+    if (!opening) canvasRef.current?.scrollIntoView({ block: "nearest" });
   }, [selectedId]);
+
+  // Arrow keys move between goals in the goals' order (A46); the one focused
+  // last is the canvas's tab stop, and is brought into view.
+  const moveFocus = (id, key) => {
+    const ids = data.nodes.map((n) => n.id);
+    const i = ids.indexOf(id);
+    const next = ids[key === "Home" ? 0 : key === "End" ? ids.length - 1
+      : key === "ArrowRight" || key === "ArrowDown" ? Math.min(ids.length - 1, i + 1) : Math.max(0, i - 1)];
+    engineRef.current?.reveal(next);
+    nodeElsRef.current.get(next)?.focus({ preventScroll: true });
+  };
 
   const wantFocus = hoveredId ?? selectedId ?? null;
   // Fade the rest only when the focused card has relationships to show;
@@ -110,20 +127,24 @@ export function GoalNetworkView({ goals, capsByGoal, selectedId, onSelect }) {
     // own; stacked (.graph-goal-row wraps), the list leads (base.css).
     <div className="graph-goal-network" style={{ flex: 1, display: "flex", minHeight: 0 }}>
       <div className="graph-goal-row" style={{ flex: 1, display: "flex", minHeight: 0, overflowY: "auto" }}>
-        <div style={{ flex: "999 1 420px", minHeight: 420, position: "relative", margin: 20, background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", overflow: "hidden", minWidth: 0 }}>
-          <svg ref={svgRef} role="img" aria-label="Goals linked by the capabilities they share"
+        <div ref={canvasRef} style={{ flex: "999 1 420px", minHeight: 420, position: "relative", margin: 20, background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", overflow: "hidden", minWidth: 0 }}>
+          <svg ref={svgRef} role="group" aria-label="Goals linked by the capabilities they share. Arrow keys move between goals."
             style={{ width: "100%", height: "100%", display: "block", cursor: "grab", touchAction: "none" }}>
             <g ref={viewportRef}>
               <g>
                 {data.edges.map((e) => {
-                  const dim = focusId != null && e.source !== focusId && e.target !== focusId;
+                  const touches = e.source === focusId || e.target === focusId;
                   const shares = e.kind === "SHARES";
+                  // Shares lines only for the goal pointed at or picked (C38, A44):
+                  // drawn for every pair at rest, they crossed unrelated cards.
+                  if (shares && !touches) return null;
+                  const dim = focusId != null && !touches;
                   return (
                     <line key={e.id} ref={ref(edgeElsRef.current, e.id, "registerEdge", "unregisterEdge")}
                       stroke={shares ? "var(--accent)" : "var(--ink-4)"}
-                      strokeWidth={(shares ? sharesWidth(e.weight) : 1.2) + (focusId != null && !dim ? 1 : 0)}
+                      strokeWidth={(shares ? sharesWidth(e.weight) : 1.2) + (touches ? 1 : 0)}
                       strokeLinecap="round"
-                      opacity={dim ? 0.06 : shares ? (focusId != null ? 0.7 : sharesRest(e.weight)) : 0.6}
+                      opacity={dim ? 0.06 : shares ? 0.7 : 0.6}
                       style={{ transition: "opacity var(--dur-med) var(--ease-out)" }}>
                       {shares && <title>{`Shares ${count(e.weight, "capability", "capabilities")}: ${e.capabilities.map((c) => c.name).join(", ")}`}</title>}
                     </line>
@@ -134,9 +155,10 @@ export function GoalNetworkView({ goals, capsByGoal, selectedId, onSelect }) {
                 {data.nodes.map((n) => (
                   <GoalNode key={n.id} node={n}
                     isSelected={selectedId === n.id}
-                    isTabStop={selectedId ? selectedId === n.id : n.id === data.nodes[0]?.id}
+                    isTabStop={n.id === (focusedId ?? selectedId ?? data.nodes[0]?.id)}
                     isDimmed={focusId != null && focusId !== n.id && !focusNeighbors?.has(n.id)}
                     onSelect={onSelect} onHoverChange={setHoveredId}
+                    onFocusNode={setFocusedId} onMove={moveFocus}
                     registerEl={ref(nodeElsRef.current, n.id, "registerNode", "unregisterNode")} />
                 ))}
               </g>
@@ -156,7 +178,7 @@ export function GoalNetworkView({ goals, capsByGoal, selectedId, onSelect }) {
   );
 }
 
-function GoalNode({ node, isSelected, isTabStop, isDimmed, onSelect, onHoverChange, registerEl }) {
+function GoalNode({ node, isSelected, isTabStop, isDimmed, onSelect, onHoverChange, onFocusNode, onMove, registerEl }) {
   const { goal, isOrg } = node;
   // A product goal's edge is the control border (3:1 or more on the card), so
   // at Fit, where names are hidden, every box still reads (C29).
@@ -166,11 +188,14 @@ function GoalNode({ node, isSelected, isTabStop, isDimmed, onSelect, onHoverChan
       aria-label={`${isOrg ? "Org goal" : "Product goal"}: ${goal.title}`} aria-pressed={isSelected}
       className={isDimmed ? "graph-node is-dim" : "graph-node"}
       onMouseEnter={() => onHoverChange(node.id)} onMouseLeave={() => onHoverChange(null)}
-      onFocus={() => onHoverChange(node.id)} onBlur={() => onHoverChange(null)}
+      onFocus={() => { onHoverChange(node.id); onFocusNode(node.id); }} onBlur={() => onHoverChange(null)}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
           onSelect(node.id);
+        } else if (["ArrowRight", "ArrowDown", "ArrowLeft", "ArrowUp", "Home", "End"].includes(e.key)) {
+          e.preventDefault();
+          onMove(node.id, e.key);
         }
       }}
       style={{ cursor: "grab" }}>
@@ -203,7 +228,7 @@ function NetworkKey({ keyRef }) {
         <div style={row}>{card("var(--surface-card)", "var(--border-control)")}product goal</div>
         <div style={row}>{card("var(--surface-card)", "var(--border-control)", "2,2")}no capabilities linked</div>
         <div style={row}>{line("var(--ink-4)", 1.2)}part of</div>
-        <div style={row}>{line("var(--accent)", 3)}share capabilities (thicker, darker: more)</div>
+        <div style={row}>{line("var(--accent)", 3)}share capabilities (thicker: more), shown for the goal you point at or pick</div>
         <div style={row}><span style={{ display: "flex", opacity: 0.25 }}>{card("var(--surface-card)", "var(--border-control)")}</span>faded: shares nothing with the goal you point at</div>
       </div>
     </details>

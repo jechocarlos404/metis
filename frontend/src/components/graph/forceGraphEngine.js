@@ -23,7 +23,7 @@ import { forceSimulation, forceLink, forceManyBody, forceCollide, forceX, forceY
 import { select } from "d3-selection";
 import { zoom as d3zoom, zoomIdentity } from "d3-zoom";
 import { drag as d3drag } from "d3-drag";
-import { READABLE_SCALE, centreTransform, fitTransform, openTransform, readableUnion, revealTransform } from "./graph-data.js";
+import { READABLE_SCALE, fitTransform, openTransform, pickTransform, readableUnion, revealTransform } from "./graph-data.js";
 
 // Keeps card-shaped nodes from overlapping. A circle wide enough for a card
 // also pushes rows far apart vertically; this pushes each overlapping pair
@@ -406,10 +406,15 @@ export function createForceGraph(opts) {
 
   /**
    * The view a graph opens on (openTransform()). `focus` is a card's id, kept
-   * in view, or {ids, centre}: as many of those cards as show at a readable
-   * scale, in order (readableUnion()), centred.
+   * in view, or {ids, centre}: the first of those cards and as many after it
+   * as show with it at a readable scale (readableUnion()), centred; or
+   * {pick, near}: a picked card and the cards it lights (framePick()).
    */
   function openView(focus, duration = 450) {
+    if (focus?.pick != null) {
+      framePick(focus.pick, focus.near, duration);
+      return;
+    }
     const b = bounds();
     if (!b) return;
     const w = svgEl.clientWidth || 1;
@@ -446,20 +451,24 @@ export function createForceGraph(opts) {
   }
 
   /**
-   * Centres a card picked outside the canvas, its name readable (scale 1 or
-   * closer). Never mid-drag, so a card pressed on the canvas stays under the
-   * pointer. While the graph is still settling, it becomes what opens.
+   * Frames a card picked outside the canvas with the cards in `near` (the
+   * ones it lights), so its lines are in view: centred on it when they fit
+   * around it at a readable scale, else all of them fitted (pickTransform()).
+   * Never closer than scale 1, or the user's zoom when closer. Never
+   * mid-drag, so a card pressed on the canvas stays under the pointer. While
+   * the graph is still settling, it becomes what opens.
    */
-  function centreOn(id) {
+  function framePick(id, near = [], duration = 300) {
     if (draggingId != null) return;
     if (openPending) {
-      openPending = { focus: { ids: [id], centre: true } };
+      openPending = { focus: { pick: id, near } };
       return;
     }
     const box = boxOf(id, 8);
     if (!box) return;
     const k = Math.min(o.scaleExtent[1], Math.max(1, currentTransform.k));
-    frameTo(centreTransform(box, k, svgEl.clientWidth || 1, svgEl.clientHeight || 1, o.frameInsets()), 300);
+    const boxes = near.map((n) => boxOf(n, 8)).filter(Boolean);
+    frameTo(pickTransform(box, boxes, svgEl.clientWidth || 1, svgEl.clientHeight || 1, o.frameInsets(), k), duration);
   }
 
   function zoomBy(factor) {
@@ -581,7 +590,7 @@ export function createForceGraph(opts) {
     openView,
     openWhenSettled,
     reveal,
-    centreOn,
+    framePick,
     zoomBy,
     setReducedMotion,
     destroy,

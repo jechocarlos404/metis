@@ -63,6 +63,25 @@ export function openTransform(bounds, w, h, inset = 0, maxK = 2.5, focus = null,
   return (focus && revealTransform(t, focus, w, h, inset)) || t;
 }
 
+const join = (a, b) => ({ x0: Math.min(a.x0, b.x0), y0: Math.min(a.y0, b.y0), x1: Math.max(a.x1, b.x1), y1: Math.max(a.y1, b.y1) });
+
+/**
+ * The view for a goal picked outside the canvas (C39): its `box` and the
+ * boxes of the goals it lights (`near`) all in view, so its lines are.
+ * Centred on it (A10) when they fit around it at a readable scale;
+ * otherwise all of them fitted, readable where they can be. Never closer
+ * than `maxK`.
+ */
+export function pickTransform(box, near, w, h, inset = 0, maxK = 1) {
+  const all = near.reduce(join, box);
+  const cx = (box.x0 + box.x1) / 2;
+  const cy = (box.y0 + box.y1) / 2;
+  const hw = Math.max(cx - all.x0, all.x1 - cx);
+  const hh = Math.max(cy - all.y0, all.y1 - cy);
+  const around = fitTransform({ x0: cx - hw, y0: cy - hh, x1: cx + hw, y1: cy + hh }, w, h, inset, maxK);
+  return around.k >= READABLE_SCALE ? around : fitTransform(all, w, h, inset, maxK);
+}
+
 /**
  * The box around as many of `boxes` as the frame shows together at a
  * readable scale: a grouped graph's hubs, most used first, so a narrow screen
@@ -71,7 +90,6 @@ export function openTransform(bounds, w, h, inset = 0, maxK = 2.5, focus = null,
  * one that still fits; the largest set wins, the earliest seed on a tie.
  */
 export function readableUnion(boxes, w, h, inset = 0) {
-  const join = (a, b) => ({ x0: Math.min(a.x0, b.x0), y0: Math.min(a.y0, b.y0), x1: Math.max(a.x1, b.x1), y1: Math.max(a.y1, b.y1) });
   let best = null;
   for (const seed of boxes) {
     let box = seed;

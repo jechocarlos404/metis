@@ -113,8 +113,8 @@ Code settings.
 
 ### When the API has auth on
 
-The local stack runs with `AUTH_ENABLED=false`, and the hooks need no token.
-With auth on, the API wants a bearer token. The simplest one is the `metis-mcp`
+With `AUTH_ENABLED=false` in metis's `.env`, the hooks need no token. Compose
+defaults to auth on, and then the API wants a bearer token. The simplest one is the `metis-mcp`
 service account. Its role is `viewer`, so it can read everything and write
 nothing. Its secret is `METIS_MCP_CLIENT_SECRET` in metis's `.env`; it defaults
 to `dev-mcp-secret`, as in `keycloak/metis-realm.json`.

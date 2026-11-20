@@ -117,8 +117,8 @@ format and ontology spec. The rules that shape everything you extract:
 10. **Hand off.** Show the user a compact summary (counts per collection, guesses
    by confidence, the capability map as a bullet tree marking which capabilities
    were reused from the inventory and which are new) and tell them how to load it:
-   in metis, on the Products page choose "Import a seed file", or use the
-   `metis-seed-instance` skill (dry-run first).
+   in metis, open Settings → Seed files, paste the file, press "Check file" and
+   then "Import", or use the `metis-seed-instance` skill (dry-run first).
 
 ## Judgment calls
 

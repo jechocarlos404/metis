@@ -157,7 +157,7 @@ export function SeedImportPanel({ onImported }) {
         </Button>
       </div>
       <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>
-        Importing only adds. Anything already in metis under the same name is kept as it is.
+        Importing adds what's new and updates the status and description of features already in metis. Check file lists every change first.
       </div>
       {error && <div role="alert" style={{ fontSize: "var(--text-xs)", color: "var(--danger-fg)" }}>{error}</div>}
       {result && <ResultBox title={result.dryRun ? "Check passed. This is what the import would do:" : "Imported"} result={result} />}

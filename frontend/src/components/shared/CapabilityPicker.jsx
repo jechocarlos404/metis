@@ -5,7 +5,7 @@ import { slugify } from "../../lib/words.js";
  * Pick capabilities by exact name — recognition, not recall, and never a fuzzy
  * auto-match (PRODUCT.md). Type to filter the inventory; Enter or click picks
  * the highlighted existing name. With allowNew, Enter on text that matches
- * nothing adds it verbatim as a name nobody has yet (it will read "not built yet").
+ * nothing, or only once accents are ignored, adds it verbatim as a name nobody has yet (it will read "not built yet").
  *
  *   options:  [{ id, name, slug, hint? }]   the inventory to pick from
  *   value:    [name, …]                     picked names, in order
@@ -13,7 +13,7 @@ import { slugify } from "../../lib/words.js";
  */
 export function CapabilityPicker({ id = "capability-picker", options, value, onChange, allowNew = false, placeholder = "Type a capability…", label = "Capabilities" }) {
   const [query, setQuery] = React.useState("");
-  const [active, setActive] = React.useState(0);
+  const [active, setActive] = React.useState(null);
   const [open, setOpen] = React.useState(false);
   const picked = new Set(value.map(slugify));
   const q = query.trim().toLowerCase();
@@ -21,29 +21,33 @@ export function CapabilityPicker({ id = "capability-picker", options, value, onC
   // suggestion: what counts as the same name (exact, picked) stays exact.
   const fold = (s) => s.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
   const fq = fold(q);
+  const literal = (o) => o.name.toLowerCase().includes(q);
   const matches = q
     ? options
         .filter((o) => !picked.has(slugify(o.name)) && fold(o.name).includes(fq))
-        .sort((a, b) => Number(!fold(a.name).startsWith(fq)) - Number(!fold(b.name).startsWith(fq)) || a.name.localeCompare(b.name))
+        .sort((a, b) => Number(!literal(a)) - Number(!literal(b)) || Number(!fold(a.name).startsWith(fq)) - Number(!fold(b.name).startsWith(fq)) || a.name.localeCompare(b.name))
         .slice(0, 8)
     : [];
+  // A match only accents make is a "did you mean": listed, never the default
+  // pick, so Enter keeps what was typed until one is chosen.
+  const current = active ?? (matches[0] && literal(matches[0]) ? 0 : -1);
   const exact = options.some((o) => slugify(o.name) === slugify(q));
   const canAddNew = allowNew && slugify(q) && !exact && !picked.has(slugify(q));
 
   const add = (name) => {
     onChange([...value, name]);
     setQuery("");
-    setActive(0);
+    setActive(null);
   };
   const remove = (name) => onChange(value.filter((v) => v !== name));
   const known = new Set(options.map((o) => slugify(o.name)));
 
   const onKeyDown = (e) => {
-    if (e.key === "ArrowDown") { e.preventDefault(); setActive((a) => Math.min(a + 1, Math.max(matches.length - 1, 0))); setOpen(true); }
-    else if (e.key === "ArrowUp") { e.preventDefault(); setActive((a) => Math.max(a - 1, 0)); }
+    if (e.key === "ArrowDown") { e.preventDefault(); setActive(Math.min(current + 1, Math.max(matches.length - 1, 0))); setOpen(true); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); setActive(Math.max(current - 1, 0)); }
     else if (e.key === "Enter") {
       e.preventDefault();
-      if (matches[active]) add(matches[active].name);
+      if (matches[current]) add(matches[current].name);
       else if (canAddNew) add(query.trim());
     } else if (e.key === "Backspace" && !query && value.length) remove(value[value.length - 1]);
     else if (e.key === "Escape" && open && (matches.length > 0 || canAddNew)) {
@@ -71,22 +75,23 @@ export function CapabilityPicker({ id = "capability-picker", options, value, onC
         })}
         <input id={id} role="combobox" aria-expanded={open && (matches.length > 0 || !!canAddNew)} aria-controls={listId} aria-autocomplete="list"
           value={query} placeholder={value.length ? "" : placeholder}
-          onChange={(e) => { setQuery(e.target.value); setActive(0); setOpen(true); }}
+          onChange={(e) => { setQuery(e.target.value); setActive(null); setOpen(true); }}
           onFocus={() => setOpen(true)} onBlur={() => setTimeout(() => setOpen(false), 120)} onKeyDown={onKeyDown}
           style={{ flex: "1 1 140px", minWidth: 120, border: "none", outline: "none", background: "transparent", font: "inherit", fontSize: "var(--text-sm)", color: "var(--text-body)", padding: "3px 2px" }} />
       </div>
       {open && (matches.length > 0 || canAddNew) && (
         <ul id={listId} role="listbox" style={{ position: "absolute", zIndex: 30, left: 0, right: 0, top: "calc(100% + 4px)", margin: 0, padding: 4, listStyle: "none", background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", boxShadow: "var(--shadow-md, 0 6px 20px rgb(0 0 0 / 0.12))", maxHeight: 280, overflowY: "auto" }}>
           {matches.map((o, i) => (
-            <li key={o.id} role="option" aria-selected={i === active} onMouseDown={(e) => { e.preventDefault(); add(o.name); }} onMouseEnter={() => setActive(i)}
-              style={{ padding: "6px 8px", borderRadius: "var(--radius-sm)", cursor: "pointer", fontSize: "var(--text-sm)", background: i === active ? "var(--accent-wash)" : "transparent", display: "flex", gap: 8, alignItems: "baseline" }}>
+            <li key={o.id} role="option" aria-selected={i === current} onMouseDown={(e) => { e.preventDefault(); add(o.name); }} onMouseEnter={() => setActive(i)}
+              style={{ padding: "6px 8px", borderRadius: "var(--radius-sm)", cursor: "pointer", fontSize: "var(--text-sm)", background: i === current ? "var(--accent-wash)" : "transparent", display: "flex", gap: 8, alignItems: "baseline" }}>
+              {!literal(o) && <span style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>did you mean</span>}
               <span style={{ color: "var(--text-heading)" }}>{o.name}</span>
               {o.hint && <span style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>{o.hint}</span>}
             </li>
           ))}
           {canAddNew && (
-            <li role="option" aria-selected={matches.length === 0} onMouseDown={(e) => { e.preventDefault(); add(query.trim()); }}
-              style={{ padding: "6px 8px", borderRadius: "var(--radius-sm)", cursor: "pointer", fontSize: "var(--text-sm)", color: "var(--text-secondary)", background: matches.length === 0 ? "var(--surface-inset)" : "transparent" }}>
+            <li role="option" aria-selected={current < 0} onMouseDown={(e) => { e.preventDefault(); add(query.trim()); }}
+              style={{ padding: "6px 8px", borderRadius: "var(--radius-sm)", cursor: "pointer", fontSize: "var(--text-sm)", color: "var(--text-secondary)", background: current < 0 ? "var(--surface-inset)" : "transparent" }}>
               Add “{query.trim()}”: a capability nobody has yet
             </li>
           )}

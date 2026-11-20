@@ -152,10 +152,13 @@ async def delete_capability(session: AsyncSession, capability_id: uuid.UUID) -> 
         .where(FeatureCapability.capability_id == capability_id)
     )
     if realizing:
+        # Direct links only, ours and external alike: what the delete would cut.
+        # The inventory's count is ours over the submap, so it can be larger.
         raise HTTPException(
             409,
-            f"{realizing} feature(s) realize this capability — unlink or delete "
-            "them first (a capability in use cannot vanish from under them).",
+            f"{realizing} feature(s) realize this capability directly, of any product "
+            "and at any status — unlink or delete them first (a capability in use "
+            "cannot vanish from under them).",
         )
     # Buy side of the same currency: tech_satisfactions.capability_id is
     # RESTRICT, mirroring the feature FK. Report it rather than let the FK raise.
@@ -501,6 +504,8 @@ class Usage:
     products: list[ProductRef]  # our products realizing it, any status
     external_products: list[ProductRef]
     features: int  # our features only, any status
+    #: Of those, the ones linked to the capability itself, not only below it.
+    direct_features: int
     ours: bool
     #: Our products whose finished features realize it: the ones that have it.
     built: frozenset[uuid.UUID] = frozenset()
@@ -542,6 +547,7 @@ async def _usage(session: AsyncSession) -> dict[uuid.UUID, Usage]:
             products=_refs(gather(ours_p, submap), by_id),
             external_products=_refs(gather(ext_p, submap), by_id),
             features=len(gather(ours_f, submap)),
+            direct_features=len(ours_f.get(capability.id, set())),
             ours=bool(gather(done_f, submap)),
             built=frozenset(gather(done_p, submap)),
         )
@@ -567,6 +573,7 @@ async def inventory(session: AsyncSession) -> list[InventoryEntry]:
             products=usage[c.id].products,
             external_products=usage[c.id].external_products,
             features=usage[c.id].features,
+            direct_features=usage[c.id].direct_features,
         )
         for c in await list_capabilities(session)
     ]

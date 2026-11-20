@@ -148,6 +148,33 @@ def test_every_validator_gives_the_same_errors():
     assert _unquoted(json.loads(result.stdout)) == _unquoted(expected)
 
 
+UNSEED = SKILLS / "metis-unseed" / "scripts" / "unseed_instance.py"
+#: The two 403 bodies the API sends, as the wire has them.
+ROLE_403 = {"detail": "Requires editor or admin role"}
+SURFACE_403 = {"detail": {"error": "human_action_required", "message": "A human action.", "href": "/tech"}}
+
+
+@pytest.mark.parametrize("path", [LOADER, UNSEED], ids=lambda p: p.name)
+def test_a_refused_write_says_who_can_make_it(path):
+    """A viewer can't write in the app either, so it hears that an editor or
+    admin can; a read-only token hears that a person signed in to the app
+    can. Neither is told a script can never get a token that writes."""
+    refused = _load(path, path.stem).refused
+    with pytest.raises(SystemExit) as role:
+        refused("POST", "/api/tech", 403, ROLE_403, "token")
+    said = str(role.value)
+    assert said.startswith("error: POST /api/tech returned 403 (Requires editor or admin role): ")
+    assert "this account can't" in said and "an editor or admin" in said
+    assert "Settings, Seed files" in said
+    with pytest.raises(SystemExit) as surface:
+        refused("POST", "/api/tech", 403, SURFACE_403, "token")
+    said = str(surface.value)
+    assert "this token can read but not" in said
+    assert "a person signed in to the app as an editor or admin" in said
+    for text in (str(role.value), str(surface.value), path.read_text()):
+        assert "no script can get" not in text and "desktop session" not in text
+
+
 class _FakeMetis(BaseHTTPRequestHandler):
     PRODUCTS = [
         {"id": "p1", "slug": "saddlebag", "name": "Saddlebag", "external": False,

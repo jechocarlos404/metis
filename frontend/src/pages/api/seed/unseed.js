@@ -81,6 +81,8 @@ function capabilityResolver(instance) {
 
 /** "1 feature outside the seed realizes it", "2 features … realize it". */
 const agree = (n, one, many) => (n === 1 ? one : many);
+/** A cost someone scored on a technology's link. No seed file carries one. */
+const hasCost = (sat) => Object.keys(sat.cost || {}).length > 0;
 const linkLabel = (src, kind, dst) => `link ${JSON.stringify(src)} ${EDGE[kind] ?? kind} ${JSON.stringify(dst)}`;
 
 class Unseeder {
@@ -386,6 +388,13 @@ class Unseeder {
       if (linked.length > 0) {
         reasons.push(`it is linked to ${andList(linked.map((id) => JSON.stringify(techNames.get(id) ?? id)))}`);
       }
+      const described = [
+        tech.vendor_id && "a vendor",
+        tech.homepage && "a homepage",
+        Object.keys(tech.facets || {}).length > 0 && "facets",
+        (tech.evidence_anchors || []).length > 0 && "evidence paths",
+      ].filter(Boolean);
+      if (described.length > 0) reasons.push(`it has ${andList(described)}, which no seed file carries`);
       for (const slot of this.liveSlots().filter((row) => row.tech_id === tech.id)) {
         reasons.push(`${this.slotLabel(slot)} uses it`);
       }
@@ -405,9 +414,11 @@ class Unseeder {
     // capability): neither holds a capability back.
     const holds = (link) =>
       !deadTechs.has(link.tech_id) && !this.declared.has(`${link.tech_id}:${link.capability_id}`);
+    // Capability id -> the technologies whose link holds it, by name.
+    const techNames = new Map(this.instTechs.map((tech) => [tech.id, tech.name]));
     const satsOf = new Map();
     for (const sat of this.instSats.filter(holds)) {
-      satsOf.set(sat.capability_id, (satsOf.get(sat.capability_id) || 0) + 1);
+      satsOf.set(sat.capability_id, [...(satsOf.get(sat.capability_id) || []), techNames.get(sat.tech_id) ?? sat.tech_id]);
     }
     const guessesOf = new Map();
     for (const guess of this.instGuesses) {
@@ -438,11 +449,16 @@ class Unseeder {
       );
       if (foreignFeatures.length > 0) {
         const n = foreignFeatures.length;
-        reasons.push(`${count(n, "feature")} outside the seed ${agree(n, "realizes", "realize")} it`);
+        // Direct links, of any product: what deleting the capability would cut.
+        reasons.push(`${count(n, "feature")} outside the seed ${agree(n, "realizes", "realize")} it directly`);
       }
       if (satsOf.has(cap.id)) {
-        const n = satsOf.get(cap.id);
-        reasons.push(`${count(n, "technology", "technologies")} ${agree(n, "satisfies", "satisfy")} it, which the seed does not say`);
+        const techs = satsOf.get(cap.id);
+        const n = techs.length;
+        reasons.push(
+          `${agree(n, "technology", "technologies")} ${andList(techs.map((name) => JSON.stringify(name)))} ` +
+            `${agree(n, "satisfies", "satisfy")} it, ${agree(n, "a link", "links")} the seed does not have`,
+        );
       }
       if (guessesOf.has(cap.id)) {
         const n = guessesOf.get(cap.id);
@@ -705,6 +721,22 @@ class Unseeder {
           `${agree(recorded.length, "stays", "stay")}, no longer naming it`,
       );
     }
+    // What a seed file has no place for: an import makes one plan document,
+    // as a draft with every ticket pending, and never a stack or a strategy.
+    const planDocs = this.instPlans.get(id) || [];
+    const strategies = (this.instStrategies.get(id) || []).length;
+    // The export writes the latest plan document, not the tickets as they
+    // are: one edited since (its status too) or not made from it is lost.
+    const fromPlan = new Set(epics.filter((epic) => planDocs[0] && epic.decomposition_id === planDocs[0].id).map((epic) => epic.id));
+    const changed = tickets.filter((ticket) => ticket.updated_at !== ticket.created_at || !fromPlan.has(ticket.epic_id)).length;
+    const lost = [
+      stacks.length > 0 && (stacks.length === 1 ? "its stack" : `its ${stacks.length} stacks`),
+      strategies > 0 && (strategies === 1 ? "its delivery strategy" : `its ${strategies} delivery strategies`),
+      planDocs.length > 1 && count(planDocs.length - 1, "older plan document"),
+      (product.status === "approved" || planDocs.some((doc) => doc.status === "approved")) && "its approval",
+      changed > 0 && `${count(changed, "ticket")} as ${agree(changed, "it is", "they are")} now (changed or added since its plan was written)`,
+    ].filter(Boolean);
+    if (lost.length > 0) after.push(`importing this file again won't bring back ${andList(lost)}`);
     return {
       label: [
         `product ${JSON.stringify(product.name)}${parts.length > 0 ? `, with ${andList(parts)}` : ""}`,
@@ -777,10 +809,14 @@ class Unseeder {
         ...(sats.length > 0 ? [`its ${agree(sats.length, "link", "links")} to ${names(sats)}`] : []),
         ...(guesses.length > 0 ? [`its ${agree(guesses.length, "guessed link", "guessed links")} to ${names(guesses)}`] : []),
       ];
+      const costed = sats.filter(hasCost);
+      const lost = costed.length > 0
+        ? `; importing this file again won't bring back the cost recorded on its ${agree(costed.length, "link", "links")} to ${names(costed)}`
+        : "";
       await this.remove(
         "technologies",
         `/api/tech/${encodeURIComponent(tech.slug)}`,
-        `technology ${JSON.stringify(tech.name)}${parts.length > 0 ? `, with ${andList(parts)}` : ""}`,
+        `technology ${JSON.stringify(tech.name)}${parts.length > 0 ? `, with ${andList(parts)}` : ""}${lost}`,
         true,
         { satisfactions: sats.length, guesses: guesses.length },
       );
@@ -794,7 +830,8 @@ class Unseeder {
         this.keep("satisfactions", label, ["the technology and the capability both stay"]);
         continue;
       }
-      await this.remove("satisfactions", `/api/tech/satisfactions/${sat.id}`, label, true);
+      const lost = hasCost(sat) ? "; importing this file again won't bring back its recorded cost" : "";
+      await this.remove("satisfactions", `/api/tech/satisfactions/${sat.id}`, `${label}${lost}`, true);
     }
   }
 

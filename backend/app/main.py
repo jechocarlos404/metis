@@ -126,8 +126,17 @@ async def http_error(request, exc: StarletteHTTPException):
     (a dict with a `message`) keeps the rest one key over: a name clash names
     the row it clashes with under `existing`. In-process callers still get the
     dict. The write boundary's 403 keeps its `{error, message, href}` detail:
-    the MCP server and the seed scripts parse it."""
+    the MCP server and the seed scripts parse it. A 422 the API raises itself
+    carries the `errors` list a validation error has, so a client reads every
+    422 one way; its rule is about the request, not one field, so `loc` is
+    empty."""
     detail = exc.detail
+    if exc.status_code == 422 and isinstance(detail, str):
+        return JSONResponse(
+            {"detail": detail, "errors": [{"type": "value_error", "loc": [], "msg": detail}]},
+            status_code=422,
+            headers=exc.headers,
+        )
     if not isinstance(detail, dict) or "message" not in detail or "error" in detail:
         return await http_exception_handler(request, exc)
     rest = {key: value for key, value in detail.items() if key != "message"}

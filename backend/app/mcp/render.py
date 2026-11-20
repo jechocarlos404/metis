@@ -86,7 +86,13 @@ def capability_supply(envelope: dict) -> str:
     if ours:
         # Any status: a feature in progress realizes it without making it ours.
         done = sum(1 for f in ours if f["status"] == "done")
-        lines += ["", f"Build side — {len(ours)} feature(s) of ours realize it, any status ({done} done):"]
+        # The count rolls up the submap, as `capability` labels it.
+        through = sum(1 for f in ours if f.get("via"))
+        via = f" ({through} only through its sub-capabilities)" if through else ""
+        lines += [
+            "",
+            f"Build side — {len(ours)} feature(s) of ours{via} realize it, any status ({done} done):",
+        ]
         lines += _table(
             [
                 [f["feature"], f["status"], f"{f['tickets']} ticket(s)", f["product"] or ""]
@@ -96,8 +102,7 @@ def capability_supply(envelope: dict) -> str:
     if theirs:
         lines += ["", f"External products — {len(theirs)} feature(s), not ours:"]
         lines += _table([[f["feature"], f["status"], f["product"] or ""] for f in theirs])
-    if rows:
-        lines.append("")
+    lines.append("")
     return _tail(envelope, lines)
 
 
@@ -136,16 +141,29 @@ def tech_blast_radius(envelope: dict) -> str:
 def tech_exposure(envelope: dict) -> str:
     rows = envelope["answer"]
     at_risk = sum(r["required_slots"] for r in rows)
+    # Filtered to a product, the answer is about what that product uses only.
+    subject = envelope["subject"]
+    product = subject["slug"] if subject.get("kind") == "product" else None
+    # A row's products and slots are the technology's, estate-wide; say so
+    # when the rows are one product's.
     lines = [
-        f"{len(rows)} exposed technolog(ies), {at_risk} required slot(s) affected.",
+        f"{len(rows)} exposed technolog(ies){f' used by {product}' if product else ''}, "
+        f"{at_risk} required slot(s) affected"
+        f"{' across every product that uses them' if product else ''}.",
         "",
     ]
-    if not rows:
+    if not rows and product is None:
         # Nothing exposed is only an all-clear for what exposure can see.
         lines.append(
             "Nothing recorded reaches its end of life in the window, has a deprecated or "
             "banned stance, or rests on a single maintainer. tech_search shows what is "
             "recorded at all."
+        )
+    elif not rows and not envelope.get("unresolved"):
+        # Otherwise the Unresolved line says what it couldn't judge.
+        lines.append(
+            f"Nothing {product} is recorded as using reaches its end of life in the window, "
+            "has a deprecated or banned stance, or rests on a single maintainer."
         )
     lines += _table(
         [
@@ -358,6 +376,13 @@ def products(rows: list[dict]) -> str:
     return _end(lines, "/products")
 
 
+def _through(entry: dict) -> str:
+    """The feature count rolls up the submap; say how much of it is a
+    sub-capability's link, as `capability` does."""
+    through = entry["features"] - entry.get("direct_features", entry["features"])
+    return f" ({through} only through its sub-capabilities)" if through else ""
+
+
 def capability_inventory(rows: list[dict], query: str | None, limit: int = 50) -> str:
     """The endpoint has no filter, so filter here — in arrival order, which is
     already most reused first."""
@@ -388,7 +413,7 @@ def capability_inventory(rows: list[dict], query: str | None, limit: int = 50) -
                 r["slug"],
                 f'"{r["name"]}"',
                 r["maturity"] if r["ours"] else "—",
-                f"{r['features']} feature(s)",
+                f"{r['features']} feature(s){_through(r)}",
                 f"our products, any status: {_names(r['products'])}"
                 if r["products"]
                 else "our products: —",

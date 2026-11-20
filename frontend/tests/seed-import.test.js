@@ -38,6 +38,8 @@ class FakeMetis {
     this.stacks = [];
     this.slots = [];
     this.journeys = [];
+    this.plans = [];
+    this.strategies = [];
   }
 
   id(prefix) {
@@ -139,7 +141,7 @@ class FakeMetis {
     if (route === "GET /api/journeys") return [200, this.journeys];
     if (route === "GET /api/tickets") return [200, this.tickets];
     if ((m = route.match(/^GET \/api\/products\/([^/]+)\/epics$/))) return [200, this.epics.filter((e) => e.product_id === m[1])];
-    if ((m = route.match(/^GET \/api\/products\/([^/]+)\/strategies$/))) return [200, []];
+    if ((m = route.match(/^GET \/api\/products\/([^/]+)\/strategies$/))) return [200, this.strategies.filter((r) => r.product_id === m[1])];
     if (route === "GET /api/motivations") return [200, this.motivations];
     if (route === "GET /api/product-bundles") return [200, this.bundles];
     if (route === "GET /api/stacks/usage") {
@@ -150,7 +152,7 @@ class FakeMetis {
       const node = (c) => ({ ...c, children: this.capabilities.filter((k) => k.parent_id === c.id).map(node) });
       return [200, this.capabilities.filter((c) => !c.parent_id).map(node)];
     }
-    if ((m = route.match(/^GET \/api\/products\/([^/]+)\/decompositions$/))) return [200, []];
+    if ((m = route.match(/^GET \/api\/products\/([^/]+)\/decompositions$/))) return [200, this.plans.filter((r) => r.product_id === m[1])];
     if ((m = route.match(/^GET \/api\/products\/([^/]+)\/bundles$/))) {
       const ids = this.bundles.filter((b) => b.product_id === m[1]).map((b) => b.capability_id);
       return [200, this.capabilities.filter((c) => ids.includes(c.id))];
@@ -723,9 +725,18 @@ describe("removing a seeded product names every row it deletes or keeps", () => 
   test("keeping a shared capability is information, not a warning", async () => {
     use(probe());
     const { body } = await unseed(probeSeed());
-    assert.ok(body.notes.includes('kept capability "Shared Cap": 1 feature outside the seed realizes it'));
+    assert.ok(body.notes.includes('kept capability "Shared Cap": 1 feature outside the seed realizes it directly'));
     assert.deepEqual(body.counts.capabilities, { kept: 1, "would delete": 1 });
     assert.deepEqual(body.warnings, []);
+  });
+
+  test("a capability a technology satisfies outside the seed names the technology", async () => {
+    use(probe());
+    const [cap] = metis.capabilities;
+    metis.techs.push({ id: "tech-r", slug: "redis", name: "Redis" });
+    metis.sats.push({ id: "sat-r", tech_id: "tech-r", capability_id: cap.id, fit: "native", cost: {} });
+    const { body } = await unseed(probeSeed());
+    assert.ok(body.notes.includes('kept capability "Probe Cap": technology "Redis" satisfies it, a link the seed does not have'), body.notes.join("\n"));
   });
 
   test("an account that can't read guesses gets 'can't tell', never a false 'would delete'", async () => {
@@ -769,11 +780,36 @@ describe("removing a seeded product names every row it deletes or keeps", () => 
     metis.journeys.push({ id: "j1", name: "Sign up", steps: [{ id: "js1", feature_id: "feat-probe" }] });
     const { body } = await unseed(probeSeed());
     assert.ok(body.notes.includes(
-      'would delete product "Probe", with 1 epic, 1 story, 2 tickets and its stack "Probe stack" (1 slot)',
+      'would delete product "Probe", with 1 epic, 1 story, 2 tickets and its stack "Probe stack" (1 slot); ' +
+        "importing this file again won't bring back its stack and 2 tickets as they are now (changed or added since its plan was written)",
     ), body.notes.join("\n"));
     assert.ok(body.notes.includes('would delete feature "Probe feature", with its 2 capability links; journey "Sign up" keeps its step, no longer linked to it'));
     assert.ok(body.notes.includes('would delete feature "Second feature", with its 1 capability link; story "Their story" of product "Other" stays, no longer about it'));
     assert.ok(body.notes.includes('kept capability "Probe Cap": epic "Their epic" of product "Other" is about it'));
+  });
+
+  test("a product's line says what importing the file again won't bring back", async () => {
+    use(probe());
+    const [prod] = metis.products;
+    prod.status = "approved";
+    // Newest first, as the API lists them. The latest plan made ep1 and its
+    // tickets: tk1 untouched, tk2 moved on since; tk3 added by hand.
+    metis.plans.push({ id: "pd2", product_id: prod.id, version: 2, status: "approved" }, { id: "pd1", product_id: prod.id, version: 1, status: "draft" });
+    metis.epics.push({ id: "ep1", product_id: prod.id, decomposition_id: "pd2", title: "Plan epic", stories: [] });
+    const at = "2026-11-20T10:00:00Z";
+    metis.tickets.push(
+      { id: "tk1", product_id: prod.id, epic_id: "ep1", status: "pending", created_at: at, updated_at: at },
+      { id: "tk2", product_id: prod.id, epic_id: "ep1", status: "in_progress", created_at: at, updated_at: "2026-11-21T09:00:00Z" },
+      { id: "tk3", product_id: prod.id, epic_id: null, status: "pending", created_at: at, updated_at: at },
+    );
+    metis.strategies.push({ id: "ds1", product_id: prod.id });
+    metis.stacks.push({ id: "stk1", name: "Probe stack", product_id: prod.id, parent_id: null });
+    const { body } = await unseed(probeSeed());
+    assert.ok(body.notes.includes(
+      'would delete product "Probe", with 2 plan documents, 1 epic, 3 tickets, 1 delivery strategy and its stack "Probe stack"; ' +
+        "importing this file again won't bring back its stack, its delivery strategy, 1 older plan document, its approval " +
+        "and 2 tickets as they are now (changed or added since its plan was written)",
+    ), body.notes.join("\n"));
   });
 
   test("a slot of a stack that stays keeps its capability", async () => {
@@ -799,6 +835,75 @@ describe("removing a seeded product names every row it deletes or keeps", () => 
     assert.equal(status, 403);
     assert.match(body.detail, /can't read guesses, so it can't tell which capabilities and technologies are safe to delete/);
     assert.deepEqual(metis.writes, []);
+  });
+});
+
+describe("a product's technology links, exported, removed and imported again", () => {
+  const unseed = (doc, options) => postSeed(unseedPOST, doc, options);
+  async function exportOf(productId) {
+    const response = await exportGET({
+      request: new Request(`http://app.test/api/seed/export?productId=${productId}`),
+      locals: { accessToken: "test-token" },
+    });
+    assert.equal(response.status, 200);
+    return (await response.json()).document;
+  }
+  const NOTE = "QA: no ops burden recorded";
+
+  /** NestJS is the seed's alone; Redis also has a homepage and facets someone
+   * recorded. Both links carry a cost someone scored. */
+  function world() {
+    const fake = new FakeMetis({ capabilities: [{ name: "Web Search" }, { name: "Job Queue" }], products: [{ name: "Taskmaster" }] });
+    const [search, queue] = fake.capabilities;
+    const [tm] = fake.products;
+    fake.features.push(
+      { id: "f-search", product_id: tm.id, name: "Search tasks", capability_ids: [search.id], status: "done" },
+      { id: "f-queue", product_id: tm.id, name: "Run jobs", capability_ids: [queue.id], status: "done" },
+    );
+    fake.techs.push(
+      { id: "tech-nest", slug: "nestjs", name: "NestJS", kind: "framework", facets: {}, evidence_anchors: [] },
+      { id: "tech-redis", slug: "redis", name: "Redis", kind: "service", homepage: "https://redis.io", facets: { hosting: "self" }, evidence_anchors: [] },
+    );
+    fake.usage.push({ id: "u1", product_id: tm.id, tech_id: "tech-nest" }, { id: "u2", product_id: tm.id, tech_id: "tech-redis" });
+    fake.sats.push(
+      { id: "sat-nest", tech_id: "tech-nest", capability_id: search.id, fit: "partial", cost: { ops_burden: 2 }, notes: NOTE },
+      { id: "sat-redis", tech_id: "tech-redis", capability_id: queue.id, fit: "native", cost: { ops_burden: 1 }, notes: null },
+    );
+    return fake;
+  }
+
+  test("the export carries a confirmed link's note as its basis", async () => {
+    use(world());
+    const doc = await exportOf(metis.products[0].id);
+    const satisfies = Object.fromEntries(doc.technologies.map((t) => [t.name, t.satisfies]));
+    assert.deepEqual(satisfies.NestJS.map(({ fit, basis }) => ({ fit, basis })), [{ fit: "partial", basis: NOTE }]);
+    assert.deepEqual(satisfies.Redis.map((link) => Object.keys(link).sort()), [["capability_ref", "fit"]]);
+  });
+
+  test("the removal keeps a described technology and names each cost that won't come back", async () => {
+    use(world());
+    const doc = await exportOf(metis.products[0].id);
+    const { body } = await unseed(doc);
+    assert.ok(body.notes.includes('kept technology "Redis": it has a homepage and facets, which no seed file carries'), body.notes.join("\n"));
+    assert.ok(body.notes.includes(
+      'would delete technology "NestJS", with its link to "Web Search"; ' +
+        'importing this file again won\'t bring back the cost recorded on its link to "Web Search"',
+    ), body.notes.join("\n"));
+    assert.ok(body.notes.includes(
+      'would delete "Redis" satisfies "Job Queue"; importing this file again won\'t bring back its recorded cost',
+    ), body.notes.join("\n"));
+  });
+
+  test("the note comes back with the link", async () => {
+    use(world());
+    const doc = await exportOf(metis.products[0].id);
+    await unseed(doc, { dryRun: false });
+    assert.deepEqual(metis.sats, []);
+    assert.deepEqual(metis.techs.map((t) => t.slug), ["redis"]);
+    const imported = await importSeed(doc, { dryRun: false });
+    assert.deepEqual(imported.body.counts.satisfactions, { created: 2 });
+    const nest = metis.techs.find((t) => t.slug === "nestjs");
+    assert.equal(metis.sats.find((s) => s.tech_id === nest.id).notes, NOTE);
   });
 });
 

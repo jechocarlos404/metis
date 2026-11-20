@@ -87,6 +87,9 @@ class InventoryEntry(CapabilityRead):
     products: list[ProductRef]
     external_products: list[ProductRef]
     features: int
+    #: Of `features`, those linked to this capability itself; the rest reach
+    #: it only through a sub-capability.
+    direct_features: int
 
 
 class IdeaFeature(BaseModel):

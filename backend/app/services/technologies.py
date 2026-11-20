@@ -135,11 +135,19 @@ async def get_technology(session: AsyncSession, tech_id: uuid.UUID) -> Technolog
     return technology
 
 
+def _slug_taken(held: Technology) -> HTTPException:
+    """The row that holds the slug rides along, as a capability name clash does."""
+    return HTTPException(
+        409,
+        {"message": f"Technology slug `{held.slug}` already exists", "slug": held.slug, "name": held.name},
+    )
+
+
 async def create_technology(session: AsyncSession, data: TechnologyCreate) -> Technology:
     if data.vendor_id is not None:
         await get_vendor(session, data.vendor_id)
-    if await session.scalar(select(Technology).where(Technology.slug == data.slug)):
-        raise HTTPException(409, f"Technology slug `{data.slug}` already exists")
+    if held := await session.scalar(select(Technology).where(Technology.slug == data.slug)):
+        raise _slug_taken(held)
     technology = Technology(**data.model_dump())
     session.add(technology)
     await session.commit()
@@ -157,8 +165,8 @@ async def update_technology(
     slug = fields.get("slug")
     if slug is not None and slug != technology.slug:
         # slug is referenced by every join a human writes; renaming is deliberate.
-        if await session.scalar(select(Technology).where(Technology.slug == slug)):
-            raise HTTPException(409, f"Technology slug `{slug}` already exists")
+        if held := await session.scalar(select(Technology).where(Technology.slug == slug)):
+            raise _slug_taken(held)
     for key, value in fields.items():
         setattr(technology, key, value)
     await session.commit()
@@ -722,19 +730,22 @@ async def exposure(
     return findings
 
 
-async def lifecycle(session: AsyncSession) -> dict:
+async def lifecycle(session: AsyncSession, tech_ids: set[uuid.UUID] | None = None) -> dict:
     """How many technologies exposure can judge at all. One with no end-of-life
     date on any version and no maintainer count on its vendor can never show
-    up as at risk, so an empty exposure list says nothing about it."""
+    up as at risk, so an empty exposure list says nothing about it. `tech_ids`
+    narrows it to those (one product's), as exposure's product filter does."""
     dated = select(TechVersion.tech_id).where(TechVersion.eol_on.is_not(None))
     counted = select(Vendor.id).where(Vendor.bus_factor.is_not(None))
+    scope = [Technology.id.in_(tech_ids)] if tech_ids is not None else []
     total, unknown = (
         await session.execute(
             select(
-                select(func.count()).select_from(Technology).scalar_subquery(),
+                select(func.count()).select_from(Technology).where(*scope).scalar_subquery(),
                 select(func.count())
                 .select_from(Technology)
                 .where(
+                    *scope,
                     Technology.id.not_in(dated),
                     or_(Technology.vendor_id.is_(None), Technology.vendor_id.not_in(counted)),
                 )

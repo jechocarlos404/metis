@@ -199,7 +199,8 @@ TOOLS = [
         description=(
             "What we can already do, most reused first: each capability's "
             "slug and exact name, its maturity when ours, our products and "
-            "feature count (any status), and external products that have it. "
+            "feature count (any status, sub-capabilities included and said), "
+            "and external products that have it. "
             "Ours (a finished feature of ours realizes it) first, then only "
             "elsewhere (an external product has it), then not built yet "
             "(realized by no finished feature)."

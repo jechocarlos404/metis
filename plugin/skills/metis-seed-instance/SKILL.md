@@ -89,9 +89,10 @@ per feature still load.
 
 An instance with `AUTH_ENABLED=false` needs no token. With auth on, the API
 checks a token's role and also which client it was issued to, and **only a
-person's browser session on the desktop may write**. No script can get such a
-token: Keycloak issues one only to the web app's browser login, and the app
-keeps it in an encrypted cookie. So:
+person signed in to the web app as an editor or admin may write**. Keycloak
+issues that token to the web app's login (`metis-web`) once the person enters
+their password, and the app keeps it in an encrypted cookie. These scripts
+sign no one in. So:
 
 - **Dry run**: works with any valid token. Pass `--token`, or set
   `METIS_TOKEN` (`METIS_API_TOKEN`, the plugin hooks' variable, also works).
@@ -110,7 +111,8 @@ keeps it in an encrypted cookie. So:
 - **The real load**: not from a script. Tell the user to import the file in
   the app, at Settings → Seed files → "Add a product from its repo": "Check
   file" shows the same counts and notes as the dry run, then "Import". The
-  script stops with that advice on a 401 or 403.
+  script stops with that advice on a 401 or 403. A viewer can't import in the
+  app either; the script says so, and that an editor or admin can.
 
 ## Verify
 

@@ -51,8 +51,9 @@ anything the seed shares with the rest of the instance:
   adoption stance, if it satisfies (or is guessed to satisfy) a capability
   the seed does not link it to, or if people recorded something about it that
   no seed file carries: who used it, a version, a link to another technology,
-  or a slot of a stack that stays. On a kept technology, the seed's own
-  satisfactions of a capability being deleted are removed first
+  a vendor, homepage, facets or evidence paths, or a slot of a stack that
+  stays. On a kept technology, the seed's own satisfactions of a capability
+  being deleted are removed first
 - a **capability is kept** (not deleted) if features outside the
   seed realize it (any of a feature's capabilities counts — capabilities are
   shared across products), if a technology satisfies it or a guess points at it
@@ -87,6 +88,13 @@ anything the seed shares with the rest of the instance:
 - display numbers are not kept: importing the file again adds the rows back
   under new numbers (`OG-39` comes back as a new number), and the run says so
   first
+- what a seed file has no place for is named on its line as not coming back
+  with a re-import: a cost recorded on a deleted satisfaction, and a deleted
+  product's stacks, delivery strategies, older plan documents, approval and
+  any ticket changed or added since its plan was written, status included
+  (the export writes the latest plan document, and an import makes it again
+  as a draft with every ticket pending). A satisfaction's note does come back
+  from a file metis exported: the export writes it as the link's `basis`
 
 Every kept row is listed with its reason (`note: kept ...`). Keeping shared
 rows is the expected outcome of a normal unseed, not a problem: every real seed
@@ -98,9 +106,9 @@ re-running after a partial failure is safe.
 ### With auth on
 
 An instance with `AUTH_ENABLED=false` needs no token. With auth on, only a
-person's browser session on the desktop may delete, and no script can get
-such a token (see the `metis-seed-instance` skill, "With auth on", for why and
-for how to get a read-only one). Any valid token runs `--dry-run`: pass
+person signed in to the web app as an editor or admin may delete, and this
+script signs no one in (see the `metis-seed-instance` skill, "With auth on",
+for why and for how to get a read-only token). Any valid token runs `--dry-run`: pass
 `--token` or set `METIS_TOKEN` (`METIS_API_TOKEN` also works). A read-only
 token cannot read guesses (editors and admins only), and a guess can keep a
 capability or technology, so that dry run opens with a note and says
@@ -109,7 +117,8 @@ guess could change the answer. Tell the user which rows are undecided; the
 app's preview, run as an editor, settles them. For the real
 removal, send the user to Settings → Seed files → "Remove a seeded product" in
 the app: "Preview removal", then "Remove". The script stops with that advice on
-a 401 or 403.
+a 401 or 403. A viewer can't remove it in the app either; the script says so,
+and that an editor or admin can.
 
 ## Verify
 

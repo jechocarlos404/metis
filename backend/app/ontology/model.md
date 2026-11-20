@@ -191,13 +191,17 @@ does not become a log line, a 404, or an omission.
 **Read-only everywhere except the desktop.** A write from any other surface is:
 
 ```
-403 { "error": "human_action_required",
-      "message": "Binding a slot is a human action.",
-      "href": "/stacks?slot=api::Auth" }
+403 { "detail": { "error": "human_action_required",
+                  "message": "Binding a slot is a human action.",
+                  "href": "/stacks?slot=9f6c1d2e-…" } }
 ```
 
 Not `401` — the caller is who they say. Not `405` — the route exists. The refusal names
 the reason and hands over the screen that can act.
+
+A 403 has two shapes. That object is the surface's. A person on the desktop whose role
+can't write (a viewer) gets a plain sentence, `403 { "detail": "Requires editor or admin
+role" }`: no screen would help them. Only the first has `detail.error`.
 
 Surface comes from the token's signed `azp`, so a service or MCP token cannot present
 itself as the desktop. An unrecognised client gets `api`, the surface with the fewest

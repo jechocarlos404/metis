@@ -13,8 +13,9 @@ states, each overwrite listed; and an existing guess takes the file's
 confidence and basis.
 
 With auth on, pass a token (--token, or METIS_TOKEN / METIS_API_TOKEN). Any
-valid token can run --dry-run; a write needs a person's desktop session, which
-no script can get, so load the file in the app instead (Settings, Seed files).
+valid token can run --dry-run; a write needs a person signed in to the app as
+an editor or admin, and this script signs no one in, so load the file in the
+app instead (Settings, Seed files).
 
 Usage:
     python3 seed_instance.py metis-seed.json [--base-url http://localhost:8000] [--dry-run] [--token TOKEN]
@@ -459,9 +460,10 @@ def capability_resolver(instance):
 
 
 IN_APP = (
-    "Writes need a person's desktop session, which no script can get: load the "
-    "file in the app instead (Settings, Seed files: check, then import), or run "
-    "against an instance started with AUTH_ENABLED=false."
+    "Writes need a person signed in to the app as an editor or admin, and this "
+    "script signs no one in. An editor or admin can load the file in the app "
+    "(Settings, Seed files: check, then import), or run this against an "
+    "instance started with AUTH_ENABLED=false."
 )
 
 
@@ -479,7 +481,12 @@ def refused(method, path, status, body, token):
         detail = body.get("detail") if isinstance(body, dict) else body
         if isinstance(detail, dict) and detail.get("error") == "human_action_required":
             sys.exit(f"error: {method} {path} returned 403: this token can read but not write. {IN_APP}")
-        sys.exit(f"error: {method} {path} returned 403 ({detail}). {IN_APP}")
+        # The role refusal: a viewer can't write in the app either.
+        sys.exit(
+            f"error: {method} {path} returned 403 ({detail}): this account can't write, "
+            "from a script or in the app; an editor or admin can. Ask one to load the "
+            "file in the app (Settings, Seed files: check, then import)."
+        )
 
 
 class Api:
@@ -1129,7 +1136,8 @@ def main():
         default=os.environ.get("METIS_TOKEN") or os.environ.get("METIS_API_TOKEN"),
         help="bearer token for an instance with auth on (default: $METIS_TOKEN, "
         "else $METIS_API_TOKEN). Any valid token can --dry-run; writes need a "
-        "desktop session, so with auth on load the file in the app instead",
+        "person signed in to the app as an editor or admin, so with auth on load "
+        "the file in the app instead",
     )
     args = ap.parse_args()
 

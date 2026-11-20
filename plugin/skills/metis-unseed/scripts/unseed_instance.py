@@ -34,9 +34,9 @@ and the line says so. Deleting a technology cascades its satisfactions and
 guesses, each named on its line by capability.
 
 With auth on, pass a token (--token, or METIS_TOKEN / METIS_API_TOKEN). Any
-valid token can run --dry-run; a delete needs a person's desktop session, which
-no script can get, so remove the product in the app instead (Settings, Seed
-files).
+valid token can run --dry-run; a delete needs a person signed in to the app as
+an editor or admin, and this script signs no one in, so remove the product in
+the app instead (Settings, Seed files).
 
 Usage:
     python3 unseed_instance.py metis-seed.json [--base-url http://localhost:8000] [--dry-run] [--token TOKEN]
@@ -61,9 +61,10 @@ import urllib.request
 
 
 IN_APP = (
-    "Deletes need a person's desktop session, which no script can get: remove "
-    "it in the app instead (Settings, Seed files: preview, then remove), or run "
-    "against an instance started with AUTH_ENABLED=false."
+    "Deletes need a person signed in to the app as an editor or admin, and this "
+    "script signs no one in. An editor or admin can remove it in the app "
+    "(Settings, Seed files: preview, then remove), or run this against an "
+    "instance started with AUTH_ENABLED=false."
 )
 
 
@@ -81,7 +82,12 @@ def refused(method, path, status, body, token):
         detail = body.get("detail") if isinstance(body, dict) else body
         if isinstance(detail, dict) and detail.get("error") == "human_action_required":
             sys.exit(f"error: {method} {path} returned 403: this token can read but not delete. {IN_APP}")
-        sys.exit(f"error: {method} {path} returned 403 ({detail}). {IN_APP}")
+        # The role refusal: a viewer can't remove it in the app either.
+        sys.exit(
+            f"error: {method} {path} returned 403 ({detail}): this account can't delete, "
+            "from a script or in the app; an editor or admin can. Ask one to remove it "
+            "in the app (Settings, Seed files: preview, then remove)."
+        )
 
 
 class Api:
@@ -412,6 +418,7 @@ class Unseeder:
         matched_ids = {c["id"] for c in self.caps.values()}
         matched_feat_ids = {f["id"] for f in self.feats.values()}
         dead_techs = self._dead("techs")
+        tech_names = {t["id"]: t["name"] for t in self.inst_techs}
         foreign = self.foreign_feature_counts()
         dead_prods = {p["id"] for p in self.prods.values() if p["id"] not in foreign}
         children, feats_of, sats_of, guesses_of = {}, {}, {}, {}
@@ -444,13 +451,12 @@ class Unseeder:
                 f for f in feats_of.get(cid, []) if f["id"] not in matched_feat_ids
             ]
             if foreign_feats:
-                reasons.append(f"{len(foreign_feats)} feature(s) outside the seed realize it")
+                # Direct links, of any product: what deleting the capability would cut.
+                reasons.append(f"{len(foreign_feats)} feature(s) outside the seed realize it directly")
             sats = sats_of.get(cid, [])
             if sats:
-                reasons.append(
-                    f"{len(sats)} technolog(ies) satisfy it — remove the satisfactions "
-                    "first if you really mean to drop it"
-                )
+                techs = _and([repr(tech_names.get(s["tech_id"], s["tech_id"])) for s in sats])
+                reasons.append(f"technolog(ies) {techs} satisfy it, link(s) the seed does not have")
             guesses = guesses_of.get(cid, [])
             if guesses:
                 reasons.append(f"{len(guesses)} guessed link(s) from outside the seed point at it")
@@ -583,6 +589,18 @@ class Unseeder:
             linked += [e["src_id"] for e in detail.get("incoming", [])]
             if linked:
                 reasons.append(f"it is linked to {_and([repr(tech_names.get(i, i)) for i in linked])}")
+            described = [
+                word
+                for present, word in (
+                    (tech.get("vendor_id"), "a vendor"),
+                    (tech.get("homepage"), "a homepage"),
+                    (tech.get("facets"), "facets"),
+                    (tech.get("evidence_anchors"), "evidence paths"),
+                )
+                if present
+            ]
+            if described:
+                reasons.append(f"it has {_and(described)}, which no seed file carries")
             for s in self._live_slots():
                 if s.get("tech_id") == tid:
                     reasons.append(f"{self._slot_label(s)} uses it")
@@ -760,6 +778,32 @@ class Unseeder:
                 f"{len(recorded)} recorded use(s) of {_and([repr(n) for n in dict.fromkeys(recorded)])} "
                 "stay, no longer naming it"
             )
+        # What a seed file has no place for: an import makes one plan
+        # document, as a draft with every ticket pending, and never a stack
+        # or a strategy.
+        plans = self.inst_plans.get(pid, [])
+        strategies = len(self.inst_strategies.get(pid, []))
+        # The export writes the latest plan document, not the tickets as they
+        # are: one edited since (its status too) or not made from it is lost.
+        from_plan = {e["id"] for e in epics if plans and e.get("decomposition_id") == plans[0]["id"]}
+        changed = sum(
+            1 for t in tickets
+            if t.get("updated_at") != t.get("created_at") or t.get("epic_id") not in from_plan
+        )
+        lost = [
+            word
+            for present, word in (
+                (stacks, f"its {len(stacks)} stack(s)"),
+                (strategies, f"its {strategies} delivery strategy(ies)"),
+                (len(plans) > 1, f"{len(plans) - 1} older plan document(s)"),
+                (prod.get("status") == "approved" or any(d.get("status") == "approved" for d in plans),
+                 "its approval"),
+                (changed, f"{changed} ticket(s) as they are now (changed or added since its plan was written)"),
+            )
+            if present
+        ]
+        if lost:
+            after.append(f"importing this file again won't bring back {_and(lost)}")
         head = f"product {prod['name']!r}" + (f" (cascades {_and(parts)})" if parts else "")
         return "; ".join([head, *after])
 
@@ -823,10 +867,16 @@ class Unseeder:
             parts = ([f"its satisfaction(s) of {names(sats)}"] if sats else []) + (
                 [f"its guess(es) about {names(guesses)}"] if guesses else []
             )
+            # A cost someone scored on a link: no seed file carries one.
+            costed = [s for s in sats if s.get("cost")]
+            lost = (
+                "; importing this file again won't bring back the cost recorded on its "
+                f"satisfaction(s) of {names(costed)}" if costed else ""
+            )
             self.remove(
                 "technologies",
                 f"/api/tech/{urllib.parse.quote(tech['slug'], safe='')}",
-                f"technology {tech['name']!r}" + (f" (cascades {_and(parts)})" if parts else ""),
+                f"technology {tech['name']!r}" + (f" (cascades {_and(parts)})" if parts else "") + lost,
                 unsure=True,
             )
         dead_techs, dead_caps = self._dead("techs"), self._dead("caps")
@@ -838,7 +888,8 @@ class Unseeder:
             if s["capability_id"] not in dead_caps:
                 self.keep("satisfactions", label, ["the technology and the capability both stay"])
                 continue
-            self.remove("satisfactions", f"/api/tech/satisfactions/{s['id']}", label, unsure=True)
+            lost = "; importing this file again won't bring back its recorded cost" if s.get("cost") else ""
+            self.remove("satisfactions", f"/api/tech/satisfactions/{s['id']}", label + lost, unsure=True)
 
     def _dead_cache_rows(self, kind):
         self._dead(kind)
@@ -914,7 +965,8 @@ def main():
         default=os.environ.get("METIS_TOKEN") or os.environ.get("METIS_API_TOKEN"),
         help="bearer token for an instance with auth on (default: $METIS_TOKEN, "
         "else $METIS_API_TOKEN). Any valid token can --dry-run; deletes need a "
-        "desktop session, so with auth on remove it in the app instead",
+        "person signed in to the app as an editor or admin, so with auth on "
+        "remove it in the app instead",
     )
     args = ap.parse_args()
 

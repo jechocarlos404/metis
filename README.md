@@ -86,9 +86,16 @@ Seeded realm users (temporary passwords — Keycloak will force a change on firs
 
 | User | Password | Role |
 |---|---|---|
-| `admin@metis.local` | `admin` | admin (Settings: users, AI models, raw data) |
-| `editor@metis.local` | `editor` | editor (read + write domain) |
-| `viewer@metis.local` | `viewer` | viewer (read-only) |
+| `admin@metis.local` | `admin-dev-only` | admin (Settings: users, AI models, raw data) |
+| `editor@metis.local` | `editor-dev-only` | editor (read + write domain) |
+| `viewer@metis.local` | `viewer-dev-only` | viewer (read-only) |
+
+Passwords need 12 or more characters and can't be the username.
+
+An existing install keeps its old realm: Keycloak skips `--import-realm` for a
+realm that already exists, so set the policy in the admin console (metis realm →
+Authentication → Policies), or recreate the Keycloak container. It has no
+volume, so recreating it resets every user to the three seeded accounts.
 
 For curl / seed scripts against the API without a browser session, set
 `AUTH_ENABLED=false` in `.env` — every request becomes an admin on the desktop
@@ -451,8 +458,8 @@ cp .env.example .env
 # frontend signs in through it (or set AUTH_ENABLED=false in .env for scripts)
 docker compose up -d postgres keycloak
 
-# backend (Python 3.11+). Settings come from the environment or a .env in the
-# current directory, so point it at the root one.
+# backend (Python 3.12, as CI and the Docker image use). Settings come from the
+# environment or a .env in the current directory, so point it at the root one.
 cd backend
 python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
 .venv/bin/uvicorn app.main:app --reload --port 8000 --env-file ../.env
@@ -460,7 +467,7 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
 # tests (uses a metis_test database on the compose postgres)
 .venv/bin/python -m pytest
 
-# frontend
+# frontend, in a second terminal from the repo root (uvicorn holds this one)
 cd frontend
 npm install
 npm run dev            # http://localhost:4321, proxies to localhost:8000

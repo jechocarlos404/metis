@@ -413,8 +413,11 @@ export function createForceGraph(opts) {
    */
   function openView(focus, duration = 450) {
     if (focus?.pick != null) {
-      framePick(focus.pick, focus.near, duration);
-      return;
+      if (boxOf(focus.pick, 8)) {
+        framePick(focus.pick, focus.near, duration);
+        return;
+      }
+      focus = null; // no such card (a stale ?goal=): the plain opening view
     }
     const b = bounds();
     if (!b) return;

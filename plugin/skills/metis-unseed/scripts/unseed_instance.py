@@ -7,7 +7,7 @@ capabilities by slug; products by name, features by (product, name);
 technologies by slug; edges by src+dst+kind; motivations and satisfactions by
 pair) and deleted via the REST API.
 
-Entities entangled with material outside the seed are kept, with a warning:
+Entities entangled with material outside the seed are kept, with the reason:
 
 - a product is kept if features outside the seed belong to it
 - a technology is kept if a product outside the seed uses it, if it has an
@@ -17,9 +17,14 @@ Entities entangled with material outside the seed are kept, with a warning:
   capability_ids counts), if a foreign feature or technology links to it
   (confirmed or guessed), or if any child capability is foreign or itself kept
 - a goal is kept if it has foreign child goals or foreign products
+- a goal link (motivation) the seed does not declare keeps whichever of its
+  ends the seed names, the goal and the capability; so does a capability
+  another product added by hand (a bundle). Deleting either end would take
+  the link with it, and the seed never made it
 
-Deleting a feature cascades its edges (including edges foreign features had
-to it, reported as notes) and its guesses. Deleting a product cascades its
+Every row a delete takes with it is listed first: a deleted feature's edges
+(including ones the seed does not declare, or that foreign features had to it)
+are deleted one by one, and its guesses are named on its line. Deleting a product cascades its
 PRD, all work items (including tickets created after seeding) and its
 technology usage. Deleting a technology cascades its satisfactions and guesses.
 
@@ -31,8 +36,13 @@ files).
 Usage:
     python3 unseed_instance.py metis-seed.json [--base-url http://localhost:8000] [--dry-run] [--token TOKEN]
 
-Exit codes: 0 clean, 1 file/connection error, 2 finished but some entities
-were kept or failed (see warnings).
+Kept rows are the designed outcome, listed with their reasons. If this
+token cannot read guesses (editors and admins only), a dry run says "can't
+tell" for every capability and technology a guess could keep, and a real run
+refuses before deleting anything.
+
+Exit codes: 0 finished (kept rows included), 1 file/connection error or
+refusal, 2 finished but some deletes failed (see warnings).
 """
 
 import argparse
@@ -106,10 +116,12 @@ class Api:
         return body
 
     def get_optional(self, path):
-        """For endpoints an older instance may not have yet. Absent is [],
-        which is the same thing as "nothing there" for every caller."""
+        """For endpoints an older instance may not have yet: a 404 is [].
+        Any other refusal is None, so the caller can say it couldn't tell."""
         status, body = self.request("GET", path)
-        return body if status == 200 else []
+        if status == 200:
+            return body
+        return [] if status == 404 else None
 
     def delete(self, path):
         return self.request("DELETE", path)
@@ -153,8 +165,9 @@ class Unseeder:
         self.doc = doc
         self.dry_run = dry_run
         self.counts = {}  # (collection, action) -> int
-        self.notes = []  # informational (e.g. cascaded foreign edges)
-        self.warnings = []  # kept or failed entities — exit 2
+        self.notes = []  # informational: kept rows and their reasons
+        self.warnings = []  # failed deletes — exit 2
+        self.unreadable = []  # lists this token cannot read
 
         # instance state, fetched once
         self.inst_goals = api.get("/api/goals")
@@ -162,12 +175,16 @@ class Unseeder:
         self.inst_feats = api.get("/api/features")
         self.inst_edges = api.get("/api/features/edges")
         self.inst_prods = api.get("/api/products")
+        # Goal links and hand-added capabilities: a capability's delete
+        # cascades both, so each is either in the seed or holds its row back.
+        self.inst_motivations = api.get("/api/motivations")
+        self.inst_bundles = api.get("/api/product-bundles")
         # Buy-side supply and guesses. A satisfaction or guess the seed did not
         # declare was recorded by someone else; it is shared state, like a
         # foreign feature, and the capability is kept rather than deleted.
-        # Older instances predate these endpoints; treat that as none.
-        self.inst_sats = api.get_optional("/api/tech/satisfactions")
-        self.inst_guesses = api.get_optional("/api/guesses")
+        # Older instances predate these endpoints (404: none).
+        self.inst_sats = self._optional("/api/tech/satisfactions", "technology links")
+        self.inst_guesses = self._optional("/api/guesses", "guesses")
         self.inst_techs = self._all_technologies()
 
         # seed ref -> matched instance entity
@@ -203,7 +220,7 @@ class Unseeder:
         # Usage of the seed's products, read now: deleting a product cascades
         # its usage rows, and the technology guard runs after that.
         self.inst_usage = {
-            p["id"]: api.get_optional(f"/api/stacks/usage?product_id={p['id']}")
+            p["id"]: self._optional(f"/api/stacks/usage?product_id={p['id']}", "technology use")
             for p in self.prods.values()
         } if self.techs else {}
         # (tech id, capability id) pairs the seed itself declares, confirmed
@@ -215,6 +232,52 @@ class Unseeder:
                 cap = self.caps.get(sat.get("capability_ref"))
                 if tech and cap:
                     self.declared.add((tech["id"], cap["id"]))
+        # Goal links the instance has that the seed does not declare, on a
+        # goal or capability the seed names. Someone else made them: each
+        # keeps both of its ends, so no delete cascades into one unlisted.
+        declared_links = set()
+        for m in self.doc.get("motivations") or []:
+            goal = self.goals.get(m.get("goal_ref"))
+            cap = self.caps.get(m.get("capability_ref"))
+            if goal and cap:
+                declared_links.add((goal["id"], cap["id"]))
+        goal_ids = {g["id"] for g in self.goals.values()}
+        cap_ids = {c["id"] for c in self.caps.values()}
+        self.foreign_links = [
+            m for m in self.inst_motivations
+            if (m["goal_id"], m["capability_id"]) not in declared_links
+            and (m["goal_id"] in goal_ids or m["capability_id"] in cap_ids)
+        ]
+        if self.unreadable:
+            what = " or ".join(self.unreadable)
+            if not dry_run:
+                sys.exit(
+                    f"error: this token cannot read {what}, so it cannot tell which "
+                    "capabilities and technologies are safe to delete. Nothing was deleted. " + IN_APP
+                )
+            msg = (
+                f"this token cannot read {what}"
+                + (" (editors and admins only)" if "guesses" in self.unreadable else "")
+                + ", and those can keep a capability or technology, so where the removal "
+                "depends on them this dry run says \"can't tell\" instead of \"would delete\""
+            )
+            print(f"  note: {msg}")
+            self.notes.append(msg)
+
+    def _optional(self, path, what):
+        """A list an older instance may lack (404: none), or this token may
+        not read. Unreadable, it is recorded: a dry run then can't tell what
+        it would keep, and a real run refuses."""
+        rows = self.api.get_optional(path)
+        if rows is None and what not in self.unreadable:
+            self.unreadable.append(what)
+        return rows or []
+
+    def _goal_name(self, goal_id):
+        goal = next((g for g in self.inst_goals if g["id"] == goal_id), None)
+        if goal is None:
+            return goal_id
+        return f"{goal['display_id']} {goal['title']!r}" if goal.get("display_id") else repr(goal["title"])
 
     def _all_technologies(self):
         rows, offset = [], 0
@@ -240,8 +303,15 @@ class Unseeder:
     def note(self, collection, action):
         self.counts[(collection, action)] = self.counts.get((collection, action), 0) + 1
 
-    def remove(self, collection, path, label):
+    def remove(self, collection, path, label, unsure=False):
+        """`unsure`: the delete depends on a capability or technology that a
+        list this token can't read might keep, so a dry run says so instead
+        of claiming it."""
         if self.dry_run:
+            if unsure and self.unreadable:
+                self.note(collection, "can't tell")
+                print(f"  can't tell whether {label} goes")
+                return
             self.note(collection, "would delete")
             print(f"  would delete {label}")
             return
@@ -258,14 +328,18 @@ class Unseeder:
     # ---- guards: what must be kept because foreign material hangs off it ----
 
     def keep(self, collection, label, reasons):
+        """Kept is the designed outcome for shared rows: listed with its
+        reasons, not a warning."""
         self.note(collection, "kept")
-        self.warnings.append(f"kept {label}: " + "; ".join(reasons))
+        self.notes.append(f"kept {label}: " + "; ".join(reasons))
 
     def deletable_caps(self):
         """Matched capabilities safe to delete, leaves before parents."""
         matched_ids = {c["id"] for c in self.caps.values()}
         matched_feat_ids = {f["id"] for f in self.feats.values()}
         dead_techs = self._dead("techs")
+        foreign = self.foreign_feature_counts()
+        dead_prods = {p["id"] for p in self.prods.values() if p["id"] not in foreign}
         children, feats_of, sats_of, guesses_of = {}, {}, {}, {}
         for c in self.inst_caps:
             children.setdefault(c["parent_id"], []).append(c)
@@ -306,6 +380,13 @@ class Unseeder:
             guesses = guesses_of.get(cid, [])
             if guesses:
                 reasons.append(f"{len(guesses)} guessed link(s) from outside the seed point at it")
+            goal_links = [m for m in self.foreign_links if m["capability_id"] == cid]
+            if goal_links:
+                names = ", ".join(self._goal_name(m["goal_id"]) for m in goal_links)
+                reasons.append(f"goal(s) {names} link to it, link(s) the seed does not have")
+            for b in self.inst_bundles:
+                if b["capability_id"] == cid and b["product_id"] not in dead_prods:
+                    reasons.append(f"product {b['product_name']!r} lists it as a capability added by hand")
             for child in children.get(cid, []):
                 if child["id"] not in matched_ids:
                     reasons.append(f"child capability {child['name']!r} is not in the seed")
@@ -358,6 +439,10 @@ class Unseeder:
             ]
             for p in foreign_prods:
                 reasons.append(f"product {p['name']!r} outside the seed points at it")
+            cap_links = [m for m in self.foreign_links if m["goal_id"] == gid]
+            if cap_links:
+                names = ", ".join(repr(m["capability_name"]) for m in cap_links)
+                reasons.append(f"it links to capability(ies) {names}, link(s) the seed does not have")
             verdict[gid] = not reasons
             if reasons:
                 self.keep("goals", f"goal {goal['title']!r}", reasons)
@@ -423,29 +508,32 @@ class Unseeder:
         return {r["id"] for r in cache[kind]}
 
     def remove_motivations(self):
+        existing = {(m["goal_id"], m["capability_id"]) for m in self.inst_motivations}
         for m in self.doc.get("motivations") or []:
             goal = self.goals.get(m.get("goal_ref"))
             cap = self.caps.get(m.get("capability_ref"))
-            if goal is None or cap is None:
+            if goal is None or cap is None or (goal["id"], cap["id"]) not in existing:
                 self.note("motivations", "absent")
                 continue
-            existing = {g["id"] for g in self.api.get(f"/api/capabilities/{cap['id']}/motivations")}
-            if goal["id"] not in existing:
-                self.note("motivations", "absent")
-                continue
+            label = f"motivation {goal['title']!r} -> {cap['name']!r}"
+            goal_dies = goal["id"] in self._dead("goals")
             # Both ends survive: the pair is someone else's too (another
             # product's seed motivated the same capability by the same goal).
-            if cap["id"] not in self._dead("caps") and goal["id"] not in self._dead("goals"):
-                self.note("motivations", "kept")
+            if cap["id"] not in self._dead("caps") and not goal_dies:
+                self.keep("motivations", label, ["the goal and the capability both stay"])
                 continue
             self.remove(
                 "motivations",
                 f"/api/capabilities/{cap['id']}/motivations/{goal['id']}",
-                f"motivation {goal['title']!r} -> {cap['name']!r}",
+                label,
+                unsure=not goal_dies,
             )
 
     def remove_edges(self):
+        """The seed's own edges, then every other edge a deleted feature has:
+        those would go with the feature anyway, so each is named here first."""
         by_key = {(e["src_id"], e["dst_id"], e["kind"]): e for e in self.inst_edges}
+        handled = set()
         for e in self.doc.get("edges") or []:
             kind = e.get("kind", "DEPENDS_ON")
             src = self.feats.get(e.get("src_ref"))
@@ -454,16 +542,33 @@ class Unseeder:
             if inst is None:
                 self.note("edges", "absent")
                 continue
+            handled.add(inst["id"])
             self.remove(
                 "edges",
                 f"/api/features/edges/{inst['id']}",
                 f"edge {src['name']!r} -{kind}-> {dst['name']!r}",
             )
+        matched_ids = {f["id"] for f in self.feats.values()}
+        names = {f["id"]: f["name"] for f in self.inst_feats}
+        for e in self.inst_edges:
+            src_in, dst_in = e["src_id"] in matched_ids, e["dst_id"] in matched_ids
+            if e["id"] in handled or not (src_in or dst_in):
+                continue
+            if src_in and dst_in:
+                why = "not in the seed; it goes with its features"
+            else:
+                outside = names.get(e["dst_id"] if src_in else e["src_id"])
+                why = f"feature {outside!r} is outside the seed; the edge goes with the deleted one"
+            self.remove(
+                "edges",
+                f"/api/features/edges/{e['id']}",
+                f"edge {names.get(e['src_id'])!r} -{e['kind']}-> {names.get(e['dst_id'])!r} ({why})",
+            )
 
     def foreign_feature_counts(self):
         """Matched product id -> number of features outside the seed that belong
-        to it. Deleting such a product would silently orphan them (product_id
-        SET NULL), so it is shared state and kept."""
+        to it. Deleting such a product would delete them with it, so it is
+        shared state and kept."""
         matched_feat_ids = {f["id"] for f in self.feats.values()}
         matched_prod_ids = {p["id"] for p in self.prods.values()}
         counts = {}
@@ -483,26 +588,21 @@ class Unseeder:
                     [f"{foreign[prod['id']]} feature(s) outside the seed belong to it"],
                 )
                 continue
+            by_hand = sum(1 for b in self.inst_bundles if b["product_id"] == prod["id"])
             self.remove(
                 "products",
                 f"/api/products/{prod['id']}",
-                f"product {prod['name']!r} (cascades its PRD and work items)",
+                f"product {prod['name']!r} (cascades its PRD and work items"
+                + (f", and its {by_hand} hand-added capability link(s))" if by_hand else ")"),
             )
 
     def remove_features(self):
-        matched_ids = {f["id"] for f in self.feats.values()}
-        names = {f["id"]: f["name"] for f in self.inst_feats}
-        for e in self.inst_edges:
-            src_in, dst_in = e["src_id"] in matched_ids, e["dst_id"] in matched_ids
-            if src_in != dst_in:
-                self.notes.append(
-                    f"edge {names.get(e['src_id'])!r} -{e['kind']}-> "
-                    f"{names.get(e['dst_id'])!r} crosses the seed boundary; "
-                    "it goes away with the deleted endpoint"
-                )
         for feat in self.feats.values():
+            guesses = sum(1 for g in self.inst_guesses if g.get("feature_id") == feat["id"])
             self.remove(
-                "features", f"/api/features/{feat['id']}", f"feature {feat['name']!r}"
+                "features",
+                f"/api/features/{feat['id']}",
+                f"feature {feat['name']!r}" + (f" (cascades its {guesses} guess(es))" if guesses else ""),
             )
 
     def remove_technologies(self):
@@ -515,6 +615,7 @@ class Unseeder:
                 "technologies",
                 f"/api/tech/{urllib.parse.quote(tech['slug'], safe='')}",
                 f"technology {tech['name']!r} (cascades its satisfactions and guesses)",
+                unsure=True,
             )
         dead_techs, dead_caps = self._dead("techs"), self._dead("caps")
         cap_names = {c["id"]: c["name"] for c in self.inst_caps}
@@ -522,14 +623,11 @@ class Unseeder:
             pair = (s["tech_id"], s["capability_id"])
             if s["tech_id"] in dead_techs or pair not in self.declared:
                 continue
+            label = f"satisfaction of {cap_names.get(s['capability_id'])!r}"
             if s["capability_id"] not in dead_caps:
-                self.note("satisfactions", "kept")
+                self.keep("satisfactions", label, ["the technology and the capability both stay"])
                 continue
-            self.remove(
-                "satisfactions",
-                f"/api/tech/satisfactions/{s['id']}",
-                f"satisfaction of {cap_names.get(s['capability_id'])!r}",
-            )
+            self.remove("satisfactions", f"/api/tech/satisfactions/{s['id']}", label, unsure=True)
 
     def _dead_cache_rows(self, kind):
         self._dead(kind)
@@ -542,6 +640,7 @@ class Unseeder:
                 "capabilities",
                 f"/api/capabilities/{cap['id']}",
                 f"capability {cap['name']!r}",
+                unsure=True,
             )
 
     def remove_goals(self):
@@ -551,7 +650,7 @@ class Unseeder:
 
     def report(self):
         order = [
-            "motivations", "edges", "products", "features", "technologies",
+            "motivations", "edges", "features", "products", "technologies",
             "satisfactions", "capabilities", "goals",
         ]
         for collection in order:
@@ -615,8 +714,10 @@ def main():
     unseeder = Unseeder(api, doc, args.dry_run)
     unseeder.remove_motivations()
     unseeder.remove_edges()
-    unseeder.remove_products()
+    # Features before their product: a product's delete takes its features,
+    # so each is deleted, and listed, by itself first.
     unseeder.remove_features()
+    unseeder.remove_products()
     unseeder.remove_technologies()
     unseeder.remove_capabilities()
     unseeder.remove_goals()

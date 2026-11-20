@@ -222,7 +222,7 @@ export function UnseedPanel({ onRemoved }) {
         </Button>
       </div>
       <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>
-        Capabilities and goals other products still use are kept, and reported as warnings.
+        Anything another product still uses is kept, and the preview says why.
       </div>
       {error && <div role="alert" style={{ fontSize: "var(--text-xs)", color: "var(--danger-fg)" }}>{error}</div>}
       {result && <ResultBox title={result.dryRun ? "Preview: this is what would be removed" : "Removed"} result={result} tone={result.warnings?.length ? "danger" : undefined} />}

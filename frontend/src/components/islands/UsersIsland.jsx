@@ -277,10 +277,10 @@ export default function UsersIsland() {
           )}
           <Input label="Email" type="email" value={draft.email}
             onChange={(e) => setDraft({ ...draft, email: e.target.value })} placeholder="jane@metis.local" />
-          <div style={{ display: "flex", gap: 12 }}>
-            <Input label="First name" style={{ flex: 1 }} value={draft.firstName}
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
+            <Input label="First name" style={{ flex: "1 1 140px", minWidth: 0 }} inputStyle={{ minWidth: 0 }} value={draft.firstName}
               onChange={(e) => setDraft({ ...draft, firstName: e.target.value })} />
-            <Input label="Last name" style={{ flex: 1 }} value={draft.lastName}
+            <Input label="Last name" style={{ flex: "1 1 140px", minWidth: 0 }} inputStyle={{ minWidth: 0 }} value={draft.lastName}
               onChange={(e) => setDraft({ ...draft, lastName: e.target.value })} />
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>

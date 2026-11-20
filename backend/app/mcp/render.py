@@ -232,19 +232,38 @@ def blocked(reason: str, rule_id: str, href: str) -> str:
     return "\n".join([f"Stop — {reason}", f"Rule: {rule_id}", f"Open: {href}"])
 
 
-def api_error(status: int, body: Any) -> str:
+def api_error(status: int, body: Any, href: str, hint: str | None = None) -> str:
     """A refusal from the API, rendered rather than swallowed. The 403 already
-    carries the screen that can act; pass it through verbatim."""
-    if isinstance(body, dict) and isinstance(body.get("detail"), dict):
-        detail = body["detail"]
-        return "\n".join(
-            [
-                f"Refused ({status}): {detail.get('error', 'error')}",
-                detail.get("message", ""),
-                f"Open: {detail.get('href', '/')}",
-            ]
+    carries the screen that can act; pass it through verbatim. Anything else
+    opens the screen of the tool's own subject."""
+    detail = body.get("detail", body) if isinstance(body, dict) else body
+    if isinstance(detail, dict):
+        lines = [f"Refused ({status}): {detail.get('error', 'error')}"]
+        lines += [detail["message"]] if detail.get("message") else []
+        href = detail.get("href") or href
+    else:
+        lines = [f"Refused ({status}): {_said(detail)}"]
+    if hint:
+        lines.append(hint)
+    return _end(lines, href)
+
+
+def _said(detail: Any) -> str:
+    """The API's own words, on one line. FastAPI's validation errors arrive as
+    a list; each keeps its location and message."""
+    if isinstance(detail, list):
+        return "; ".join(
+            f"{'.'.join(str(part) for part in e.get('loc', []))}: {e.get('msg', '')}"
+            for e in detail
+            if isinstance(e, dict)
         )
-    return f"Refused ({status}): {body}"
+    return " ".join(str(detail).split())[:300]
+
+
+def error(message: str, href: str) -> str:
+    """An input this server refused before asking, or a setup it cannot get
+    past: one sentence saying what to change, then the screen as always."""
+    return _end([message], href)
 
 
 # ---- inventory: what exists, and what we could build from it ----
@@ -552,24 +571,93 @@ def no_capability(slug: str, candidates: list[dict]) -> str:
     return _end(lines, "/capabilities")
 
 
-def feature_why(why: dict) -> str:
+def feature_why(
+    why: dict,
+    feature: dict,
+    products: list[dict],
+    goals: list[dict],
+    motivations: list[dict],
+) -> str:
+    """The chain, split by whose goal it is. A goal is the feature's own when it
+    sits under the same top goal as the feature's product (the desktop's rule);
+    any other arrived through a shared capability — reuse, not the reason this
+    feature exists — so it is labelled with its products. Each goal says which
+    capability it motivates, or which goal it is the parent of, because the
+    chain lists a goal once however many capabilities it motivates."""
     chain = why["chain"]
-    capabilities = sum(1 for s in chain if s["kind"] == "capability")
-    goals = sum(1 for s in chain if s["kind"] == "goal")
+    parent = {g["id"]: g["parent_goal_id"] for g in goals}
+
+    def root(goal_id: str) -> str:
+        seen = set()
+        while parent.get(goal_id) and goal_id not in seen:
+            seen.add(goal_id)
+            goal_id = parent[goal_id]
+        return goal_id
+
+    owners: dict[str, list[str]] = {}
+    for p in products:
+        if p.get("goal_id"):
+            owners.setdefault(root(p["goal_id"]), []).append(p["slug"])
+    product = next((p for p in products if p["id"] == feature.get("product_id")), None)
+    slug = product["slug"] if product else "(no product)"
+    own_root = root(product["goal_id"]) if product and product.get("goal_id") else None
+
+    capabilities = [s for s in chain if s["kind"] == "capability"]
+    steps = [s for s in chain if s["kind"] == "goal"]
+    order = [s["id"] for s in capabilities]
+    names = {s["id"]: s["name"] for s in capabilities}
+    motivates: dict[str, list[str]] = {}
+    for m in motivations:
+        if m["capability_id"] in names:
+            motivates.setdefault(m["goal_id"], []).append(m["capability_id"])
+
+    def via(step: dict) -> str:
+        said = []
+        motivated = sorted(motivates.get(step["id"], []), key=order.index)
+        if motivated:
+            said.append("motivates " + ", ".join(names[c] for c in motivated))
+        children = [g["display_id"] for g in steps if parent.get(g["id"]) == step["id"]]
+        if children:
+            said.append("parent of " + ", ".join(children))
+        return "; ".join(said)
+
+    own = [g for g in steps if own_root is not None and root(g["id"]) == own_root]
+    other = [g for g in steps if g not in own]
     lines = [
-        f"{capabilities} capabilit(ies) and {goals} goal(s) above {chain[0]['name']}.",
+        f"{len(capabilities)} capabilit(ies) and {len(steps)} goal(s) above "
+        f"{chain[0]['name']} ({slug}): {len(own)} of {slug}, "
+        f"{len(other)} of other products.",
         "",
     ]
-    lines += _table(
-        [
-            [s["relation"] or "—", s["kind"], s.get("display_id") or "", s["name"]]
-            for s in chain[1:]
-        ]
-    )
-    if not goals:
+    lines += _table([["  " + s["relation"], s["name"]] for s in capabilities])
+    lines.append("")
+    if not steps:
         lines.append(
             "No goal motivates any capability on this path — the why stops here. "
             "That is an answer."
+        )
+    elif own:
+        lines.append(f"Goals of {slug} ({len(own)}):")
+        lines += _table([["  " + g["display_id"], g["name"], via(g)] for g in own])
+    elif own_root is None:
+        lines.append(f"{slug} has no goal of its own, so none of these is its reason.")
+    else:
+        lines.append(f"No goal of {slug} motivates these capabilities.")
+    if other:
+        lines.append(
+            f"Goals of other products ({len(other)}) — each motivates a capability "
+            "this feature shares, not this feature:"
+        )
+        lines += _table(
+            [
+                [
+                    "  " + g["display_id"],
+                    g["name"],
+                    ", ".join(owners.get(root(g["id"]), [])) or "(no product)",
+                    via(g),
+                ]
+                for g in other
+            ]
         )
     lines.append("")
     return _end(lines, f"/features?feature={why['feature_id']}")
@@ -753,3 +841,19 @@ def no_feature(value: str, named: list[dict], products: list[dict]) -> str:
     )
     lines.append("")
     return _end(lines, "/features")
+
+
+def no_journey(value: str, named: list[dict]) -> str:
+    """The same rule as features: an id or the exact name, never a near one."""
+    if not named:
+        return _end(
+            [
+                f"0 journeys are named {value!r}. Matching is exact: pass an id or the "
+                "exact name; journeys with no argument lists them."
+            ],
+            "/journeys",
+        )
+    lines = [f"{len(named)} journeys are named {value!r}. Pass one id:", ""]
+    lines += _table([["  " + j["name"], j["persona"] or "—", j["id"]] for j in named])
+    lines.append("")
+    return _end(lines, "/journeys")

@@ -251,9 +251,24 @@ def test_a_refused_write_is_rendered_with_its_href():
     text = render.api_error(403, {"detail": {
         "error": "human_action_required",
         "message": "Binding a slot is a human action.",
-        "href": "/stacks?slot=api::Auth"}})
+        "href": "/stacks?slot=api::Auth"}}, "/stacks")
     assert "human_action_required" in text
     assert text.endswith("Open: /stacks?slot=api::Auth")
+
+
+@pytest.mark.parametrize(
+    "body,said",
+    [
+        ({"detail": "Feature not found"}, "Feature not found"),
+        ({"detail": [{"loc": ["path", "feature_id"], "msg": "Input should be a valid UUID"}]},
+         "path.feature_id: Input should be a valid UUID"),
+        ("<html>Bad Gateway</html>", "<html>Bad Gateway</html>"),
+    ],
+)
+def test_any_other_refusal_is_a_sentence_and_opens_the_tools_screen(body, said):
+    """No dict repr, and the Open: line is there like on every answer."""
+    text = render.api_error(404, body, "/features")
+    assert text.splitlines() == [f"Refused (404): {said}", "Open: /features"]
 
 
 @pytest.mark.parametrize(
@@ -581,8 +596,76 @@ async def test_feature_why_walks_up_to_the_goal(api):
     w = await _world(*api)
     text = await server._dispatch("feature_why", {"feature": str(w["forecast"].id)})
     _conventions(text)
-    assert text.startswith("1 capabilit(ies) and 1 goal(s) above Show ride history.")
-    assert "REALIZES" in text and "MOTIVATES" in text and "PG-" in text
+    assert text.startswith(
+        "1 capabilit(ies) and 1 goal(s) above Show ride history (can-i-climb): "
+        "0 of can-i-climb, 1 of other products."
+    )
+    assert "REALIZES" in text and "PG-" in text and "motivates Strava import" in text
+    # can-i-climb has no goal, so no goal is called its own.
+    assert "can-i-climb has no goal of its own" in text
+    # By exact name too, as recheck takes it.
+    assert await server._dispatch("feature_why", {"feature": "Show ride history"}) == text
+
+
+async def test_feature_why_puts_the_products_own_goals_first(api):
+    """A shared capability brings in other products' goals: they are labelled
+    with their product, never shown as this feature's reason. Each goal says
+    what it motivates, even one the chain met first as a parent."""
+    app, db = api
+    async with db() as s:
+        def cap(name):
+            return capability_service.create_capability(s, CapabilityCreate(name=name))
+
+        strava, physics = await cap("Strava import"), await cap("Physics model")
+        og_climb = Goal(goal_type=GoalType.org, title="Riders know before they ride")
+        og_saddle = Goal(goal_type=GoalType.org, title="Every bike ready")
+        s.add_all([og_climb, og_saddle])
+        await s.flush()
+        pg_climb = Goal(
+            goal_type=GoalType.product, title="Trust the estimate", parent_goal_id=og_climb.id
+        )
+        pg_saddle = Goal(
+            goal_type=GoalType.product, title="Plan the ride", parent_goal_id=og_saddle.id
+        )
+        s.add_all([pg_climb, pg_saddle])
+        await s.flush()
+        climb = Product(name="Can I Climb", slug="can-i-climb", goal_id=pg_climb.id)
+        saddle = Product(name="Saddlebag", slug="saddlebag", goal_id=og_saddle.id)
+        s.add_all([climb, saddle])
+        await s.commit()
+        for cap, goal in ((strava, pg_climb), (strava, pg_saddle), (physics, og_saddle)):
+            await capability_service.add_motivation(s, cap.id, goal.id)
+        feature = await feature_service.create_feature(
+            s, FeatureCreate(name="Estimate climb power", product_id=climb.id,
+                             capability_ids=[strava.id, physics.id]),
+        )
+        ids = {g.title: f"{'OG' if g.goal_type == GoalType.org else 'PG'}-{g.seq:02d}"
+               for g in (og_climb, og_saddle, pg_climb, pg_saddle)}
+
+    text = await server._dispatch("feature_why", {"feature": "Estimate climb power"})
+    _conventions(text)
+    lines = text.splitlines()
+    assert lines[0] == (
+        "2 capabilit(ies) and 4 goal(s) above Estimate climb power (can-i-climb): "
+        "2 of can-i-climb, 2 of other products."
+    )
+    own = lines.index("Goals of can-i-climb (2):")
+    other = next(
+        i for i, line in enumerate(lines) if line.startswith("Goals of other products (2)")
+    )
+    assert own < other
+    mine = " ".join(lines[own + 1:other])
+    assert ids["Trust the estimate"] in mine and "motivates Strava import" in mine
+    assert ids["Riders know before they ride"] in mine
+    assert f"parent of {ids['Trust the estimate']}" in mine
+    theirs = lines[other + 1:-2]
+    saddle_og = next(line for line in theirs if ids["Every bike ready"] in line)
+    # Met first as a parent, it still says what it motivates directly.
+    assert "saddlebag" in saddle_og
+    assert f"motivates Physics model; parent of {ids['Plan the ride']}" in saddle_og
+    saddle_pg = next(line for line in theirs if ids["Plan the ride"] in line)
+    assert "saddlebag" in saddle_pg and "motivates Strava import" in saddle_pg
+    assert text.endswith(f"Open: /features?feature={feature.id}")
 
 
 async def test_journeys_list_and_analysis(api):
@@ -598,7 +681,19 @@ async def test_journeys_list_and_analysis(api):
         "1 live today."
     )
     assert "Check wind needs, not ours: Weather forecast" in text
+    # The exact name works like the id; anything else lists nothing and says so.
+    assert await server._dispatch("journeys", {"journey": "Plan a climb"}) == text
+    missing = await server._dispatch("journeys", {"journey": "onboarding"})
+    _conventions(missing)
+    assert missing.startswith("0 journeys are named 'onboarding'. Matching is exact")
 
+
+async def test_capability_takes_a_name_as_check_idea_does(api):
+    """check_idea resolves "User-Authentication" to its slug; so does capability."""
+    await _world(*api)
+    by_slug = await server._dispatch("capability", {"slug": "strava-import"})
+    for value in ("Strava import", "Strava-Import", "STRAVA IMPORT"):
+        assert await server._dispatch("capability", {"slug": value}) == by_slug
 
 async def test_ready_features_filters_by_product(api):
     await _world(*api)
@@ -647,18 +742,29 @@ async def test_recheck_by_exact_name_or_id(api):
 
 
 @pytest.mark.parametrize(
-    "name,args",
+    "name,args,hostile",
     [
-        ("feature_why", {"feature": "../../admin/llm"}),
-        ("journeys", {"journey": "x/../../users"}),
-        ("capability", {"slug": "../users"}),
+        ("feature_why", {"feature": "../../admin/llm"}, "../../admin/llm"),
+        ("journeys", {"journey": "x/../../users"}, "x/../../users"),
+        ("capability", {"slug": "../users"}, "../users"),
+        ("capability_supply", {"capability": "../../admin"}, "../../admin"),
     ],
 )
-async def test_inventory_tools_take_ids_only_in_the_shape_of_ids(name, args):
-    """Ids go into request paths, so the same guard as slugs applies — and it
-    fires before any request is made."""
-    with pytest.raises(ValueError):
-        await server._dispatch(name, args)
+async def test_names_never_reach_a_request_path(api, monkeypatch, name, args, hostile):
+    """Ids and slugs go into request paths, so only something shaped like one
+    gets there. A name is matched in memory or travels as a query parameter —
+    a hostile one finds nothing, and walks nowhere."""
+    await _world(*api)
+    paths = []
+    real = server.client._send
+
+    async def spy(method, path, **kwargs):
+        paths.append(path)
+        return await real(method, path, **kwargs)
+
+    monkeypatch.setattr(server.client, "_send", spy)
+    await server.call_tool(name, args)
+    assert paths and not any(hostile in p or ".." in p for p in paths), paths
 
 
 async def test_an_api_refusal_is_rendered_not_raised(api):
@@ -667,8 +773,85 @@ async def test_an_api_refusal_is_rendered_not_raised(api):
     result = await server.call_tool(
         "feature_why", {"feature": "16ce952e-44cd-4317-9176-b3c7de518d9f"}
     )
-    text = result[0].text if isinstance(result, list) else result.content[0].text
-    assert text.startswith("Refused (404)")
+    assert result.isError
+    assert result.content[0].text.splitlines() == [
+        "Refused (404): Feature not found",
+        "Open: /features",
+    ]
+
+
+@pytest.mark.parametrize(
+    "name,args,said,href",
+    [
+        ("propose_binding", {"slot": "db", "tech": "qdrant", "rationale": "x"},
+         "Not a slot id: 'db'. Slot ids are UUIDs; the metis://stacks/{product} "
+         "resource lists a product's slots.", "/stacks"),
+        ("tech_blast_radius", {"tech": "Qdrant"},
+         "Not a technology slug: 'Qdrant'. Slugs are lowercase letters, digits and "
+         "dashes; tech_search lists them.", "/tech"),
+        ("capability", {"slug": "!!!"},
+         "Not a capability slug or name: '!!!'. capability_inventory lists them.",
+         "/capabilities"),
+    ],
+)
+async def test_a_bad_input_is_an_error_that_says_what_to_pass(api, name, args, said, href):
+    result = await server.call_tool(name, args)
+    assert result.isError
+    assert result.content[0].text.splitlines() == [said, f"Open: {href}"]
+
+
+async def test_an_unreachable_backend_says_which_and_the_setting(api, monkeypatch):
+    """Not httpx's "All connection attempts failed": which service, and the
+    setting that points at it."""
+    import httpx
+
+    def refuse(request):
+        raise httpx.ConnectError("All connection attempts failed", request=request)
+
+    client = server.client
+    monkeypatch.setattr(client, "_http", httpx.AsyncClient(transport=httpx.MockTransport(refuse)))
+    result = await server.call_tool("products", {})
+    assert result.isError
+    first, last = result.content[0].text.splitlines()
+    assert first.startswith("Cannot reach the metis API at http://test")
+    assert "MCP_API_BASE_URL" in first
+    assert last == "Open: /products"
+
+    # Auth on: the token request comes first, so a refused secret is named
+    # as that, not as a raw 401 from some URL.
+    def keycloak(request):
+        return httpx.Response(401, json={"error": "unauthorized_client",
+                                         "error_description": "Invalid client credentials"})
+
+    monkeypatch.setattr(client, "_http", httpx.AsyncClient(transport=httpx.MockTransport(keycloak)))
+    monkeypatch.setattr(client, "_settings", Settings(auth_enabled=True))
+    monkeypatch.setattr(client, "_token", None)
+    result = await server.call_tool("products", {})
+    assert result.isError
+    text = result.content[0].text
+    assert text.startswith(
+        "Keycloak refused to sign this server in as metis-mcp "
+        "(401: Invalid client credentials). Check KEYCLOAK_MCP_CLIENT_SECRET"
+    )
+
+
+async def test_an_auth_off_server_against_an_auth_on_api_says_so(api, monkeypatch):
+    import httpx
+
+    def wants_token(request):
+        return httpx.Response(401, json={"detail": "Not authenticated"})
+
+    monkeypatch.setattr(
+        server.client, "_http", httpx.AsyncClient(transport=httpx.MockTransport(wants_token))
+    )
+    result = await server.call_tool("products", {})
+    assert result.isError
+    assert result.content[0].text.splitlines() == [
+        "Refused (401): Not authenticated",
+        "This server sent no token (its AUTH_ENABLED is false), and the API wants one: "
+        "set AUTH_ENABLED=true for this server as well.",
+        "Open: /products",
+    ]
 
 
 @pytest.mark.parametrize("path", ["/api/stacks/metis/recommend", "/api/capabilities/coverage"])

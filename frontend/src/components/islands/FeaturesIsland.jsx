@@ -577,7 +577,7 @@ export default function FeaturesIsland({ canWrite = true }) {
               const productNames = (nodeById.get(n.id)?.product_ids ?? []).map((pid) => productById.get(pid)?.name ?? "").filter(Boolean).join(", ");
               return (
               <div key={n.id} {...pressable((e) => { selectFeature(n.id); if (e.type === "keydown") focusPanelFor.current = n.id; })} aria-pressed={selected === n.id} style={{ display: "grid", gridTemplateColumns: compactRows ? "minmax(0, 1fr) auto" : COLUMNS, columnGap: 12, alignItems: "center", padding: "10px 16px", borderBottom: i < directory.length - 1 ? "1px solid var(--border-hairline)" : "none", cursor: "pointer", fontSize: "var(--text-sm)",
-                // Selected: inset surface (muted text 4.98:1, priority bars still show) and an accent edge.
+                // Selected: inset surface (muted text 4.98:1, empty priority bars 3:1 by EMPTY_BARS) and an accent edge.
                 background: selected === n.id ? "var(--surface-inset)" : undefined, boxShadow: selected === n.id ? "inset 3px 0 0 var(--accent)" : undefined }}>
                 {compactRows ? (
                   // Narrow: the name, then product and capabilities on one line; badges on the right.
@@ -590,7 +590,7 @@ export default function FeaturesIsland({ canWrite = true }) {
                     </span>
                     <span style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
                       <StatusBadge status={n.status} />
-                      {n.priority != null && <PriorityBadge priority={n.priority} />}
+                      {n.priority != null && <PriorityBadge priority={n.priority} style={EMPTY_BARS} />}
                     </span>
                   </>
                 ) : (
@@ -598,7 +598,7 @@ export default function FeaturesIsland({ canWrite = true }) {
                     <span style={{ color: "var(--text-heading)", fontWeight: "var(--weight-medium)" }}>{n.name}</span>
                     <span title={capabilitiesTitle} style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", ...ELLIPSIS }}>{capabilityNames(n.capability_ids, capabilityById)}</span>
                     <span style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", ...ELLIPSIS }}>{productNames || "none"}</span>
-                    <span>{n.priority != null ? <PriorityBadge priority={n.priority} /> : <span style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>none</span>}</span>
+                    <span>{n.priority != null ? <PriorityBadge priority={n.priority} style={EMPTY_BARS} /> : <span style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>none</span>}</span>
                     <span><StatusBadge status={n.status} /></span>
                   </>
                 )}
@@ -746,6 +746,9 @@ const MONO_ROW = { fontFamily: "var(--font-mono)", fontSize: 11 };
 // Feature, what it does, product, priority, status.
 const COLUMNS = "minmax(0, 1fr) 160px 110px 110px 120px";
 const ELLIPSIS = { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
+// PriorityBadge paints its empty bars --ink-2, 1.11:1 on a selected row. The
+// control-edge grey keeps them at 3:1 or more on white and on the selected row.
+const EMPTY_BARS = { "--ink-2": "var(--border-control)" };
 const NOTE = { fontSize: "var(--text-xs)", color: "var(--text-secondary)", lineHeight: "var(--leading-snug)" };
 const LINK = { fontSize: "var(--text-xs)", color: "var(--text-accent)", textDecoration: "none" };
 const SECTION = { borderTop: "1px solid var(--border-hairline)", paddingTop: 12, display: "flex", flexDirection: "column", gap: 6 };

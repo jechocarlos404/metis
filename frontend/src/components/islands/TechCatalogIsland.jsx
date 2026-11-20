@@ -106,6 +106,12 @@ export default function TechCatalogIsland({ initialView = "catalog", initialQuer
   // A product slug (exposure's own `?product=`): its technologies only.
   const [product, setProduct] = React.useState(initialProduct);
   const [productName, setProductName] = React.useState(null);
+  // Every product again. The count in hand is the product's, so it goes in
+  // the same render: kept, a product with none would read "No technologies yet".
+  const everyProduct = () => {
+    setLifecycle(null);
+    setProduct("");
+  };
   const [lifecycle, setLifecycle] = React.useState(null); // {technologies, unknown}
   const [hasStacks, setHasStacks] = React.useState(false);
   const [windowDays, setWindowDays] = React.useState(180);
@@ -168,7 +174,7 @@ export default function TechCatalogIsland({ initialView = "catalog", initialQuer
     (product ? api("/products").then((ps) => ps.find((x) => x.slug === product)?.name) : Promise.resolve(null))
       .then((name) => {
         // A link to a product since removed: every product, as Features does.
-        if (product && !name) return live && setProduct("");
+        if (product && !name) return live && everyProduct();
         return Promise.all([
           api(`/exposure?window_days=${windowDays}${only && `&${only}`}`),
           api(`/tech/lifecycle${only && `?${only}`}`),
@@ -197,7 +203,7 @@ export default function TechCatalogIsland({ initialView = "catalog", initialQuer
   const judged = (techTotal ?? 0) - unknown;
   // Nothing to filter or sort: say so, without the filters and table around
   // it. Judged from an unfiltered answer, never from the filters on screen.
-  const noTech = view === "catalog" ? page != null && total === 0 && !page.filtered : !loading && techTotal === 0 && !product; // a refetch still holds the last answer
+  const noTech = view === "catalog" ? page != null && total === 0 && !page.filtered : techTotal === 0 && !product;
   const noneUsed = view === "exposure" && product && techTotal === 0; // the product records none
   const noTechWords = canWrite
     ? <>No technologies yet. They come in with a product's seed file, imported from <a href="/settings">Settings → Seed files</a>.</>
@@ -210,7 +216,7 @@ export default function TechCatalogIsland({ initialView = "catalog", initialQuer
         title="Technology"
         meta={
           view === "exposure"
-            ? [
+            ? lifecycle == null ? "loading" : [
                 noneUsed ? "no technology recorded" : exposed === 0 && techTotal > 0 && judged === 0 ? "no lifecycle data" : `${exposed} at risk`,
                 unknown > 0 && !(exposed === 0 && judged === 0) && `${unknown} without lifecycle data`,
                 formatAsOf(exposure?.as_of),
@@ -348,7 +354,7 @@ export default function TechCatalogIsland({ initialView = "catalog", initialQuer
           {product && (
             <p style={{ margin: 0, fontSize: "var(--text-sm)", color: "var(--text-body)" }}>
               Only the technologies {productName ?? product} uses; the counts beside each are across every product.{" "}
-              <a href="/tech?view=exposure" onClick={(e) => { e.preventDefault(); setProduct(""); }}>Show every product</a>
+              <a href="/tech?view=exposure" onClick={(e) => { e.preventDefault(); everyProduct(); }}>Show every product</a>
             </p>
           )}
 

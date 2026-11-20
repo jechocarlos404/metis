@@ -135,11 +135,19 @@ async def get_technology(session: AsyncSession, tech_id: uuid.UUID) -> Technolog
     return technology
 
 
+def _slug_taken(held: Technology) -> HTTPException:
+    """The row that holds the slug rides along, as a capability name clash does."""
+    return HTTPException(
+        409,
+        {"message": f"Technology slug `{held.slug}` already exists", "slug": held.slug, "name": held.name},
+    )
+
+
 async def create_technology(session: AsyncSession, data: TechnologyCreate) -> Technology:
     if data.vendor_id is not None:
         await get_vendor(session, data.vendor_id)
-    if await session.scalar(select(Technology).where(Technology.slug == data.slug)):
-        raise HTTPException(409, f"Technology slug `{data.slug}` already exists")
+    if held := await session.scalar(select(Technology).where(Technology.slug == data.slug)):
+        raise _slug_taken(held)
     technology = Technology(**data.model_dump())
     session.add(technology)
     await session.commit()
@@ -157,8 +165,8 @@ async def update_technology(
     slug = fields.get("slug")
     if slug is not None and slug != technology.slug:
         # slug is referenced by every join a human writes; renaming is deliberate.
-        if await session.scalar(select(Technology).where(Technology.slug == slug)):
-            raise HTTPException(409, f"Technology slug `{slug}` already exists")
+        if held := await session.scalar(select(Technology).where(Technology.slug == slug)):
+            raise _slug_taken(held)
     for key, value in fields.items():
         setattr(technology, key, value)
     await session.commit()

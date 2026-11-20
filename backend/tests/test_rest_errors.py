@@ -99,6 +99,43 @@ async def test_a_refusal_with_more_to_say_still_reads_as_a_sentence(client, db):
     assert json.loads(said.body) == {"detail": "Feature not found"}
 
 
+async def test_every_slug_clash_names_the_row_it_clashes_with(client):
+    """A product or a technology slug taken is answered as a capability
+    name is: the sentence, and the row that holds it under `existing`."""
+    assert (await client.post("/api/products", json={"name": "Strava", "external": True})).status_code == 201
+    res = await client.post("/api/products", json={"name": "Strava again", "slug": "strava"})
+    assert (res.status_code, res.json()) == (
+        409, {"detail": "Slug `strava` is already taken", "existing": {"slug": "strava", "name": "Strava"}}
+    )
+    for slug, name in (("redis", "Redis"), ("valkey", "Valkey")):
+        body = {"slug": slug, "name": name, "kind": "service"}
+        assert (await client.post("/api/tech", json=body)).status_code == 201
+    res = await client.post("/api/tech", json={"slug": "redis", "name": "Redis 2", "kind": "service"})
+    assert (res.status_code, res.json()) == (
+        409, {"detail": "Technology slug `redis` already exists", "existing": {"slug": "redis", "name": "Redis"}}
+    )
+    res = await client.patch("/api/tech/valkey", json={"slug": "redis"})
+    assert (res.status_code, res.json()["existing"]) == (409, {"slug": "redis", "name": "Redis"})
+
+
+async def test_every_422_has_the_errors_list(client):
+    """A rule the API checks itself reads like a validation error: the
+    sentence in `detail`, and the same `errors` list one key over."""
+    said = "Name yields an empty slug — give one explicitly"
+    res = await client.post("/api/products", json={"name": ""})
+    assert (res.status_code, res.json()) == (
+        422, {"detail": said, "errors": [{"type": "value_error", "loc": [], "msg": said}]}
+    )
+    for res in (
+        await client.post("/api/capabilities", json={"name": "!!!"}),
+        await client.get("/api/tech?kind=spaceship"),
+        await client.get("/api/features/not-a-uuid"),
+    ):
+        body = res.json()
+        assert res.status_code == 422 and isinstance(body["detail"], str), body
+        assert body["errors"] and body["errors"][0]["msg"], body
+
+
 def _idea(size: int) -> bytes:
     return json.dumps({"features": [{"name": "x", "capabilities": ["a" * size]}]}).encode()
 

@@ -287,12 +287,25 @@ async def stack_redundancy(slug: str, session: AsyncSession = Depends(get_db)):
         }
         for r in findings
     ]
+    # Redundancy compares what the product records using; with nothing
+    # recorded, an empty answer is no finding, and says so.
+    unresolved = []
+    if not await stack_service.list_product_technologies(session, product.id):
+        unresolved = [
+            Unresolved(
+                subject=slug,
+                reason="no technology is recorded as used by this product, so nothing can "
+                "answer one of its capabilities twice. A seed file's technologies, or the "
+                "API, record one.",
+            )
+        ]
     return envelope(
         Question.stack_redundancy,
         SubjectKind.product,
         slug,
         rows,
         f"/stacks?product={slug}",
+        unresolved,
     )
 
 

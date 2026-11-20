@@ -51,18 +51,23 @@ async def unique_slug(
     don't use this: a second one by the same name is refused instead."""
     base = valid_slug(name, requested)
 
-    async def taken(candidate: str) -> bool:
-        stmt = select(model.id).where(model.slug == candidate)
+    async def holder(candidate: str):
+        stmt = select(model).where(model.slug == candidate)
         if exclude_id is not None:
             stmt = stmt.where(model.id != exclude_id)
-        return await session.scalar(stmt) is not None
+        return await session.scalar(stmt)
 
-    if not await taken(base):
+    held = await holder(base)
+    if held is None:
         return base
     if requested is not None:
-        raise HTTPException(409, f"Slug `{base}` is already taken")
+        # The row that holds it rides along, as a capability name clash does.
+        raise HTTPException(
+            409,
+            {"message": f"Slug `{base}` is already taken", "slug": held.slug, "name": held.name},
+        )
     suffix = 2
-    while await taken(f"{base}-{suffix}"):
+    while await holder(f"{base}-{suffix}") is not None:
         suffix += 1
     return f"{base}-{suffix}"
 

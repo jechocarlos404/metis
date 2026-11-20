@@ -191,9 +191,9 @@ class Unseeder {
     if (this.unreadable.length > 0) {
       const what = this.unreadable.join(" or ");
       if (!this.dryRun) {
-        throw new Error(
+        throw Object.assign(new Error(
           `This account can't read ${what}, so it can't tell which capabilities and technologies are safe to delete. Nothing was removed.`,
-        );
+        ), { status: 403 });
       }
       this.notes.push(
         `This account can't read ${what}${this.unreadable.includes("guesses") ? " (guesses need an editor or admin)" : ""}. ` +
@@ -688,7 +688,7 @@ export async function POST({ request, locals }) {
     });
   } catch (error) {
     return new Response(JSON.stringify({ detail: String(error.message || error) }), {
-      status: 500,
+      status: error.status ?? 500,
       headers: { "content-type": "application/json" },
     });
   }

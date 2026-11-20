@@ -615,7 +615,7 @@ describe("removing a seeded product names every row it deletes or keeps", () => 
     use(probe());
     metis.guessesStatus = 403;
     const { status, body } = await unseed(probeSeed(), { dryRun: false });
-    assert.equal(status, 500);
+    assert.equal(status, 403);
     assert.match(body.detail, /can't read guesses, so it can't tell which capabilities and technologies are safe to delete/);
     assert.deepEqual(metis.writes, []);
   });

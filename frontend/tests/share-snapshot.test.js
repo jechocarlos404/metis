@@ -53,6 +53,13 @@ describe("Share snapshot", () => {
     assert.doesNotMatch(does, /planned|stable/);
   });
 
+  test("nothing named: the groups, then what's missing to score it", () => {
+    const blank = { ...score, buildable: [], missing: [], not_described: ["Record an activity", "Upload files"], report: null, missing_capabilities: [], closest_products: [] };
+    const out = text(snapshotHtml({ product: strava, goals: [], features, capabilities, score: blank }));
+    assert.match(out, /Strava: 2 features 2 not described: nobody has named the capabilities it needs yet Nothing to score yet: none of its features names a capability\./);
+    assert.doesNotMatch(out, /We have|Closest/);
+  });
+
   test("our own product is not scored", () => {
     const out = text(snapshotHtml({ product: ours, goals: [], features, capabilities, score: { ...score, product: ref("climb", "Can I Climb") } }));
     assert.doesNotMatch(out, /We have|buildable|we could build|Closest/);

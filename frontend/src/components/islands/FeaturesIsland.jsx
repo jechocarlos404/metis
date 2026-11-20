@@ -389,13 +389,15 @@ export default function FeaturesIsland({ canWrite = true }) {
   };
 
   const noFeatures = loaded && layout.nodes.length === 0;
+  // Search narrows the directory only; the header says by how much.
+  const searching = results != null && shownTab === "directory";
   const cutTargetOptions = visibleLayout.nodes.filter((n) => !n.external);
 
   return (
     <>
       <PageHeader
         title="Features"
-        meta={`${count(visibleLayout.nodes.length, "feature")}${plannedShown ? ` · ${visibleReady.length} ready to start` : ""}${activeProduct ? ` · filtered from ${layout.nodes.length}` : ""}`}
+        meta={`${searching ? `${directory.length} of ` : ""}${count(visibleLayout.nodes.length, "feature")}${searching ? " match" : ""}${plannedShown ? ` · ${visibleReady.length} ready to start` : ""}${activeProduct ? ` · filtered from ${layout.nodes.length}` : ""}`}
         actions={
           <>
             {products.length > 0 && (

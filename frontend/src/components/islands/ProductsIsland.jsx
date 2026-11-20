@@ -341,7 +341,7 @@ export default function ProductsIsland({ canWrite = true }) {
                 bundles={bundles} canWrite={canWrite} onAddBundle={addBundle} onRemoveBundle={removeBundle} />
             )}
 
-            {shownTab === "goals" && <ProductGoals product={product} products={products} goals={goals} features={features} capabilities={capabilities}
+            {shownTab === "goals" && <ProductGoals product={product} goals={goals} features={features} capabilities={capabilities}
               motivations={motivations} canWrite={canWrite} />}
 
             {shownTab === "plan" && (showPlan ? (

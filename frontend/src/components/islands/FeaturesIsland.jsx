@@ -7,7 +7,7 @@ import { CapabilityPicker } from "../shared/CapabilityPicker.jsx";
 import { Guesses } from "../shared/Guesses.jsx";
 import { api, ApiError } from "../../lib/api.js";
 import { FeatureGraphView } from "../graph/FeatureGraphView.jsx";
-import { capabilityHubs, goalHubs, goalRoot } from "../graph/graph-data.js";
+import { capabilityHubs, goalHubs } from "../graph/graph-data.js";
 import { pressable } from "../../lib/pressable.js";
 import { useParamRestore, writeParams } from "../../lib/url-state.js";
 
@@ -38,7 +38,6 @@ export default function FeaturesIsland({ canWrite = true }) {
   const [motivations, setMotivations] = React.useState(null); // null loading | false failed | rows
   const [productFilter, setProductFilter] = React.useState(""); // "" | "unattributed" | product id
   const [group, setGroup] = React.useState("order"); // graph: order | capability | goal
-  const goalParent = React.useMemo(() => new Map((goals || []).map((g) => [g.id, g.parent_goal_id])), [goals]);
 
   // ?feature=<id>&tab=graph|plan&product=<id>&group=capability|goal: linkable, and Back restores the previous view.
   useParamRestore("feature", (v) => { if (v) setSelected(v); setPanelOpen(Boolean(v)); });
@@ -214,14 +213,14 @@ export default function FeaturesIsland({ canWrite = true }) {
     };
   }, [activeProduct, layout, matchesProduct]);
   // Group by capability or goal: hubs for the graph's one product. Goals use
-  // the same "own goal" rule as the panel's Why (same top goal as the product).
+  // the same rule as the panel's Why: a goal is the product's own when the
+  // goals API says it belongs to it (product_id).
   const hubs = React.useMemo(() => {
     if (tab !== "graph" || group === "order") return null;
     if (group === "capability") return capabilityHubs(visibleLayout.nodes, capabilityById);
     if (!goals || !motivations) return null;
-    const goalId = productById.get(activeProduct)?.goal_id;
-    return goalHubs(visibleLayout.nodes, motivations, goals, goalId ? goalRoot(goalParent, goalId) : null);
-  }, [tab, group, visibleLayout, capabilityById, goals, motivations, productById, activeProduct, goalParent]);
+    return goalHubs(visibleLayout.nodes, motivations, goals, productById.has(activeProduct) ? activeProduct : null);
+  }, [tab, group, visibleLayout, capabilityById, goals, motivations, productById, activeProduct]);
   const visibleReady = activeProduct ? ready.filter((f) => matchesProduct(f.id)) : ready;
   // Planning is on demand: ready to start, build order and the smallest
   // version say nothing true until one of our features is planned. The header

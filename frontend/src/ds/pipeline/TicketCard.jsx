@@ -27,7 +27,7 @@ export function TicketCard({ id, title, description, status = "pending", budget 
       {files.length > 0 && (
         <div style={{ display: "flex", flexWrap: "wrap", gap: "4px", marginTop: "10px" }}>
           {files.map((f) => (
-            <span key={f} style={{ fontFamily: "var(--font-mono)", fontSize: "10px", color: "var(--text-secondary)", background: "var(--surface-inset)", padding: "2px 6px", borderRadius: "var(--radius-xs)" }}>{f}</span>
+            <span key={f} style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-2xs)", color: "var(--text-secondary)", background: "var(--surface-inset)", padding: "2px 6px", borderRadius: "var(--radius-xs)" }}>{f}</span>
           ))}
         </div>
       )}

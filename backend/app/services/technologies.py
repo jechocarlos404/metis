@@ -622,9 +622,15 @@ async def delete_encounter(session: AsyncSession, encounter_id: uuid.UUID) -> No
 
 async def dependents(session: AsyncSession, tech_id: uuid.UUID) -> list[ProductBreak]:
     """Question 2: which products break if we drop this. required is a break,
-    optional is an inconvenience, and off_stack means the dependency was never
-    declared in the first place."""
+    optional is an inconvenience, and off_stack means the product's stack
+    never declared the dependency. A product with no stack has nothing to be
+    off: its row has no slot and says only that the product uses it."""
     await get_technology(session, tech_id)
+    stacked = set(
+        await session.scalars(
+            select(TechStack.product_id).where(TechStack.product_id.is_not(None))
+        )
+    )
     stmt = (
         select(Product, StackSlot)
         .select_from(ProductTechnology)
@@ -640,7 +646,7 @@ async def dependents(session: AsyncSession, tech_id: uuid.UUID) -> list[ProductB
             layer=slot.layer if slot else None,
             role=slot.role if slot else None,
             required=bool(slot.required) if slot else False,
-            off_stack=slot is None,
+            off_stack=slot is None and product.id in stacked,
         )
         for product, slot in await session.execute(stmt)
     ]
@@ -714,6 +720,29 @@ async def exposure(
         )
     findings.sort(key=lambda e: (-e.required_slots, -e.products, e.slug))
     return findings
+
+
+async def lifecycle(session: AsyncSession) -> dict:
+    """How many technologies exposure can judge at all. One with no end-of-life
+    date on any version and no maintainer count on its vendor can never show
+    up as at risk, so an empty exposure list says nothing about it."""
+    dated = select(TechVersion.tech_id).where(TechVersion.eol_on.is_not(None))
+    counted = select(Vendor.id).where(Vendor.bus_factor.is_not(None))
+    total, unknown = (
+        await session.execute(
+            select(
+                select(func.count()).select_from(Technology).scalar_subquery(),
+                select(func.count())
+                .select_from(Technology)
+                .where(
+                    Technology.id.not_in(dated),
+                    or_(Technology.vendor_id.is_(None), Technology.vendor_id.not_in(counted)),
+                )
+                .scalar_subquery(),
+            )
+        )
+    ).one()
+    return {"technologies": total, "unknown": unknown}
 
 
 async def _blocking_constraints(

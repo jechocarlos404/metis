@@ -3,12 +3,11 @@ import { PageHeader } from "../shell/PageHeader.jsx";
 import { Badge, Button, Card, Checkbox, Dialog, Icon, Input, Select, StatusBadge, Tabs, Toast, DeleteConfirm } from "../../ds";
 import { api } from "../../lib/api.js";
 import { count, freshness, productOptions, statusLabel } from "../../lib/words.js";
-import { openChatWithPrompt } from "../../lib/chat-launch.js";
 import { useParamRestore, writeParams } from "../../lib/url-state.js";
 import { exportSeedFile } from "../shared/SeedFiles.jsx";
 import { WhatItDoes } from "../products/WhatItDoes.jsx";
 import { ProductGoals } from "../products/ProductGoals.jsx";
-import { ProductPlan, SIZE_HINT } from "../products/ProductPlan.jsx";
+import { ProductPlan, SIZE_HINT, hasPlan } from "../products/ProductPlan.jsx";
 import { downloadSnapshot } from "../products/shareSnapshot.js";
 
 const TABS = ["does", "goals", "plan"];
@@ -49,17 +48,27 @@ export default function ProductsIsland({ canWrite = true }) {
   useParamRestore("tab", (v) => setTab(TABS.includes(v) ? v : "does"));
   const selectProduct = (id) => { setProductId(id); setTab("does"); writeParams({ product: id, tab: null }, { push: true }); };
   const changeTab = (t) => { setTab(t); writeParams({ tab: t === "does" ? null : t }, { push: true }); };
-  // The plan only applies to products we build.
-  const shownTab = tab === "plan" && product?.external ? "does" : tab;
   const prd = decompositions[0];
   const strategy = strategies[0];
+  // Planning is on demand, and only for products we build: the tab shows once
+  // a plan exists, or to a writer while some of its features aren't done.
+  // Until this product's plan and features load, nobody knows yet.
+  const planKnown = detailId === productId && features != null;
+  const showPlan = planKnown && product != null && !product.external && (
+    hasPlan(product, { prd, epics, tickets, strategy }) || (canWrite && features.some((f) => f.status !== "done")));
+  const shownTab = tab !== "plan" || showPlan ? tab : planKnown || product?.external ? "does" : "plan";
 
   const loadProducts = React.useCallback(async () => {
     const [list, goalList] = await Promise.all([api("/products"), api("/goals")]);
     setProducts(list);
     setGoals(goalList);
-    setProductId((current) => current && list.some((p) => p.id === current) ? current : list[0]?.id ?? null);
   }, []);
+
+  // With nothing chosen, or a product that's gone (deleted, then Back), open
+  // on the picker's first product.
+  React.useEffect(() => {
+    if (products && !products.some((p) => p.id === productId)) setProductId(productOptions(products)[0]?.value ?? null);
+  }, [products, productId]);
 
   const loadDetail = React.useCallback(async (id) => {
     if (!id) return;
@@ -98,7 +107,8 @@ export default function ProductsIsland({ canWrite = true }) {
     currentId.current = productId;
     setFeatures(null); // don't show the previous product's features under this one's name
     setScore(null);
-    loadDetail(productId).catch((e) => setToast({ tone: "danger", title: "Load failed", detail: String(e.message) }));
+    // A product that's gone fails to load; by then the page has moved on, so stay quiet.
+    loadDetail(productId).catch((e) => currentId.current === productId && setToast({ tone: "danger", title: "Load failed", detail: String(e.message) }));
   }, [productId, loadDetail]);
 
   const showError = (title) => (e) => setToast({ tone: "danger", title, detail: String(e.message) });
@@ -247,19 +257,17 @@ export default function ProductsIsland({ canWrite = true }) {
 
   const closeTicket = () => { setTicketDialog(null); setConfirmingTicketDelete(false); };
 
-  const decomposePrompt = () =>
-    `Decompose the Spec "${product.name}" (${product.display_id}, product id ${productId}) into a PRD: epics must pin capabilities, stories must pin features, tickets sized S/M/L for one Claude session each. Use the current capability map and feature graph.`;
-
-  const refreshPrdPrompt = () =>
-    `Refresh the draft PRD for "${product.name}" (${product.display_id}, product id ${productId}). Keep approved pins where still valid; update epics/stories/tickets to match the current taxonomy.`;
-
-  const strategyPrompt = () =>
-    `Create a delivery strategy for "${product.name}" (${product.display_id}, product id ${productId}): a phased Gantt plan aligned with the current PRD and feature graph.${strategy ? " Replace the existing strategy with a new version." : ""}`;
-
+  // What the owner reads in their own Chat thread, so plain words. The display id
+  // stays: the agent resolves a product by it, and a bare name can match two.
   const planActions = {
-    decompose: () => openChatWithPrompt(decomposePrompt()),
-    refreshPrd: () => openChatWithPrompt(refreshPrdPrompt()),
-    strategy: () => openChatWithPrompt(strategyPrompt()),
+    prompts: {
+      decompose: () =>
+        `Plan the work left on "${product.name}" (${product.display_id}): break it down into a plan document and tickets, each ticket small enough for one coding session. Use the current capabilities and features.`,
+      refreshPrd: () =>
+        `Update the draft plan document for "${product.name}" (${product.display_id}) to match the current capabilities and features. Keep what still fits.`,
+      strategy: () =>
+        `Make a delivery strategy for "${product.name}" (${product.display_id}): a timeline in phases that follows its plan document and the order its features need.${strategy ? " It replaces the current one with a new version." : ""}`,
+    },
     approveSpec: approveProduct,
     approvePrd,
     newTicket: () => setTicketDialog({ mode: "new", title: "", description: "", budget: "M", files: "" }),
@@ -274,25 +282,22 @@ export default function ProductsIsland({ canWrite = true }) {
       <PageHeader
         title="Products"
         meta={products?.length ? count(products.length, "product") : undefined}
-        actions={
-          <>
-            {products?.length > 1 && (
-              <Select aria-label="Product" value={productId ?? ""} onChange={(e) => selectProduct(e.target.value)} style={{ width: 240 }}
-                options={productOptions(products)} />
-            )}
-            {canWrite && products?.length > 0 && (
-              <Button size="sm" variant="accent" style={{ gap: 6 }} onClick={openNewProduct}>
-                <Icon name="plus" size={13} />New product
-              </Button>
-            )}
-          </>
-        }
+        actions={canWrite && products?.length > 0 && (
+          <Button size="sm" variant="accent" style={{ gap: 6 }} onClick={openNewProduct}>
+            <Icon name="plus" size={13} />New product
+          </Button>
+        )}
       />
       <div style={{ flex: 1, overflowY: "auto", padding: 24 }}>
         {products == null ? (
           <div role="status" style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>Loading products…</div>
         ) : product ? (
           <div style={{ maxWidth: 860, display: "flex", flexDirection: "column", gap: 16 }}>
+            {/* In the page, not the header: the header doesn't wrap, and at phone width the picker shrank to an empty box. */}
+            {products.length > 1 && (
+              <Select aria-label="Product" value={productId ?? ""} onChange={(e) => selectProduct(e.target.value)} style={{ width: 320, maxWidth: "100%" }}
+                options={productOptions(products)} />
+            )}
             <Card>
               <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                 <h2 style={{ margin: 0, fontSize: "var(--text-lg)", fontWeight: "var(--weight-semibold)", color: "var(--text-heading)" }}>{product.name}</h2>
@@ -325,7 +330,7 @@ export default function ProductsIsland({ canWrite = true }) {
               tabs={[
                 { value: "does", label: "What it does", count: features?.length },
                 { value: "goals", label: "Goals" },
-                ...(product.external ? [] : [{ value: "plan", label: "Plan" }]),
+                ...(showPlan ? [{ value: "plan", label: "Plan" }] : []),
               ]}
               value={shownTab}
               onChange={changeTab}
@@ -336,10 +341,10 @@ export default function ProductsIsland({ canWrite = true }) {
                 bundles={bundles} canWrite={canWrite} onAddBundle={addBundle} onRemoveBundle={removeBundle} />
             )}
 
-            {shownTab === "goals" && <ProductGoals product={product} goals={goals} features={features} capabilities={capabilities}
+            {shownTab === "goals" && <ProductGoals product={product} products={products} goals={goals} features={features} capabilities={capabilities}
               motivations={motivations} canWrite={canWrite} />}
 
-            {shownTab === "plan" && (detailId === productId ? (
+            {shownTab === "plan" && (showPlan ? (
               <ProductPlan product={product} prd={prd} epics={epics} tickets={tickets} strategy={strategy}
                 capabilities={capabilities} features={features} canWrite={canWrite} actions={planActions} />
             ) : (
@@ -405,8 +410,8 @@ export default function ProductsIsland({ canWrite = true }) {
         footer={
           <>
             {productDialog?.mode === "edit" && (
-              <DeleteConfirm armed={confirmingDelete} onArm={() => setConfirmingDelete(true)} onCancel={() => setConfirmingDelete(false)} onConfirm={deleteProduct} disabled={saving}
-                label="Delete" confirmLabel={"Delete product"} style={{ marginRight: "auto" }} />
+              <DeleteConfirm armed={confirmingDelete} onArm={() => setConfirmingDelete(true)} onCancel={() => setConfirmingDelete(false)} onConfirm={deleteProduct}
+                disabled={saving || features == null} label="Delete" confirmLabel={"Delete product"} style={{ marginRight: "auto" }} />
             )}
             <Button size="sm" variant="secondary" onClick={() => setProductDialog(null)}>Cancel</Button>
             <Button size="sm" variant="accent" disabled={saving || !productDialog?.name?.trim()} onClick={saveProduct}>
@@ -415,11 +420,12 @@ export default function ProductsIsland({ canWrite = true }) {
           </>
         }
       >
+        {productDialog?.mode === "edit" && confirmingDelete && <DeleteWhat product={product} features={features ?? []} />}
         {productDialog && (
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             <Input label="Name" value={productDialog.name} onChange={(e) => setProductDialog({ ...productDialog, name: e.target.value })} placeholder="PM tracker export" />
             <Input label="Summary" value={productDialog.summary} onChange={(e) => setProductDialog({ ...productDialog, summary: e.target.value })} />
-            <Select label="Product goal" value={productDialog.goalId} onChange={(e) => setProductDialog({ ...productDialog, goalId: e.target.value })}
+            <Select label="Goal" value={productDialog.goalId} onChange={(e) => setProductDialog({ ...productDialog, goalId: e.target.value })}
               options={[{ value: "", label: "None" },
                 ...goals.map((g) => ({ value: g.id, label: `${g.display_id} ${g.title}` }))]} />
             <Checkbox label="External: someone else's product, known from the outside. Its features never count as ours."
@@ -434,6 +440,26 @@ export default function ProductsIsland({ canWrite = true }) {
         </div>
       )}
     </>
+  );
+}
+
+// What deleting a product takes with it. Its features go too: left without a
+// product they would count as ours.
+function DeleteWhat({ product, features }) {
+  return (
+    <div role="note" style={{ marginBottom: 14, padding: 12, border: "1px solid var(--border-default)", borderRadius: "var(--radius-sm)", display: "flex", flexDirection: "column", gap: 8, fontSize: "var(--text-sm)", color: "var(--text-body)" }}>
+      <div>
+        {features.length > 0
+          ? <>Deleting {product.name} also deletes its {count(features.length, "feature")}:</>
+          : <>{product.name} has no features.</>}
+      </div>
+      {features.length > 0 && (
+        <ul style={{ margin: 0, paddingLeft: 18, maxHeight: 160, overflowY: "auto", display: "flex", flexDirection: "column", gap: 2 }}>
+          {features.map((f) => <li key={f.id}>{f.name}</li>)}
+        </ul>
+      )}
+      <div style={{ color: "var(--text-secondary)" }}>Anything kept only for it, such as its plan or technology stack, goes too. Capabilities and goals stay.</div>
+    </div>
   );
 }
 

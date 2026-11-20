@@ -5,7 +5,7 @@ import { slugify } from "../../lib/words.js";
  * Pick capabilities by exact name — recognition, not recall, and never a fuzzy
  * auto-match (PRODUCT.md). Type to filter the inventory; Enter or click picks
  * the highlighted existing name. With allowNew, Enter on text that matches
- * nothing adds it verbatim as a name nobody has yet (it will read "missing").
+ * nothing adds it verbatim as a name nobody has yet (it will read "not built yet").
  *
  *   options:  [{ id, name, slug, hint? }]   the inventory to pick from
  *   value:    [name, …]                     picked names, in order

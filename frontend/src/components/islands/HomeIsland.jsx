@@ -72,7 +72,7 @@ export default function HomeIsland({ canWrite = false, isAdmin = false }) {
         title="Home"
         meta={`${count(ourProducts, "product")} of ours · ${count(products.length - ourProducts, "external product")} · ${count(ours.length, "capability", "capabilities")} of ours`}
       />
-      <div style={{ flex: 1, overflowY: "auto", padding: 20, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))", gap: 20, alignItems: "start" }}>
+      <div style={{ flex: 1, overflowY: "auto", padding: 20, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(340px, 100%), 1fr))", gap: 20, alignItems: "start", alignContent: "start" }}>
         <IdeaChecker inventory={inventory} canWrite={canWrite} />
         <div style={{ display: "flex", flexDirection: "column", gap: 20, minWidth: 0 }}>
           <Portfolio products={products} />
@@ -257,9 +257,10 @@ function Portfolio({ products }) {
               <a href={`/products?product=${p.id}`} style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap", padding: "9px 16px", textDecoration: "none" }}>
                 <span style={{ fontSize: "var(--text-sm)", fontWeight: "var(--weight-medium)", color: "var(--text-heading)" }}>{p.name}</span>
                 {p.external && <Badge>external</Badge>}
-                <span title="When its seed file was last imported" style={QUIET}>{freshness(p.seeded_at)}</span>
-                <span style={{ flex: 1 }} />
-                {p.external && <ScoreLine score={scores[p.id]} />}
+                {/* Only a real import date says something; "never imported" on every row was noise. */}
+                {p.seeded_at && <span title="When its seed file was last imported" style={QUIET}>{freshness(p.seeded_at)}</span>}
+                {/* Right-aligned, and on a line of its own when the row is too narrow, so scores line up. */}
+                {p.external && <span style={{ marginLeft: "auto" }}><ScoreLine score={scores[p.id]} /></span>}
               </a>
             </li>
           ))}

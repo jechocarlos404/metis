@@ -6,7 +6,7 @@ export function Select({ label, options, children, style, ...rest }) {
     <label style={{ display: "flex", flexDirection: "column", gap: "6px", fontFamily: "var(--font-body)", ...style }}>
       {label && <span style={{ fontSize: "var(--text-xs)", fontWeight: "var(--weight-medium)", color: "var(--text-heading)" }}>{label}</span>}
       <div style={{ position: "relative", display: "flex" }}>
-        <select {...rest}
+        <select {...rest} data-ds-field
           onFocus={(e) => { setFocus(true); rest.onFocus && rest.onFocus(e); }}
           onBlur={(e) => { setFocus(false); rest.onBlur && rest.onBlur(e); }}
           style={{

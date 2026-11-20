@@ -275,7 +275,8 @@ function GoalPanel({ goals, edges, capsByGoal, selectedId, onSelect }) {
 
       {caps.length > 0 && (
         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          <div style={head}>{count(caps.length, "capability", "capabilities")} linked</div>
+          {/* "directly" as on the Goals list, which also counts an org goal's product goals. */}
+          <div style={head}>{count(caps.length, "capability", "capabilities")} linked{children.length > 0 ? " directly" : ""}</div>
           <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>
             {caps.map((c, i) => (
               <React.Fragment key={c.id}>

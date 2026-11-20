@@ -63,11 +63,15 @@ export default function GoalsIsland({ canWrite = true }) {
   // A product goal needs an org goal as its parent whenever one exists.
   const needsParent = draft.goal_type === "product" && orgs.length > 0 && !draft.parent_goal_id;
 
-  // An org goal across its product goals: distinct capabilities linked to any of them.
+  // An org goal's own links, the count the Network panel shows, then the
+  // distinct capabilities across it and its product goals when that is more.
   const orgCapabilityCount = (org) => {
+    const direct = (capsByGoal[org.id] ?? []).length;
+    const children = productGoals.filter((g) => g.parent_goal_id === org.id);
+    if (children.length === 0) return `${count(direct, "capability", "capabilities")} linked`;
     const ids = new Set((capsByGoal[org.id] ?? []).map((c) => c.id));
-    for (const g of productGoals) if (g.parent_goal_id === org.id) for (const c of capsByGoal[g.id] ?? []) ids.add(c.id);
-    return ids.size;
+    for (const g of children) for (const c of capsByGoal[g.id] ?? []) ids.add(c.id);
+    return `${count(direct, "capability", "capabilities")} linked directly${ids.size > direct ? ` · ${ids.size} with its product goals` : ""}`;
   };
 
   const openNew = () => {
@@ -239,8 +243,8 @@ export default function GoalsIsland({ canWrite = true }) {
                     {org.description && <div style={{ fontSize: "var(--text-sm)", color: "var(--aegean-4)", marginTop: 4 }}>{org.description}</div>}
                     {org.success_criteria && <div style={{ fontSize: "var(--text-xs)", color: "var(--aegean-4)", marginTop: 2 }}>Success: {org.success_criteria}</div>}
                   </div>
-                  <span style={{ fontSize: "var(--text-xs)", color: "var(--aegean-4)", whiteSpace: "nowrap" }}>
-                    {count(orgCapabilityCount(org), "capability", "capabilities")} linked
+                  <span style={{ fontSize: "var(--text-xs)", color: "var(--aegean-4)" }}>
+                    {orgCapabilityCount(org)}
                   </span>
                   <StatusBadge status={org.status} />
                   {canWrite && (

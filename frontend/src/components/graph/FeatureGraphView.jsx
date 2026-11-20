@@ -114,8 +114,10 @@ export function FeatureGraphView({ layout, hubs, selectedId, onSelect, impactIds
   }, [fitKey]);
 
   // With a cut overlay active, tier coloring owns the canvas — selection no
-  // longer dims non-neighbors (hover still focuses transiently).
-  const wantFocus = hoveredId ?? (cutStates != null ? null : selectedId) ?? null;
+  // longer dims non-neighbors (hover still focuses transiently). Same when
+  // grouped by hubs: every feature has a hub line, so selection would fade
+  // the whole graph; the selected ring is enough there.
+  const wantFocus = hoveredId ?? (cutStates != null || hubs ? null : selectedId) ?? null;
   // Fade the rest only when the focused card has relationships to show;
   // fading everything around a loner just makes the graph hard to read.
   const focusId = wantFocus != null && adjacency.get(wantFocus)?.size ? wantFocus : null;

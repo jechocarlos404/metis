@@ -33,11 +33,11 @@ export default function FeaturesIsland({ canWrite = true }) {
   const [capabilities, setCapabilities] = React.useState([]);
   const [edgeList, setEdgeList] = React.useState([]);
   const [products, setProducts] = React.useState([]);
-  const [goals, setGoals] = React.useState(null);
+  const [goals, setGoals] = React.useState(null); // null loading | false failed | rows
   const [motivations, setMotivations] = React.useState(null); // null loading | false failed | rows
   const [productFilter, setProductFilter] = React.useState(""); // "" | "unattributed" | product id
   const [group, setGroup] = React.useState("order"); // graph: order | capability | goal
-  const goalParent = React.useMemo(() => new Map((goals ?? []).map((g) => [g.id, g.parent_goal_id])), [goals]);
+  const goalParent = React.useMemo(() => new Map((goals || []).map((g) => [g.id, g.parent_goal_id])), [goals]);
 
   // ?feature=<id>&tab=graph|plan&product=<id>&group=capability|goal: linkable, and Back restores the previous view.
   useParamRestore("feature", (v) => v && setSelected(v));
@@ -76,7 +76,7 @@ export default function FeaturesIsland({ canWrite = true }) {
       api("/graph/ready"),
       api("/graph/cycles"),
     ]);
-    api("/goals").then(setGoals).catch(() => setGoals([]));
+    api("/goals").then(setGoals).catch(() => setGoals(false));
     api("/motivations").then(setMotivations).catch(() => setMotivations(false));
     setLayout(data);
     setCapabilities(caps);
@@ -426,11 +426,11 @@ export default function FeaturesIsland({ canWrite = true }) {
           <div style={{ flex: 1, position: "relative", margin: 20, background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", overflow: "hidden", minWidth: 0 }}>
             {group !== "order" && !hubs ? (
               <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>
-                {motivations === false ? "Could not load the goals behind these features." : "Loading goals…"}
+                {goals === false || motivations === false ? "Could not load the goals behind these features." : "Loading goals…"}
               </div>
             ) : (
-              // A fresh graph per grouping: pins and the fit from another grouping would not fit this one.
-              <FeatureGraphView key={group} layout={visibleLayout} hubs={hubs} fitKey={activeProduct} selectedId={selected} onSelect={selectFeature} impactIds={impactIds} cutStates={cutStates} />
+              // A fresh graph per grouping and product: pins and hubs from another one would not fit this one.
+              <FeatureGraphView key={`${group}:${activeProduct}`}layout={visibleLayout} hubs={hubs} fitKey={activeProduct} selectedId={selected} onSelect={selectFeature} impactIds={impactIds} cutStates={cutStates} />
             )}
             <div role="group" aria-label="Group by" style={{ position: "absolute", top: 10, left: "50%", transform: "translateX(-50%)", display: "flex", alignItems: "center", gap: 8, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-secondary)" }}>
               Group by

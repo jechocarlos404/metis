@@ -232,6 +232,7 @@ const CELL_H = NODE_H + 16;
 const UNIT_W = CELL_W / 2; // blocks sit on a grid of half cells
 const UNIT_H = CELL_H / 2;
 const ASPECT = 1.6; // about the graph's frame
+const GROW_COST = 10; // weight of growing the layout against straying from a block's spot
 
 /** Hubs for Group by capability. `features` are /graph/layout nodes. */
 export function capabilityHubs(features, capabilityById) {
@@ -252,7 +253,8 @@ export function capabilityHubs(features, capabilityById) {
     hubs: [...hubs.values()],
     byFeature,
     empty: { id: "cap:none", name: "No capability yet", tone: "empty" },
-    legend: { shapes: [["capability", "Capability"]], line: "Uses this capability" },
+    quietBroad: true,
+    legend: { shapes: [["capability", "Capability"], ["empty", "No capability yet"]], line: "Uses this capability" },
   };
 }
 
@@ -302,9 +304,11 @@ export function goalHubs(features, motivations, goals, ownRoot) {
  * Lays features out around hubs. Each feature sits at the mean of its hubs,
  * the most-used hubs in the middle. Two exceptions keep it
  * readable:
- *  - a hub used by more than half the features (User Authentication, say)
- *    still gets its lines, but only places features that have no other hub;
- *    otherwise everything would pile into the middle.
+ *  - with `quietBroad` (capabilities), a hub used by more than half the
+ *    features (User Authentication, say) still gets its lines, but only
+ *    places features that have no other hub; otherwise everything would pile
+ *    into the middle. Goals skip this: a product has only a few, so most of
+ *    them are "broad" and the rule would leave the specific ones empty.
  *  - a hub only one feature uses sits right beside that feature.
  * Features placed by the same hubs form one compact block, and blocks are
  * packed so none overlap: the engine starts from a layout that is already
@@ -313,7 +317,7 @@ export function goalHubs(features, motivations, goals, ownRoot) {
  *
  * features: buildFeatureGraph() nodes. spec: capabilityHubs() or goalHubs().
  */
-export function buildHubGraph(features, { hubs, byFeature, empty }) {
+export function buildHubGraph(features, { hubs, byFeature, empty, quietBroad = false }) {
   const n = features.length;
   const hubById = new Map(hubs.map((h) => [h.id, h]));
   const hubsOf = new Map();
@@ -324,7 +328,7 @@ export function buildHubGraph(features, { hubs, byFeature, empty }) {
   if (empty) hubById.set(empty.id, empty);
   const usage = new Map();
   for (const ids of hubsOf.values()) for (const id of ids) usage.set(id, (usage.get(id) ?? 0) + 1);
-  const broad = new Set([...usage].filter(([, k]) => n >= 4 && k > n / 2).map(([id]) => id));
+  const broad = new Set(quietBroad ? [...usage].filter(([, k]) => n >= 4 && k > n / 2).map(([id]) => id) : []);
 
   // Which hubs place each feature (mean) and which sit beside it (side).
   const meanOf = new Map();
@@ -378,11 +382,16 @@ export function buildHubGraph(features, { hubs, byFeature, empty }) {
     return true;
   };
   const hubPos = new Map();
+  // Extent of what is placed so far, in grid units, and how big it would
+  // look in a wide frame: growing it costs as much as straying from `want`.
+  let box = null;
+  const extent = (bx) => Math.max((bx.x1 - bx.x0) * UNIT_W / Math.sqrt(ASPECT), (bx.y1 - bx.y0) * UNIT_H * Math.sqrt(ASPECT));
   const put = (b, want) => {
     const fw = b.cols * 2;
     const fh = b.rows * 2 + (b.hub ? 2 : 0);
     const cx = Math.round(want.x / UNIT_W - fw / 2);
     const cy = Math.round(want.y / UNIT_H - fh / 2);
+    const now = box ? extent(box) : 0;
     let best = null;
     for (let r = 4; !best; r *= 2) {
       for (let gx = cx - r; gx <= cx + r; gx++) {
@@ -390,12 +399,18 @@ export function buildHubGraph(features, { hubs, byFeature, empty }) {
           // Distance in screen terms: sideways is cheaper, the frame is wide.
           const dx = (gx - cx) * UNIT_W / Math.sqrt(ASPECT);
           const dy = (gy - cy) * UNIT_H * Math.sqrt(ASPECT);
-          const cost = dx * dx + dy * dy;
+          const grown = box
+            ? extent({ x0: Math.min(box.x0, gx), y0: Math.min(box.y0, gy), x1: Math.max(box.x1, gx + fw), y1: Math.max(box.y1, gy + fh) }) - now
+            : 0;
+          const cost = dx * dx + dy * dy + GROW_COST * grown * grown;
           if (best && cost >= best.cost) continue;
           if (free(gx, gy, fw, fh)) best = { gx, gy, cost };
         }
       }
     }
+    box = box
+      ? { x0: Math.min(box.x0, best.gx), y0: Math.min(box.y0, best.gy), x1: Math.max(box.x1, best.gx + fw), y1: Math.max(box.y1, best.gy + fh) }
+      : { x0: best.gx, y0: best.gy, x1: best.gx + fw, y1: best.gy + fh };
     for (let x = best.gx; x < best.gx + fw; x++) for (let y = best.gy; y < best.gy + fh; y++) taken.add(`${x},${y}`);
     b.x = (best.gx + fw / 2) * UNIT_W;
     b.y = (best.gy + fh / 2) * UNIT_H;

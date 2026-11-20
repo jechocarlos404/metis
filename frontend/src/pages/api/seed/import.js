@@ -882,6 +882,18 @@ class Loader {
     }
   }
 
+  // Last, once everything loaded: record that each product in the file was
+  // just refreshed. The server stamps the time.
+  async markSeeded() {
+    if (this.dryRun) return;
+    for (const productId of new Set(this.productIds.values())) {
+      const { status, body } = await this.api.post(`/api/products/${productId}/seeded`);
+      if (status !== 200) {
+        this.notes.push(`could not record when product ${productId} was seeded: ${status} ${JSON.stringify(body)}`);
+      }
+    }
+  }
+
   async run() {
     await this.loadGoals();
     await this.loadCapabilities();
@@ -892,6 +904,7 @@ class Loader {
     await this.loadEdges();
     await this.loadTechnologies();
     await this.loadProducts();
+    await this.markSeeded();
     // Names are identity, so a re-described repo with reworded features adds
     // near-duplicates. Say so before anyone presses Import.
     const products = this.count("products");

@@ -20,6 +20,18 @@ export function count(n, one, many = `${one}s`) {
   return `${n} ${n === 1 ? one : many}`;
 }
 
+// How fresh a product's map is, from its seeded_at (the last seed file import).
+// freshness(null) → "never imported from a seed file"; else "updated today",
+// "updated 3 days ago", "updated 5 months ago", "updated 2 years ago".
+export function freshness(seededAt, now = Date.now()) {
+  if (!seededAt) return "never imported from a seed file";
+  const days = Math.max(0, Math.floor((now - new Date(seededAt).getTime()) / 86400000));
+  if (days === 0) return "updated today";
+  if (days < 30) return `updated ${count(days, "day")} ago`;
+  if (days < 365) return `updated ${count(Math.floor(days / 30), "month")} ago`;
+  return `updated ${count(Math.floor(days / 365), "year")} ago`;
+}
+
 // One product order for every picker: ours first, then external, each A–Z.
 export const productOptions = (products) =>
   [...products]

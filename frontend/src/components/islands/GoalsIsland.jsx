@@ -4,7 +4,7 @@ import { Button, Dialog, Icon, IconButton, Input, PriorityBadge, Select, StatusB
 import { api } from "../../lib/api.js";
 import { readParam, useParamRestore, writeParams } from "../../lib/url-state.js";
 import { GoalNetworkView } from "../graph/GoalNetworkView.jsx";
-import { PRIORITY_HINT, count, statusLabel } from "../../lib/words.js";
+import { NEED, PRIORITY_HINT, count, needKey, statusLabel } from "../../lib/words.js";
 
 const EMPTY_DRAFT = { goal_type: "product", parent_goal_id: "", title: "", description: "", success_criteria: "", priority: "3", status: "pending" };
 
@@ -28,13 +28,14 @@ export default function GoalsIsland({ canWrite = true }) {
       api("/goals"),
       api("/products"),
       api("/motivations"),
-      api("/capabilities"),
+      api("/capabilities/inventory"),
     ]);
-    // Per goal, the capabilities it motivates, linked by slug.
-    const slugs = new Map(capabilities.map((c) => [c.id, c.slug]));
+    // Per goal, the capabilities it motivates, linked by slug, with whether we have each.
+    const byId = new Map(capabilities.map((c) => [c.id, c]));
     const caps = {};
     for (const m of motivations) {
-      (caps[m.goal_id] ??= []).push({ id: m.capability_id, name: m.capability_name, slug: slugs.get(m.capability_id) });
+      const c = byId.get(m.capability_id);
+      (caps[m.goal_id] ??= []).push({ id: m.capability_id, name: m.capability_name, slug: c?.slug, need: needKey(c) });
     }
     setCapsByGoal(caps);
     setGoals(goalList);
@@ -402,7 +403,11 @@ function GoalList({ goals, productById, capsByGoal, highlightStyle, editButton, 
                     <>
                       <span>{count(caps.length, "capability", "capabilities")}:</span>
                       {caps.map((c, i) => (
-                        <a key={c.id} href={`/capabilities/${c.slug}`}>{c.name}{i < caps.length - 1 ? "," : ""}</a>
+                        <a key={c.id} href={`/capabilities/${c.slug}`}>
+                          {c.name}
+                          {c.need !== "ours" && <span title={NEED[c.need].hint} style={{ color: "var(--text-secondary)" }}> ({NEED[c.need].label})</span>}
+                          {i < caps.length - 1 ? "," : ""}
+                        </a>
                       ))}
                     </>
                   )}

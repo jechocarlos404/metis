@@ -7,6 +7,9 @@ import { FIT, FLAG, count, productOptions } from "../../lib/words.js";
 import { Term } from "../shared/Term.jsx";
 
 const STACK_IS ="A stack is the set of technologies a product runs on, grouped by layer into slots.";
+// Nothing in the app records a stack (an open question for the owner), and a
+// seed file never carries one: only POST /api/stacks by an editor or admin.
+const NOT_RECORDED = <>Stacks can't be recorded in the app yet, and seed files never carry one: only <span title="POST /api/stacks or /api/stacks/instantiate, as an editor or admin">a call to metis's API</span> adds one.</>;
 
 /**
  * `/stacks` — a product's stack as layers of slots, and the resolver.
@@ -222,10 +225,10 @@ export default function StacksIsland({ initialSlot = "", canWrite = false }) {
             {!productStack ? (
               <div style={{ ...CARD, padding: "var(--space-4)", color: "var(--text-secondary)", fontSize: "var(--text-sm)" }}>
                 {products.length === 0
-                  ? <>No products yet, so no stacks. {STACK_IS} <a href="/products">Add a product</a> first.</>
+                  ? <>No products yet, so no stacks. {STACK_IS} {NOT_RECORDED}</>
                   : stacks.length === 0
-                    ? <>No product has a stack yet. {STACK_IS} Until one is recorded, <a href="/tech">Technology</a> shows which technologies each product uses.</>
-                    : <>{products.find((p) => p.id === productId)?.name ?? "This product"} has no stack yet. {STACK_IS}</>}
+                    ? <>No product has a stack yet. {STACK_IS} {NOT_RECORDED} Meanwhile, <a href="/tech">Technology</a> shows which technologies each product uses.</>
+                    : <>{products.find((p) => p.id === productId)?.name ?? "This product"} has no stack yet. {STACK_IS} {NOT_RECORDED}</>}
               </div>
             ) : (
               byLayer.map(([layer, slots]) => (

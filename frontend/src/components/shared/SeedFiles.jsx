@@ -1,6 +1,7 @@
 import React from "react";
-import { Button } from "../../ds";
+import { Button, Select } from "../../ds";
 import { api } from "../../lib/api.js";
+import { productOptions } from "../../lib/words.js";
 
 // Seed files: how a repo gets into metis (a coding agent describes it as a
 // metis-seed/v1 JSON file), and how a project moves between instances.
@@ -184,6 +185,55 @@ export function SeedImportPanel({ onImported }) {
       </div>
       {error && <div role="alert" style={{ fontSize: "var(--text-xs)", color: "var(--danger-fg)" }}>{error}</div>}
       {result && <ResultBox title={result.dryRun ? "Check passed. This is what the import would do:" : "Imported"} result={result} />}
+      <SeedExport />
+    </div>
+  );
+}
+
+/** Export sits beside import: download one product as a seed file, to keep a
+ * copy or import it into another metis. Hidden until there is a product. */
+function SeedExport() {
+  const [products, setProducts] = React.useState([]);
+  const [productId, setProductId] = React.useState("");
+  const [busy, setBusy] = React.useState(false);
+  const [status, setStatus] = React.useState(null); // { tone, text }
+
+  React.useEffect(() => {
+    api("/products").then(setProducts).catch(() => setProducts([]));
+  }, []);
+  if (products.length === 0) return null;
+
+  const download = async () => {
+    setBusy(true);
+    setStatus(null);
+    try {
+      const filename = await exportSeedFile(productId);
+      setStatus({ tone: "ok", text: `Downloaded ${filename}.` });
+    } catch (e) {
+      setStatus({ tone: "danger", text: `The export failed: ${e.message}` });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8, borderTop: "1px solid var(--border-hairline)", paddingTop: 12 }}>
+      <div style={{ fontSize: "var(--text-sm)", color: "var(--text-body)" }}>
+        Or download a product as a seed file, to keep a copy or import it into another metis.
+      </div>
+      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+        <Select aria-label="Product to download" value={productId} onChange={(e) => { setProductId(e.target.value); setStatus(null); }}
+          style={{ flex: "1 1 200px", maxWidth: 320 }}
+          options={[{ value: "", label: "Choose a product" }, ...productOptions(products)]} />
+        <Button size="sm" variant="secondary" disabled={busy || !productId} onClick={download}>
+          {busy ? "Downloading…" : "Download seed file"}
+        </Button>
+      </div>
+      {status && (
+        <div role={status.tone === "danger" ? "alert" : "status"} style={{ fontSize: "var(--text-xs)", color: status.tone === "danger" ? "var(--danger-fg)" : "var(--text-secondary)" }}>
+          {status.text}
+        </div>
+      )}
     </div>
   );
 }

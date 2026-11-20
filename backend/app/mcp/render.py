@@ -71,7 +71,9 @@ def capability_supply(envelope: dict) -> str:
                 r["tech"],
                 r["fit"],
                 r["stance"] or "(no stance)",
-                f"ops {r['cost']['ops_burden']}" if r["cost"].get("ops_burden") else "ops not recorded",
+                f"ops {r['cost']['ops_burden']}"
+                if r["cost"].get("ops_burden") is not None  # 0..3; 0 is a burden of none
+                else "ops not recorded",
                 "← bound in " + ", ".join(r["bound_in"]) if r["bound_in"] else "",
             ]
             for r in rows

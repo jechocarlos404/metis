@@ -977,6 +977,9 @@ async def test_an_empty_answer_says_what_would_fill_it(api):
     offer = {"tech": "networkx", "fit": "native", "stance": None, "cost": {}, "bound_in": []}
     supply = render.capability_supply({**envelope_of("graph"), "answer": [offer]})
     assert "ops not recorded" in supply and "ops ?" not in supply
+    offer["cost"] = {"ops_burden": 0}
+    supply = render.capability_supply({**envelope_of("graph"), "answer": [offer]})
+    assert "ops 0" in supply and "ops not recorded" not in supply
 
     # tech_search reads the whole catalog's size only when a filter matched nothing.
     await _world(*api)

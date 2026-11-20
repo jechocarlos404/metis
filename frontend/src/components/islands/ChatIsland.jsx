@@ -2,6 +2,7 @@ import React from "react";
 import { PageHeader } from "../shell/PageHeader.jsx";
 import { VizBlock } from "../chat/VizBlock.jsx";
 import { ProposalDraft } from "../chat/ProposalDraft.jsx";
+import { changeLabel } from "../chat/proposal-words.js";
 import { Badge, Button, Icon, IconButton, Select, DeleteConfirm } from "../../ds";
 import { AGENT, PROPOSAL_STATUS, count } from "../../lib/words.js";
 import { Term } from "../shared/Term.jsx";
@@ -147,7 +148,7 @@ function Proposals({ message, canWrite, onDecided }) {
         {list.map((p) => (
           <li key={p.id} style={{ fontSize: "var(--text-xs)", color: "var(--text-body)" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-              <span title={p.tool_name} style={{ fontWeight: "var(--weight-medium)", color: "var(--text-heading)" }}>{stepLabel(p.tool_name)}</span>
+              <span title={p.tool_name} style={{ fontWeight: "var(--weight-medium)", color: "var(--text-heading)" }}>{changeLabel(p.tool_name)}</span>
               <Badge tone={PROPOSAL_TONE[p.status] ?? "neutral"}><Term dict={PROPOSAL_STATUS} value={p.status} /></Badge>
               <span style={{ flex: 1 }} />
               {canWrite && agentDone && p === next && (
@@ -161,7 +162,7 @@ function Proposals({ message, canWrite, onDecided }) {
               )}
             </div>
             <div style={{ margin: "6px 0 2px", padding: 8, background: "var(--surface-inset)", borderRadius: "var(--radius-sm)" }}>
-              <ProposalDraft tool={p.tool_name} args={p.arguments} />
+              <ProposalDraft tool={p.tool_name} args={p.arguments} named={p.named_arguments} />
             </div>
             {p.result && <div style={{ color: p.status === "failed" ? "var(--danger-fg)" : "var(--text-body)" }}>→ {p.result}</div>}
           </li>

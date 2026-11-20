@@ -220,10 +220,90 @@ async def product_coverage(ctx: ToolContext, features: list[dict]) -> ToolResult
     return ToolResult(report.model_dump_json())
 
 
+#: The product page's verdict words (frontend/src/lib/words.js VERDICT), in
+#: its group order. test_agents pins them to words.js.
+VERDICT = {
+    "buildable": ("buildable", "every capability it needs is ours"),
+    "partly": ("partly known", "everything named so far is ours, but the list is incomplete"),
+    "missing": ("missing", "needs a capability we don't have"),
+    "not_described": ("not described", "nobody has named the capabilities it needs yet"),
+}
+
+
+def _count(n: int, one: str, many: str | None = None) -> str:
+    return f"{n} {one if n == 1 else (many or one + 's')}"
+
+
+def score_text(score) -> str:
+    """A product's score as the product page says it: the four groups, the
+    capabilities we don't have ranked as the API ranks them, and the closest
+    of our products. Text, not JSON, so the model quotes the page's words
+    and numbers instead of paraphrasing or recomputing them."""
+    name = score.product.name
+    groups = {key: getattr(score, key) for key in VERDICT}
+    lines = [
+        f"{name}: {_count(score.total_features, 'feature')} — "
+        + ", ".join(f"{len(groups[k])} {label}" for k, (label, _) in VERDICT.items()) + "."
+    ]
+    report = score.report
+    if report is None:
+        lines.append(f"No capability links known for {name} yet.")
+        return "\n".join(lines)
+    lines.append(
+        f"We have {report.existing} of the {report.needed} capabilities needed · "
+        f"{report.mature} proven (beta or stable)"
+    )
+    if not score.buildable and score.partly:
+        lines.append(
+            "Nothing counts as buildable yet: its features still have capabilities nobody has "
+            "named. Partly known is the useful number here."
+        )
+    lacking = {
+        f.name: [n.match.name if n.match else n.name for n in f.capabilities if not (n.match and n.match.ours)]
+        for f in report.features
+    }
+    named = {f.name: [n.match.name if n.match else n.name for n in f.capabilities] for f in report.features}
+    for key, (label, hint) in VERDICT.items():
+        names = groups[key]
+        if not names:
+            continue
+        lines += ["", f"{len(names)} {label} — {hint}."]
+        if key == "missing" and score.missing_incomplete:
+            some = f"All {len(names)}" if len(score.missing_incomplete) == len(names) else (
+                f"{len(score.missing_incomplete)} of these")
+            lines.append(f"{some} also have capabilities nobody has named yet, so adding what's named may not be enough.")
+        for n in names:
+            if key == "missing":
+                lines.append(f"- {n} (we don't have: {', '.join(lacking.get(n, []))})")
+            elif key in ("buildable", "partly"):
+                lines.append(f"- {n} (named: {', '.join(named.get(n, []))})")
+            else:
+                lines.append(f"- {n}")
+    gaps = score.missing_capabilities
+    if gaps:
+        lines += ["", f"{_count(len(gaps), 'capability', 'capabilities')} we don't have, most useful first:"]
+        for i, g in enumerate(gaps, 1):
+            covers = f"; adding it covers everything named for {g.only_gap} of them" if g.only_gap else ""
+            where = f"also in {', '.join(p.name for p in g.elsewhere)}" if g.elsewhere else "in no other product"
+            lines.append(f"{i}. {g.name} · needed by {_count(g.features, 'feature')}{covers} · {where}")
+    if score.closest_products:
+        lines += ["", "Closest of our products:"]
+        lines += [
+            f"- {c.product.name} has {c.capabilities} of the {report.needed} capabilities {name}'s features name"
+            for c in score.closest_products
+        ]
+    lines += [
+        "",
+        "\"Adding it covers everything named\" is not \"buildable\": a feature whose capability list "
+        "is incomplete never counts as buildable, so at best it becomes partly known.",
+    ]
+    return "\n".join(lines)
+
+
 async def existing_product_coverage(ctx: ToolContext, product: str) -> ToolResult:
     product_obj = await _resolve(ctx.session, Product, product, "PRD", Product.name)
     score = await capability_service.product_coverage(ctx.session, product_obj.id)
-    return ToolResult(score.model_dump_json())
+    return ToolResult(score_text(score))
 
 
 async def list_capabilities(ctx: ToolContext) -> ToolResult:
@@ -675,7 +755,7 @@ _MVP_CUT_TOOL = _tool(
 SHARED_TOOLS = [
     _tool("capability_inventory", "Everything we can already do: every capability with its maturity, the products whose features realize it, and its feature count — most-reused first. Start here for 'what could we build next'.", {}, [], capability_inventory),
     _tool("product_coverage", "How much of a product idea already exists. features = [{name, capabilities: [capability names]}]. Names match exactly (by slug) — read capability_inventory first and reuse its names; unresolved needs come back with near-name candidates, never a guessed match.", {"features": {"type": "array", "items": {"type": "object", "properties": {"name": _STR, "capabilities": {"type": "array", "items": _STR, "minItems": 1}}, "required": ["name", "capabilities"]}, "minItems": 1}}, ["features"], product_coverage),
-    _tool("existing_product_coverage", "How much of an existing product (typically an external one) we could build from what we already have: its features in four groups that sum to the total — buildable (every capability known and ours), partly (list declared incomplete, every named one ours; never counted as buildable — the score is a lower bound), missing (names one we don't have) and not_described (names none) — then missing_capabilities, ranked by only_gap (features it alone would cover, as named) then by features needing it, and closest_products: our products that already have the most of what it names.", {"product": _STR}, ["product"], existing_product_coverage),
+    _tool("existing_product_coverage", "How much of an existing product (typically an external one) we could build from what we already have, as the product page says it: its features in four groups that sum to the total — buildable, partly known, missing, not described — then the capabilities we don't have, most useful first, and the closest of our products. Quote its groups, counts, rankings and words; never recompute or re-rank them.", {"product": _STR}, ["product"], existing_product_coverage),
     _tool("list_goals", "List all org and product goals with IDs, criteria, priority, status.", {}, [], list_goals),
     _tool("list_products", "List all products (Specs) with IDs, names, status, version.", {}, [], list_products),
     _tool("list_capabilities", "List the capability map (slow plane): IDs, names, parent, maturity, evidence anchors.", {}, [], list_capabilities),

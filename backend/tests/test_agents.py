@@ -245,6 +245,8 @@ def test_step_summaries_read_like_a_log():
     assert summarize_result('[{"a": 1}, {"a": 2}]') == "2 results"
     assert summarize_result('{"error": "no such product"}') == "error: no such product"
     assert summarize_result('{"id": "x", "name": "Route Planning"}') == "Route Planning"
+    # An approved link's outcome shows on the card: no UUID in it.
+    assert summarize_result('{"edge_id": "bc55de64-3d5a-4934-b404-b0945c6e2492", "kind": "BLOCKS"}') == "kind: BLOCKS"
     assert summarize_result('{"product": "Strava", "total_features": 25, "buildable": [], "report": {}}') == (
         "product: Strava · total features: 25 · buildable: 0"
     )
@@ -284,3 +286,192 @@ async def test_chat_status_says_whether_any_provider_answers():
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as http:
             body = (await http.get("/api/chat/status")).json()
         assert body == {"available": available}
+
+
+# ---- what the owner reads: plain words, names, the product page's numbers ----
+
+UUID_RE = r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+
+
+def chat_client(db):
+    from httpx import ASGITransport, AsyncClient
+
+    from app.config import Settings, get_settings
+    from app.db import get_db
+    from app.main import create_app
+
+    app = create_app()
+
+    async def _session():
+        async with db() as session:
+            yield session
+
+    app.dependency_overrides[get_db] = _session
+    app.dependency_overrides[get_settings] = lambda: Settings(auth_enabled=False)
+    return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
+
+
+@pytest.mark.asyncio
+async def test_the_approval_card_names_the_goal_not_its_uuid(db):
+    """A5: the agent passed UUIDs; the card shows the goal's code and title and
+    the parent's name. A capability an earlier change in the reply creates is
+    shown by the name given, and `arguments` stay what approval will run."""
+    import re
+
+    from app.models import Goal
+    from app.schemas.capability import CapabilityCreate
+    from app.services import capabilities as capability_service
+
+    async with db() as session:
+        goal = Goal(goal_type="product", title="Plan café stops on every ride")
+        session.add(goal)
+        await session.commit()
+        goal_id, code = str(goal.id), f"PG-{goal.seq:02d}"
+        crawl = await capability_service.create_capability(session, CapabilityCreate(name="Cafe Crawl Planning"))
+        crawl_id = str(crawl.id)
+    provider = FakeProvider([
+        [ToolCallEvent(id="tc-1", name="create_capability",
+                       arguments={"name": "Ride Café Stops", "parent": crawl_id, "maturity": "planned"}),
+         StreamDone("tool_use")],
+        call("motivate_capability", goal=goal_id, capability="Ride Café Stops"),
+        text("Proposed 2 changes."),
+    ])
+    _, messages = await turn(db, FakeRegistry({"feature_manager": provider}), "add a capability and link it to a goal")
+    path = f"/api/chat/threads/{messages[0].thread_id}/messages"
+    async with chat_client(db) as http:
+        rows = (await http.get(path)).json()
+    create, motivate = rows[-1]["proposals"]
+    assert create["named_arguments"] == {"name": "Ride Café Stops", "parent": "Cafe Crawl Planning", "maturity": "planned"}
+    assert motivate["named_arguments"] == {"goal": f"{code} Plan café stops on every ride", "capability": "Ride Café Stops"}
+    assert motivate["arguments"]["goal"] == goal_id  # what approval runs is untouched
+    assert not re.search(UUID_RE, str([p["named_arguments"] for p in rows[-1]["proposals"]]))
+
+    # Approved, the card still names the same things.
+    await proposals.approve_all(db, GRAPH, messages[-1].id)
+    async with chat_client(db) as http:
+        rows = (await http.get(path)).json()
+    assert [p["status"] for p in rows[-1]["proposals"]] == ["applied", "applied"]
+    assert rows[-1]["proposals"][1]["named_arguments"]["goal"] == f"{code} Plan café stops on every ride"
+
+
+@pytest.mark.asyncio
+async def test_named_arguments_cover_features_products_tickets_and_prd_pins(db):
+    from app.agents.proposals import named_arguments
+    from app.schemas.capability import CapabilityCreate
+    from app.schemas.feature import FeatureCreate
+    from app.services import capabilities as capability_service
+    from app.services import features as feature_service
+
+    async with db() as session:
+        maps = await capability_service.create_capability(session, CapabilityCreate(name="Interactive Maps"))
+        product = Product(slug="atlas", name="Atlas", summary="s")
+        session.add(product)
+        await session.commit()
+        plan = await feature_service.create_feature(session, FeatureCreate(name="Plan a route", capability_ids=[maps.id]))
+        show = await feature_service.create_feature(session, FeatureCreate(name="Show the map", capability_ids=[maps.id]))
+        ticket = Ticket(product_id=product.id, title="Wire the map")
+        session.add(ticket)
+        await session.commit()
+
+        link = {"src": str(plan.id), "dst": str(show.id), "kind": "DEPENDS_ON"}
+        assert await named_arguments(session, "link_features", link, set()) == {
+            "src": "Plan a route", "dst": "Show the map", "kind": "DEPENDS_ON",
+        }
+        new = {"name": "Zoom", "product": str(product.id), "capabilities": [str(maps.id), "interactive-maps", "Not Yet"]}
+        named = await named_arguments(session, "create_feature", new, set())
+        assert named["product"] == "Atlas"
+        assert named["capabilities"] == ["Interactive Maps", "Interactive Maps", "Not Yet"]
+        named = await named_arguments(session, "update_ticket", {"ticket": f"TKT-{ticket.seq}", "status": "done"}, set())
+        assert named["ticket"] == f"TKT-{ticket.seq:04d} Wire the map"
+        epic = {"title": "E", "capability": str(maps.id), "stories": [{"title": "S", "feature": str(plan.id)}]}
+        prd = {"product": str(product.id), "document": {"epics": [epic]}}
+        named = await named_arguments(session, "create_prd_draft", prd, set())
+        assert named["product"] == "Atlas"
+        assert named["document"]["epics"][0]["capability"] == "Interactive Maps"
+        assert named["document"]["epics"][0]["stories"][0]["feature"] == "Plan a route"
+        assert epic["capability"] == str(maps.id)  # the arguments themselves are not touched
+
+
+@pytest.mark.asyncio
+async def test_existing_product_coverage_says_what_the_product_page_says(db):
+    """A6: the model gets the page's four groups, ranking and closest products
+    in the page's words, as text to quote, not JSON to do its own sums over."""
+    import re
+
+    from app.agents.tools import ToolContext, execute_tool
+    from app.models import CapabilityMaturity, WorkStatus
+    from app.schemas.capability import CapabilityCreate
+    from app.schemas.feature import FeatureCreate
+    from app.services import capabilities as capability_service
+    from app.services import features as feature_service
+
+    async with db() as session:
+        async def cap(name, maturity=CapabilityMaturity.planned):
+            return await capability_service.create_capability(session, CapabilityCreate(name=name, maturity=maturity))
+
+        maps, geo = await cap("Maps", CapabilityMaturity.ga), await cap("Geocoding", CapabilityMaturity.beta)
+        route, heat = await cap("Route Planning"), await cap("Heatmaps")
+        atlas = Product(slug="atlas", name="Atlas", summary="s")
+        rival = Product(slug="rival", name="Rival", summary="s", external=True)
+        session.add_all([atlas, rival])
+        await session.commit()
+
+        async def feature(name, product, caps, unknown=False, status=WorkStatus.pending):
+            await feature_service.create_feature(session, FeatureCreate(
+                name=name, product_id=product.id, capability_ids=[c.id for c in caps],
+                unknown_capabilities=unknown, status=status,
+            ))
+
+        await feature("Show the map", atlas, [maps, geo], status=WorkStatus.done)
+        await feature("Find a place", rival, [maps, geo])
+        await feature("Switch layers", rival, [maps], unknown=True)
+        await feature("Plan a route", rival, [maps, route], unknown=True)
+        await feature("Plan offline", rival, [route, heat], unknown=True)
+        await feature("Live beacon", rival, [], unknown=True)
+
+        ctx = ToolContext(session=session, graph=GRAPH)
+        out = (await execute_tool("feature_manager", "existing_product_coverage", {"product": "Rival"}, ctx)).result
+
+    lines = out.splitlines()
+    assert lines[0] == "Rival: 5 features — 1 buildable, 1 partly known, 2 missing, 1 not described."
+    assert summarize_result(out) == lines[0]  # what "What it did" shows
+    assert lines[1] == "We have 2 of the 4 capabilities needed · 2 proven (beta or stable)"
+    for expected in [
+        "1 partly known — everything named so far is ours, but the list is incomplete.",
+        "- Switch layers (named: Maps)",
+        "All 2 also have capabilities nobody has named yet, so adding what's named may not be enough.",
+        "- Plan offline (we don't have: Route Planning, Heatmaps)",
+        "1 not described — nobody has named the capabilities it needs yet.",
+        "2 capabilities we don't have, most useful first:",
+        "1. Route Planning · needed by 2 features; adding it covers everything named for 1 of them · in no other product",
+        "2. Heatmaps · needed by 1 feature · in no other product",
+        "- Atlas has 2 of the 4 capabilities Rival's features name",
+    ]:
+        assert expected in lines, expected
+    assert "is not \"buildable\"" in out
+    assert not re.search(UUID_RE, out)
+    assert "not_described" not in out and "only_gap" not in out and "ga" not in out.split()
+
+
+def test_chat_verdict_words_are_the_product_pages():
+    """The coverage text and the prompts use words.js's verdict words."""
+    import pathlib
+    import re
+
+    from app.agents.prompts import AGENT_PROMPTS, PROPOSALS_NOTE, SYNTHESIS_PROMPT
+    from app.agents.tools import VERDICT
+
+    words = pathlib.Path(__file__).resolve().parents[2] / "frontend/src/lib/words.js"
+    if not words.exists():
+        pytest.skip("frontend not checked out")
+    source = words.read_text()
+    for key, (label, hint) in VERDICT.items():
+        js_key = "unknown" if key == "not_described" else key
+        found = re.search(rf'^\s*{js_key}: \{{ label: "([^"]+)", tone: "[^"]+", hint: "([^"]+)" \}}', source, re.M)
+        assert found and found.groups() == (label, hint), key
+        for prompt in AGENT_PROMPTS.values():
+            assert label in prompt
+    assert 'ga: "stable"' in source
+    for prompt in AGENT_PROMPTS.values():
+        assert "ga -> stable" in prompt and "Never put tool names" in prompt
+    assert "never the tool name" in PROPOSALS_NOTE and "no tool names" in SYNTHESIS_PROMPT

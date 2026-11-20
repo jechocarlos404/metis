@@ -49,7 +49,8 @@ def summarize_result(output: str) -> str:
     try:
         data = json.loads(output)
     except (TypeError, ValueError):
-        return (output or "")[:200]
+        # Text (a coverage answer): its first line is the headline.
+        return (output or "").split("\n", 1)[0][:200]
     if isinstance(data, dict) and "error" in data:
         return f"error: {data['error']}"[:200]
     if isinstance(data, list):
@@ -61,6 +62,8 @@ def summarize_result(output: str) -> str:
             return f"{label}: {extra}"[:200] if extra else str(label)[:200]
         parts = []
         for key, value in data.items():
+            if key == "id" or key.endswith("_id"):
+                continue  # a UUID: nobody reads it, and the card names things instead
             label = key.replace("_", " ")
             if isinstance(value, list):
                 parts.append(f"{label}: {len(value)}")

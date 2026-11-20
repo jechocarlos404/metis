@@ -1,8 +1,13 @@
 import React from "react";
+import { EDGE } from "../../lib/words.js";
+import { Term } from "../shared/Term.jsx";
+import { fieldRows } from "./proposal-words.js";
 
 // A proposed change shown as the draft it is, so it can be reviewed before
 // anyone approves it: PRDs as epics → stories → tickets, tickets and
-// strategies in full. Anything else falls back to its fields.
+// strategies in full. Anything else falls back to its fields. `named` is the
+// same arguments with each reference (goal, capability, feature, product,
+// ticket) replaced by its name; what the agent passed stays in `title`.
 
 const LABEL = { fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: "var(--tracking-caps)", textTransform: "uppercase", color: "var(--text-secondary)" };
 const BODY = { fontSize: "var(--text-xs)", color: "var(--text-body)", lineHeight: "var(--leading-body)", whiteSpace: "pre-wrap" };
@@ -90,26 +95,39 @@ function StrategyDraft({ args }) {
   );
 }
 
-function Fields({ args }) {
+function Fields({ args, named }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-      {Object.entries(args ?? {}).map(([k, v]) => (
-        <Field key={k} label={k.replace(/_/g, " ")}>{typeof v === "object" && !Array.isArray(v) ? JSON.stringify(v) : v}</Field>
+      {fieldRows(args, named).filter((r) => r.text !== "").map((r) => (
+        <div key={r.key}>
+          <div style={LABEL}>{r.label}</div>
+          <div style={BODY}><span title={r.raw ?? undefined}>{r.text}</span></div>
+        </div>
       ))}
     </div>
   );
 }
 
-export function ProposalDraft({ tool, args }) {
-  if (tool === "create_prd_draft") return <PrdDraft args={args} />;
-  if (tool === "create_delivery_strategy") return <StrategyDraft args={args} />;
+function LinkDraft({ named }) {
+  return (
+    <div style={BODY}>
+      <strong>{named.src}</strong> <Term dict={EDGE} value={named.kind ?? "DEPENDS_ON"} /> <strong>{named.dst}</strong>
+    </div>
+  );
+}
+
+export function ProposalDraft({ tool, args, named }) {
+  const shown = named ?? args;
+  if (tool === "create_prd_draft") return <PrdDraft args={shown} />;
+  if (tool === "create_delivery_strategy") return <StrategyDraft args={shown} />;
+  if (tool === "link_features") return <LinkDraft named={shown} />;
   if (tool === "create_ticket") {
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-        <div style={BODY}>New ticket for <strong>{args.product}</strong></div>
-        <TicketDraft t={args} open />
+        <div style={BODY}>New ticket for <strong>{shown.product}</strong>{shown.epic_id ? ` · epic: ${shown.epic_id}` : ""}{shown.story_id ? ` · story: ${shown.story_id}` : ""}</div>
+        <TicketDraft t={shown} open />
       </div>
     );
   }
-  return <Fields args={args} />;
+  return <Fields args={args} named={named} />;
 }

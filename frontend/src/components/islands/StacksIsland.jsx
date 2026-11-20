@@ -174,7 +174,8 @@ export default function StacksIsland({ initialSlot = "", canWrite = false }) {
           </span>
         }
         actions={
-          products.length > 0 && (
+          // Until some product has a stack, picking one only leads to "no stack yet".
+          stacks.length > 0 && products.length > 0 && (
             <Select aria-label="Product" value={productId} options={productOptions(products)}
               onChange={(e) => { setProductId(e.target.value); setActiveSlot(null); }} />
           )
@@ -222,7 +223,9 @@ export default function StacksIsland({ initialSlot = "", canWrite = false }) {
               <div style={{ ...CARD, padding: "var(--space-4)", color: "var(--text-secondary)", fontSize: "var(--text-sm)" }}>
                 {products.length === 0
                   ? <>No products yet, so no stacks. {STACK_IS} <a href="/products">Add a product</a> first.</>
-                  : <>{products.find((p) => p.id === productId)?.name ?? "This product"} has no stack yet. {STACK_IS}</>}
+                  : stacks.length === 0
+                    ? <>No product has a stack yet. {STACK_IS} Until one is recorded, <a href="/tech">Technology</a> shows which technologies each product uses.</>
+                    : <>{products.find((p) => p.id === productId)?.name ?? "This product"} has no stack yet. {STACK_IS}</>}
               </div>
             ) : (
               byLayer.map(([layer, slots]) => (
@@ -283,7 +286,7 @@ export default function StacksIsland({ initialSlot = "", canWrite = false }) {
                     return (
                       <div key={o.tech_id} style={{ border: `1px solid ${bound ? "var(--accent)" : "var(--border-hairline)"}`, background: bound ? "var(--accent-wash)" : "var(--surface-card)", borderRadius: "var(--radius-sm)", padding: "10px 12px", display: "flex", flexDirection: "column", gap: 6 }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                          <a href={`/tech/${o.slug}`} style={{ flex: 1, fontFamily: "var(--font-mono)", fontSize: "var(--text-sm)", color: "var(--text-heading)", textDecoration: "none" }}>{o.slug}</a>
+                          <a href={`/tech/${o.slug}`} style={{ flex: 1, fontFamily: "var(--font-mono)", fontSize: "var(--text-sm)", color: "var(--text-heading)", textDecoration: "none" }} title={o.slug}>{o.name}</a>
                           {o.stance && <Badge tone={STANCE_TONE[o.stance]}><span title={o.stance}>{o.stance}</span></Badge>}
                         </div>
                         <div style={{ display: "flex", gap: 10, alignItems: "center" }}>

@@ -1,0 +1,16 @@
+---
+// What an editor or viewer sees on an admin-only page: why it's closed and
+// who can open it, instead of a silent bounce to Home that makes an admin's
+// shared link look broken.
+import { PageHeader } from "./PageHeader.jsx";
+
+const { title } = Astro.props;
+---
+
+<PageHeader title={title} />
+<div style="flex:1; overflow-y:auto; padding:24px;">
+  <p style="margin:0; max-width:640px; font-size:var(--text-sm); color:var(--text-secondary);">
+    Users, AI models and raw data are for admins. An admin of this metis can give you the admin role.
+    <a href="/home">Back to Home</a>
+  </p>
+</div>

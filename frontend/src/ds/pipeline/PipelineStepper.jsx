@@ -19,7 +19,7 @@ export function PipelineStepper({ active = 0, compact, onSelect, style }) {
             ...(onSelect ? { type: "button", onClick: () => onSelect(i) } : { "aria-current": i === active ? "step" : undefined }),
             style: {
             padding: compact ? "3px 8px" : "5px 12px",
-            fontSize: compact ? "10px" : "var(--text-xs)", fontFamily: "inherit",
+            fontSize: compact ? "var(--text-2xs)" : "var(--text-xs)", fontFamily: "inherit",
             fontWeight: i === active ? "var(--weight-bold)" : "var(--weight-regular)",
             color: i === active ? "var(--text-inverse)" : i < active ? "var(--stage-" + s.key + ")" : "var(--text-secondary)",
             background: i === active ? "var(--stage-" + s.key + ")" : "var(--surface-card)",

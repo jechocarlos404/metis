@@ -31,6 +31,16 @@ code, pre, .mono { font-family: var(--font-mono); }
 .skip-link:focus { top: 8px; color: var(--text-inverse); }
 main:focus { outline: none; }
 
+/* Every control shows where keyboard focus is. !important beats an inline
+   outline:none; :where() keeps specificity at zero so a rule's own
+   outline-offset still wins. Left out: ds Input/Select draw their own ring
+   ([data-ds-field]), tabindex=-1 targets (main, dialog panels) are focused
+   by script, and graph nodes stroke their card instead. */
+:where(:focus-visible:not([data-ds-field], [tabindex="-1"], .graph-node)) {
+  outline: 2px solid var(--border-focus) !important;
+  outline-offset: 2px;
+}
+
 /* DS Checkbox, Switch and Radio hide the native input; show its focus on the drawn control. */
 [data-ds-control]:focus-visible + span { outline: 2px solid var(--border-focus); outline-offset: 2px; }
 

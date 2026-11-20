@@ -28,6 +28,7 @@ export function FeatureGraphView({ layout, hubs, selectedId, onSelect, recheckSt
   const onSelectRef = React.useRef(onSelect);
   const hasFitRef = React.useRef(false);
   const legendRef = React.useRef(null);
+  const toolbarRef = React.useRef(null);
 
   const [pinned, setPinned] = React.useState(() => new Set());
   const [hoveredId, setHoveredId] = React.useState(null);
@@ -60,10 +61,10 @@ export function FeatureGraphView({ layout, hubs, selectedId, onSelect, recheckSt
   // change would throw away simulation state (positions/velocities) and
   // defeat the entire point of smooth transitions between data updates.
   useIsomorphicLayoutEffect(() => {
-    // The key starts folded, so the drawing opens from the canvas's left edge;
-    // an open key is framed around, never drawn over.
+    // The key starts folded; folded or open, it and the zoom buttons are
+    // framed around, never drawn over.
     const engine = createForceGraph({
-      fitInsetLeft: () => (legendRef.current?.open ? legendRef.current.offsetLeft + legendRef.current.offsetWidth : 0),
+      frameInsets: () => controlInsets(legendRef.current, toolbarRef.current),
       svgEl: svgRef.current,
       viewportEl: viewportRef.current,
       nodeSize: { width: NODE_W, height: NODE_H },
@@ -103,12 +104,21 @@ export function FeatureGraphView({ layout, hubs, selectedId, onSelect, recheckSt
     engineRef.current?.setReducedMotion(reducedMotion);
   }, [reducedMotion]);
 
+  // Grouped, a graph opens on what it is grouped by: its hubs centred (B35),
+  // leaving out the "linked to none" one, which is not a goal or capability.
+  // In build order, on the selected feature.
+  const openFocus = () => {
+    const hubs = graphData.nodes.filter((n) => n.hub);
+    const named = hubs.filter((n) => n.tone !== "empty");
+    return hubs.length ? { ids: (named.length ? named : hubs).map((n) => n.id), centre: true } : selectedId;
+  };
+
   useIsomorphicLayoutEffect(() => {
     engineRef.current?.update(graphData.nodes, graphData.edges);
     if (!hasFitRef.current && graphData.nodes.length) {
       hasFitRef.current = true;
-      engineRef.current?.openView(selectedId, 0);
-      engineRef.current?.openWhenSettled(selectedId); // the first frame sees unspread nodes
+      engineRef.current?.openView(openFocus(), 0);
+      engineRef.current?.openWhenSettled(openFocus()); // the first frame sees unspread nodes
     }
   }, [graphData]);
 
@@ -117,7 +127,7 @@ export function FeatureGraphView({ layout, hubs, selectedId, onSelect, recheckSt
   useIsomorphicLayoutEffect(() => {
     if (lastFitKey.current === fitKey) return;
     lastFitKey.current = fitKey;
-    engineRef.current?.openWhenSettled(selectedId);
+    engineRef.current?.openWhenSettled(openFocus());
   }, [fitKey]);
 
   // A feature picked outside the canvas is brought into view.
@@ -237,6 +247,7 @@ export function FeatureGraphView({ layout, hubs, selectedId, onSelect, recheckSt
         onZoomIn={() => engineRef.current?.zoomBy(1.4)}
         onZoomOut={() => engineRef.current?.zoomBy(1 / 1.4)}
         onFit={() => engineRef.current?.fitToView()}
+        toolbarRef={toolbarRef}
       />
       <GraphLegend legendRef={legendRef} cutActive={cutStates != null} recheckActive={recheckStates != null} hubs={hubs} graphData={graphData} />
 
@@ -261,7 +272,7 @@ function FeatureNode({ node, isSelected, isTabStop, isHovered, isDimmed, isFaded
     : recheck === "retest" ? "var(--warn-fg)"
     : cutState === "target" ? "var(--accent)"
     : cutState === "essential" ? "var(--ok-fg)"
-    : isHovered ? "var(--border-default)" : "var(--border-hairline)";
+    : isHovered ? "var(--text-secondary)" : "var(--border-control)"; // 3:1 on the card, like a goal box
   const ringWide = isSelected || recheck != null || cutState === "target" || cutState === "essential";
   // Deferrable and filtered-out nodes fade like focus-dimming does, but stay
   // readable on hover/select.
@@ -318,7 +329,7 @@ const HUB_TONE = {
   capability: { fill: "var(--accent-wash)", stroke: "var(--accent)", text: "var(--text-accent)" },
   product: { fill: "var(--accent-wash)", stroke: "var(--accent)", text: "var(--text-accent)" },
   org: { fill: "var(--surface-inverse)", stroke: "var(--surface-inverse)", text: "var(--text-inverse)" },
-  empty: { fill: "var(--surface-card)", stroke: "var(--border-default)", text: "var(--text-secondary)", dash: "4,3" },
+  empty: { fill: "var(--surface-card)", stroke: "var(--border-control)", text: "var(--text-secondary)", dash: "4,3" },
 };
 
 // A capability or goal the features are grouped by. Not a feature, so it is
@@ -344,8 +355,8 @@ function HubPill({ tone, w = HUB_W, h = HUB_H }) {
 
 // SVG text, not an HTML foreignObject: 462 HTML labels made pan and zoom
 // drop to about 29fps. Hidden when zoomed out too far to read (.graph-far).
-export function CardLabel({ name, x, fill = "var(--text-heading)", anchor }) {
-  const lines = wrapLabel(name);
+export function CardLabel({ name, x, fill = "var(--text-heading)", anchor, maxLines = 2 }) {
+  const lines = wrapLabel(name, 19, maxLines);
   const lineH = 14;
   return (
     <text x={x} y={-((lines.length - 1) * lineH) / 2} dominantBaseline="central" fill={fill} textAnchor={anchor}
@@ -367,7 +378,7 @@ export function GraphCaption({ name }) {
   };
   return (
     <>
-      {/* One line: a phone's Group by bar sits just above it. */}
+      {/* One line: a corner chip, never a block over the drawing. */}
       {name && <div className="graph-caption" style={{ ...chip, fontSize: "var(--text-sm)", color: "var(--text-heading)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{name}</div>}
       <div className="graph-hint" style={{ ...chip, fontFamily: "var(--font-mono)", fontSize: "var(--text-2xs)", color: "var(--text-secondary)" }}>
         drag to move · double-click to release · scroll to zoom
@@ -376,10 +387,26 @@ export function GraphCaption({ name }) {
   );
 }
 
-export function GraphToolbar({ onZoomIn, onZoomOut, onFit }) {
+/**
+ * The px a graph keeps clear of the controls drawn over its canvas when it
+ * frames itself (Fit, open, centring a pick): the strip along the top that
+ * the folded key, the zoom buttons and a wide screen's Group by bar share;
+ * and beside the key when it is open, as it is tall then.
+ */
+export function controlInsets(key, toolbar) {
+  const GAP = 8;
+  const bottom = (el) => (el ? el.offsetTop + el.offsetHeight + GAP : 0);
+  const out = { top: Math.max(key?.open ? 0 : bottom(key), bottom(toolbar)), right: 0, bottom: 0, left: 0 };
+  if (key?.open) out.left = key.offsetLeft + key.offsetWidth + GAP;
+  return out;
+}
+
+// A row, so it shares the key's strip along the top and the drawing keeps the
+// canvas's full width (controlInsets()).
+export function GraphToolbar({ onZoomIn, onZoomOut, onFit, toolbarRef }) {
   return (
-    <div style={{
-      position: "absolute", top: 10, right: 10, display: "flex", flexDirection: "column", gap: 2,
+    <div ref={toolbarRef} style={{
+      position: "absolute", top: 10, right: 10, display: "flex", gap: 2,
       background: "var(--surface-card)", border: "1px solid var(--border-hairline)",
       borderRadius: "var(--radius-sm)", boxShadow: "var(--shadow-card)", padding: 2,
     }}>
@@ -432,7 +459,7 @@ function GraphLegend({ legendRef, cutActive, recheckActive, hubs, graphData }) {
               </LegendRow>
             ))}
             <LegendRow mark={
-              <svg width="16" height="10"><rect x="1" y="1" width="14" height="8" rx="2" fill="var(--surface-card)" stroke="var(--border-default)" /></svg>
+              <svg width="16" height="10"><rect x="1" y="1" width="14" height="8" rx="2" fill="var(--surface-card)" stroke="var(--border-control)" /></svg>
             }>Feature</LegendRow>
             <div style={LEGEND_HEAD}>Lines</div>
             <LegendRow mark={lineMark(0.7)}>{hubs.legend.line}</LegendRow>

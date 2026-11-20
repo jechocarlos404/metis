@@ -14,8 +14,8 @@ RELATES_TO participates in nothing.
 
 Containment is NOT here: the capability map (PART_OF) is relational
 (capabilities.parent_id). The bridge between planes is each feature's set of
-capability_ids (REALIZES, many-to-many), carried as a node attribute so the
-capability coupling projection can be computed from this graph alone.
+capability_ids (REALIZES, many-to-many), carried as a node attribute so
+capability impact can be computed from this graph alone.
 
 Postgres is the system of record: every mutation commits there first, then
 write-through updates this graph. Any in-memory failure marks the graph dirty
@@ -374,37 +374,33 @@ class FeatureGraph:
             for cycle in islice(nx.simple_cycles(dep), limit)
         ]
 
-    # ---- capability coupling (slow-plane projection) ----
-
-    def coupling_edges(self) -> set[tuple[uuid.UUID, uuid.UUID]]:
-        """Project the precedence graph onto capabilities: (c1, c2) means some
-        feature realizing c1 needs a feature realizing c2. Computed, never
-        stored. Same-capability pairs are internal and dropped."""
-        edges: set[tuple[uuid.UUID, uuid.UUID]] = set()
-        for u, v in self._precedence_subgraph().edges:
-            for cu in self._g.nodes[u].get("capability_ids", ()):
-                for cv in self._g.nodes[v].get("capability_ids", ()):
-                    if cu != cv:
-                        edges.add((cu, cv))
-        return edges
+    # ---- capability impact (read off the feature graph) ----
 
     def capability_impact(self, capability_ids: set[uuid.UUID]) -> dict[str, list[uuid.UUID]]:
-        """Blast radius at capability resolution for a submap's worth of ids:
-        dependents = capabilities whose features break, dependencies = what the
-        submap's features need. Aggregation over a subtree is the caller's job
-        (the capability service owns the PART_OF forest)."""
-        g = nx.DiGraph()
-        g.add_edges_from(self.coupling_edges())
-        dependents: set[uuid.UUID] = set()
-        dependencies: set[uuid.UUID] = set()
-        for cid in capability_ids:
-            if g.has_node(cid):
-                dependents |= nx.ancestors(g, cid)
-                dependencies |= nx.descendants(g, cid)
-        return {
-            "dependents": sorted(dependents - capability_ids, key=str),
-            "dependencies": sorted(dependencies - capability_ids, key=str),
-        }
+        """Blast radius at capability resolution for a submap's worth of ids.
+        Walks feature needs, never capability pairs: dependents = capabilities
+        of the features that need (through links of links) a feature realizing
+        the submap, dependencies = capabilities of what those features need.
+        Projecting edges onto capabilities first would let a shared capability
+        (File Storage, sign-in) bridge products that never need each other.
+        Aggregation over a subtree is the caller's job (the capability service
+        owns the PART_OF forest); so is ordering, since names live there."""
+        dep = self._precedence_subgraph()
+        seeds = [
+            n for n in self._g.nodes
+            if capability_ids.intersection(self._g.nodes[n].get("capability_ids", ()))
+        ]
+        needers: set[uuid.UUID] = set()
+        needed: set[uuid.UUID] = set()
+        for n in seeds:
+            needers |= nx.ancestors(dep, n)
+            needed |= nx.descendants(dep, n)
+
+        def capabilities_of(features: set[uuid.UUID]) -> list[uuid.UUID]:
+            found = {c for f in features for c in self._g.nodes[f].get("capability_ids", ())}
+            return sorted(found - capability_ids, key=str)
+
+        return {"dependents": capabilities_of(needers), "dependencies": capabilities_of(needed)}
 
     def layout(self) -> dict[str, Any]:
         """Server-computed positions, one block per product.

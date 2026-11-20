@@ -133,7 +133,22 @@ on the Docker frontend against `metis_verify`, a copy of the real database.
 | Seed skills moved to `plugin/skills/` | done | `scripts/install-skills.sh` re-run; global metis-export symlink points at the new path |
 | Claude Code plugin: MCP over SSE (token required, Host checked), 3 reuse skills, 3 read-only hooks | done | agent: `claude plugin validate --strict`, headless session connected, hook output against live data |
 
+## Persona pass (2026-11-20)
+
+| Item | Status | Verified |
+|---|---|---|
+| Skill `metis-map-outside-product`: public pages to a seed file of guesses | done | agent: Plausible Analytics, 25 features, 37 guesses, dry run only |
+| Skill `metis-fill-gaps`: code behind unknown-capability features | done | discovery only: all 49 gaps are on the two external products |
+| Freshness: `products.seeded_at`, stamped by both loaders; product header, Home, Needs attention (`stale_map`), hooks, MCP | done | 271 tests; browser on real data: every product reads "never imported" |
+| Share: one self-contained read-only HTML snapshot per product | done | browser: downloaded file has no ids or internal links |
+| Ideas answer "what next": `/home?idea=&caps=` prefill, `check_idea` Open: link, `metis-what-next` skill | done | browser: link survives login, check runs on load |
+
 ## Open follow-ups
+- The seed loaders never change a feature that already exists, so links that
+  `metis-fill-gaps` confirms in code must be added on the desktop. Owner to
+  decide whether loaders should add (never remove) confirmed links on reuse.
+- Every product of ours reads "never imported" and appears under Needs
+  attention until its seed file is imported once more.
 
 - A shared capability (e.g. User Authentication) pulls every goal behind it onto
   each product's Goals tab. Collapsed there; the owner chose the Goals Network

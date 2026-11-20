@@ -50,6 +50,8 @@ _FLAG_COLUMNS = (
     "alter table chat_messages add column if not exists status text not null default 'done'",
     "alter table chat_messages add column if not exists parent_id uuid references chat_messages(id) on delete cascade",
     "alter table chat_messages add column if not exists task text",
+    # Map freshness (2026-11-20): existing products read as never seeded.
+    "alter table products add column if not exists seeded_at timestamptz",
 )
 
 

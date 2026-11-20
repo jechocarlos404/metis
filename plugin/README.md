@@ -18,17 +18,27 @@ desktop.
     capabilities already exist and in which products.
   - `metis-find-reuse`: find another product that already has a capability,
     and point at its recorded evidence paths.
-  - `metis-next-work`: list the features that are ready to start, and why each
-    one exists.
+  - `metis-what-next`: propose 2 to 4 ideas built mostly from capabilities
+    that already exist, each checked with `check_idea`, ranked by how much
+    already exists, with a link that opens Home's idea check filled in. It
+    saves nothing: saving an idea is the owner's choice on the desktop.
+  - `metis-map-outside-product`: describe someone else's product from its
+    public pages as a seed file of features and guessed capability links,
+    for you to review and load.
+  - `metis-fill-gaps`: in one of your repos, read the code behind features
+    whose capabilities are unknown, and hand you a seed file of guesses plus
+    the links the code confirms, to add on the desktop.
 - **Hooks.** Each one is silent when metis is unreachable or the repo is not a
   known product:
   - *Session start:* a short brief on this repo's product. It gives the
-    feature count and the capabilities it shares with other products.
+    feature count, the capabilities it shares with other products, and when
+    its map was last updated from a seed file.
   - *Prompt submit:* if your prompt names a capability another product already
     has, Claude gets one line saying where.
   - *Stop:* if the session changed code in a known product, you see a
     one-line reminder to re-export the seed file with the `metis-export` skill.
-    It appears at most once per session.
+    It appears at most once per session, and says how old the map is when it
+    was last updated over 7 days ago, or never.
 
 ## Install
 
@@ -168,5 +178,6 @@ plugin/
   .mcp.json                     the metis SSE server
   hooks/hooks.json              SessionStart, UserPromptSubmit, Stop
   hooks/metis_hooks.py          all three hooks, Python stdlib only
-  skills/                       metis-check-idea, metis-find-reuse, metis-next-work
+  skills/                       metis-check-idea, metis-find-reuse, metis-what-next,
+                                metis-map-outside-product, metis-fill-gaps
 ```

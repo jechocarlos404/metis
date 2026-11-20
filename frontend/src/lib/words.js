@@ -20,6 +20,18 @@ export function count(n, one, many = `${one}s`) {
   return `${n} ${n === 1 ? one : many}`;
 }
 
+// How fresh a product's map is, from its seeded_at (the last seed file import).
+// freshness(null) → "never imported from a seed file"; else "updated today",
+// "updated 3 days ago", "updated 5 months ago", "updated 2 years ago".
+export function freshness(seededAt, now = Date.now()) {
+  if (!seededAt) return "never imported from a seed file";
+  const days = Math.max(0, Math.floor((now - new Date(seededAt).getTime()) / 86400000));
+  if (days === 0) return "updated today";
+  if (days < 30) return `updated ${count(days, "day")} ago`;
+  if (days < 365) return `updated ${count(Math.floor(days / 30), "month")} ago`;
+  return `updated ${count(Math.floor(days / 365), "year")} ago`;
+}
+
 // One product order for every picker: ours first, then external, each A–Z.
 export const productOptions = (products) =>
   [...products]
@@ -106,6 +118,20 @@ export const NEED = {
   elsewhere: { label: "only elsewhere", tone: "warn", hint: "only products we don't own have it, so it isn't ours" },
   none: { label: "missing", tone: "danger", hint: "no product in metis has it" },
 };
+
+/** One-line headline for a coverage report, the same wording everywhere. */
+export function coverageHeadline(report) {
+  return `We have ${report.existing} of the ${report.needed} capabilities needed · ${report.mature} proven (beta or stable)`;
+}
+
+/** A scored product's features split by VERDICT key (GET /products/{id}/coverage). */
+export function scoreGroups(score) {
+  return [
+    { key: "buildable", names: score.buildable },
+    { key: "partly", names: score.known_covered },
+    { key: "unknown", names: score.unknown_features.filter((n) => !score.known_covered.includes(n)) },
+  ];
+}
 
 /** Look up a plain word; unknown values fall back to spaced lower case. */
 export function plain(dict, value) {

@@ -5,6 +5,8 @@ server — and they are exactly where the surfaces would drift apart, because
 this is the only place the shared rows get turned into something else.
 """
 
+from datetime import datetime, timezone
+
 import pytest
 import pytest_asyncio
 from fastapi import HTTPException
@@ -360,7 +362,11 @@ async def _world(app, db):
         physics = await cap("Physics model", CapabilityMaturity.alpha)
         weather = await cap("Weather forecast")
         await cap("Route planner")
-        climb = Product(name="Can I Climb", slug="can-i-climb")
+        climb = Product(
+            name="Can I Climb",
+            slug="can-i-climb",
+            seeded_at=datetime(2026, 11, 1, 12, 0, tzinfo=timezone.utc),
+        )
         rival = Product(name="Rival", slug="rival", external=True)
         goal = Goal(goal_type=GoalType.product, title="Riders trust the estimate")
         s.add_all([climb, rival, goal])
@@ -416,6 +422,8 @@ async def test_products_lists_ours_and_external(api):
     _conventions(text)
     assert text.startswith("2 product(s): 1 ours, 1 external.")
     assert str(w["rival"].id) in text and "external" in text
+    rows = {line.split()[0]: line.split()[2] for line in text.splitlines()[2:4]}
+    assert rows == {"can-i-climb": "2026-11-01T12:00:00Z", "rival": "never"}
 
 
 async def test_inventory_is_most_reused_first_and_filters_in_order(api):
@@ -455,6 +463,21 @@ async def test_check_idea_never_counts_a_near_name(api):
     miss = next(i for i, line in enumerate(lines) if line.strip() == "no match       Elevaton data")
     assert "near names, unconfirmed: elevation-data" in lines[miss + 1]
     assert "Not ours (2): Weather forecast, Elevaton data" in text
+    # Home's idea check, pre-filled: matched needs by slug, the rest as typed.
+    assert lines[-1] == (
+        "Open: /home?idea=Climb%20planner&caps=strava-import,weather-forecast,Elevaton%20data"
+    )
+
+    named = await server._dispatch(
+        "check_idea",
+        {"idea": "Climb, then eat",
+         "features": [{"name": "Plan", "capabilities": ["strava-import", "Elevaton data"]},
+                      {"name": "Eat", "capabilities": ["Strava import", "Food & drink"]}]},
+    )
+    assert named.splitlines()[-1] == (
+        "Open: /home?idea=Climb%2C%20then%20eat"
+        "&caps=strava-import,Elevaton%20data,Food%20%26%20drink"
+    )
 
 
 async def test_product_score_groups_sum_to_the_total(api):
@@ -532,7 +555,14 @@ async def test_ready_features_filters_by_product(api):
     assert text.startswith("1 feature(s) ready to start — pending, every dependency done.")
     assert "Show ride history" in text and "can-i-climb" in text
     rival = await server._dispatch("ready_features", {"product": "rival"})
-    assert rival.startswith("0 feature(s) ready to start in rival") and "Nothing is ready" in rival
+    assert rival.startswith("0 feature(s) ready to start in rival")
+    # Rival's pending features are external, so none of ours is pending there.
+    assert "Nothing is pending in rival: every feature of ours" in rival and "check_idea" in rival
+    assert rival.endswith("Open: /home")
+
+    blocked = render.ready_features([], [], None, pending=2)
+    assert "Nothing is ready: 2 pending feature(s), each waits on one not done." in blocked
+    assert "check_idea" in blocked and blocked.endswith("Open: /home")
     assert (await server._dispatch("ready_features", {"product": "nope"})).startswith("0 products")
 
 

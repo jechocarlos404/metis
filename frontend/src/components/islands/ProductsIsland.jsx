@@ -2,13 +2,14 @@ import React from "react";
 import { PageHeader } from "../shell/PageHeader.jsx";
 import { Badge, Button, Card, Checkbox, Dialog, Icon, Input, Select, StatusBadge, Tabs, Toast, DeleteConfirm } from "../../ds";
 import { api } from "../../lib/api.js";
-import { count, productOptions, statusLabel } from "../../lib/words.js";
+import { count, freshness, productOptions, statusLabel } from "../../lib/words.js";
 import { openChatWithPrompt } from "../../lib/chat-launch.js";
 import { useParamRestore, writeParams } from "../../lib/url-state.js";
 import { exportSeedFile } from "../shared/SeedFiles.jsx";
 import { WhatItDoes } from "../products/WhatItDoes.jsx";
 import { ProductGoals } from "../products/ProductGoals.jsx";
 import { ProductPlan, SIZE_HINT } from "../products/ProductPlan.jsx";
+import { downloadSnapshot } from "../products/shareSnapshot.js";
 
 const TABS = ["does", "goals", "plan"];
 const SIZES = [
@@ -116,6 +117,11 @@ export default function ProductsIsland({ canWrite = true }) {
     exportSeedFile(productId)
       .then((filename) => setToast({ tone: "ok", title: "Seed file downloaded", detail: filename }))
       .catch(showError("Export failed"));
+
+  const shareProduct = () => {
+    const filename = downloadSnapshot({ product, goals, features, capabilities, score });
+    setToast({ tone: "ok", title: "Snapshot downloaded", detail: filename });
+  };
 
   const openNewProduct = () => {
     setConfirmingDelete(false);
@@ -291,6 +297,7 @@ export default function ProductsIsland({ canWrite = true }) {
               <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                 <h2 style={{ margin: 0, fontSize: "var(--text-lg)", fontWeight: "var(--weight-semibold)", color: "var(--text-heading)" }}>{product.name}</h2>
                 {product.external && <span title="Someone else's product. Its features never count as ours."><Badge>external</Badge></span>}
+                <span title="When its seed file was last imported" style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>{freshness(product.seeded_at)}</span>
                 <span style={{ flex: 1 }} />
                 {canWrite && (
                   <>
@@ -302,6 +309,10 @@ export default function ProductsIsland({ canWrite = true }) {
                     </Button>
                   </>
                 )}
+                <Button size="sm" variant="secondary" style={{ gap: 6 }} onClick={shareProduct} disabled={features == null || score == null}
+                  title="Download a read-only page of this product to send to someone without a login">
+                  <Icon name="send" size={13} />Share
+                </Button>
               </div>
               {product.summary && (
                 <div style={{ marginTop: 8, fontSize: "var(--text-sm)", color: "var(--text-secondary)", lineHeight: "var(--leading-body)" }}>

@@ -1,6 +1,6 @@
 import React from "react";
 import { Badge } from "../../ds";
-import { MATURITY, NEED, VERDICT } from "../../lib/words.js";
+import { MATURITY, NEED, VERDICT, coverageHeadline, scoreGroups } from "../../lib/words.js";
 import { Term } from "./Term.jsx";
 
 export const MATURITY_TONES = {
@@ -24,11 +24,7 @@ function VerdictBadge({ kind }) {
 
 // Features of a scored product, grouped by the shared verdict vocabulary.
 export function ProductScore({ score }) {
-  const groups = [
-    { key: "buildable", names: score.buildable },
-    { key: "partly", names: score.known_covered },
-    { key: "unknown", names: score.unknown_features.filter((n) => !score.known_covered.includes(n)) },
-  ].filter((g) => g.names.length > 0);
+  const groups = scoreGroups(score).filter((g) => g.names.length > 0);
   return (
     <div style={{ borderTop: "1px solid var(--border-hairline)", padding: "14px 16px", display: "flex", flexDirection: "column", gap: 10, fontSize: "var(--text-xs)" }}>
       <div style={{ fontSize: "var(--text-sm)", color: "var(--text-heading)", fontWeight: "var(--weight-medium)" }}>
@@ -53,11 +49,6 @@ export function ProductScore({ score }) {
       ))}
     </div>
   );
-}
-
-/** One-line headline for a coverage report, the same wording everywhere. */
-export function coverageHeadline(report) {
-  return `We have ${report.existing} of the ${report.needed} capabilities needed · ${report.mature} proven (beta or stable)`;
 }
 
 // onCandidate(needName, candidateName) swaps a near name in; without it, a

@@ -1,7 +1,8 @@
 import uuid
+from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Boolean, Enum, ForeignKey, Integer, Text, UniqueConstraint, false
+from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Integer, Text, UniqueConstraint, false
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -31,6 +32,9 @@ class Product(PKMixin, TimestampMixin, Base):
     #: Someone else's product, known only from the outside — its features are
     #: what a user sees, never our work. Never counted as what we can do.
     external: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+    #: When a seed file import last loaded this product; null if never.
+    #: Set by the loaders through POST /api/products/{id}/seeded.
+    seeded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     decompositions: Mapped[list["ProductDecomposition"]] = relationship(
         back_populates="product", cascade="all, delete-orphan"

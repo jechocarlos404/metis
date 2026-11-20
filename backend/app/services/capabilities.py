@@ -9,6 +9,7 @@ progress is always the rollup over realizing features.
 
 import uuid
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from collections import defaultdict
 
 from fastapi import HTTPException
@@ -606,6 +607,10 @@ async def coverage(session: AsyncSession, request: CoverageRequest) -> CoverageR
 
 # ---- health (findings generators) ----
 
+#: A product of ours not imported from its seed file for this long needs attention.
+STALE_AFTER = timedelta(days=30)
+
+
 async def health(session: AsyncSession) -> list[HealthFinding]:
     findings: list[HealthFinding] = []
     children = await _children_index(session)
@@ -692,6 +697,29 @@ async def health(session: AsyncSession) -> list[HealthFinding]:
                     detail="product goal motivates no capability — decompose or drop.",
                 )
             )
+
+    # Our map is only as fresh as the last import of the product's seed file.
+    stale_before = datetime.now(timezone.utc) - STALE_AFTER
+    stale = await session.scalars(
+        select(Product)
+        .where(
+            Product.external.is_(False),
+            or_(Product.seeded_at.is_(None), Product.seeded_at < stale_before),
+        )
+        .order_by(Product.seq)
+    )
+    for product in stale:
+        findings.append(
+            HealthFinding(
+                kind="stale_map",
+                subject_id=product.id,
+                subject_name=product.name,
+                detail="never imported from a seed file."
+                if product.seeded_at is None
+                else f"map last updated {product.seeded_at.date().isoformat()}, "
+                f"over {STALE_AFTER.days} days ago. Re-export and import its seed file.",
+            )
+        )
     return findings
 
 

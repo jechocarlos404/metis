@@ -36,9 +36,12 @@ are hidden until someone asks for them or data exists.
 - **Honest numbers.** Capability names match exactly; near names are offered,
   never assumed. Coverage is a lower bound. A gap is an answer. Never add fuzzy
   auto-matching to reduce friction — offer exact picks instead.
-- **Only real data.** No demo or sample rows. (Proposed, not yet built:
-  guesses for the technology plane, marked *unverified* and never counted as
-  ours — see docs/ux-overhaul-status.md.)
+- **Only real data.** No demo or sample rows. The one exception is a guess:
+  when nothing can confirm a link (no access to the feature, its code, its
+  users or a public page that shows it), a seed file may say a feature or
+  technology is likely, possibly or on a hunch built on a capability, with a
+  one-line basis. Guesses are stored apart from facts, count nowhere, and only
+  editors and admins see them until one confirms or rejects each.
 - **Plain words on screen, raw values underneath.** Humans see "needs",
   "stable", "planned"; the raw value (`DEPENDS_ON`, `ga`, `pending`) is one
   hover away (`title`) and stays verbatim in Chat tool output, MCP and logs.

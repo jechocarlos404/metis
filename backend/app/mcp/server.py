@@ -184,7 +184,8 @@ TOOLS = [
     Tool(
         name="products",
         description=(
-            "List products, ours and external, with id, slug and name. The "
+            "List products, ours and external, with id, slug, name and "
+            "seeded_at (when its seed file was last imported, ISO, or never). The "
             "inventory's navigation tool — the other tools take an id or slug "
             "it returns, so agents never guess."
         ),
@@ -211,11 +212,16 @@ TOOLS = [
             "How much of a product idea we already have. Give features, each "
             "with the capability names it needs. Each need comes back ours, "
             "external only, or no match with near names as candidates. Exact "
-            "names only: a candidate is never counted as a match."
+            "names only: a candidate is never counted as a match. Ends with an "
+            "Open: link that pre-fills Home's idea check; it saves nothing."
         ),
         inputSchema={
             "type": "object",
             "properties": {
+                "idea": {
+                    "type": "string",
+                    "description": "Idea name for the Home link, optional; defaults to the first feature's name",
+                },
                 "features": {
                     "type": "array",
                     "minItems": 1,
@@ -392,7 +398,10 @@ async def _dispatch(name: str, args: dict) -> str:
                 for f in args["features"]
             ]
         }
-        return render.check_idea(await client.post("/api/capabilities/coverage", body))
+        idea = (args.get("idea") or "").strip() or body["features"][0]["name"]
+        return render.check_idea(
+            await client.post("/api/capabilities/coverage", body), idea
+        )
 
     if name == "product_score":
         product = await _product(args["product"])
@@ -426,7 +435,16 @@ async def _dispatch(name: str, args: dict) -> str:
             if only is None:
                 return render.no_product(args["product"])
         ready = (await client.get("/api/graph/ready"))["ready"]
-        return render.ready_features(ready, products, only)
+        pending = None
+        if not any(only is None or r["product_id"] == only["id"] for r in ready):
+            pending = sum(
+                1
+                for f in await client.get("/api/features")
+                if f["status"] == "pending"
+                and not f["external"]
+                and (only is None or f["product_id"] == only["id"])
+            )
+        return render.ready_features(ready, products, only, pending)
 
     raise ValueError(f"Unknown tool: {name}")
 

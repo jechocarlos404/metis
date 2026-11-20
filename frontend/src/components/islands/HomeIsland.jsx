@@ -2,10 +2,12 @@ import React from "react";
 import { PageHeader } from "../shell/PageHeader.jsx";
 import { Badge, Button, Input } from "../../ds";
 import { api } from "../../lib/api.js";
-import { VERDICT, count } from "../../lib/words.js";
+import { VERDICT, count, freshness } from "../../lib/words.js";
 import { CapabilityPicker } from "../shared/CapabilityPicker.jsx";
 import { CoverageReport } from "../shared/coverage.jsx";
 import GetStartedIsland from "./GetStartedIsland.jsx";
+import { readParam } from "../../lib/url-state.js";
+import { parseIdeaParams } from "../../lib/idea-link.js";
 
 const PANEL = {
   background: "var(--surface-card)", border: "1px solid var(--border-hairline)",
@@ -84,8 +86,10 @@ export default function HomeIsland({ canWrite = false, isAdmin = false }) {
 // ---- What could we build next? -------------------------------------------
 
 function IdeaChecker({ inventory, canWrite }) {
-  const [idea, setIdea] = React.useState("");
-  const [rows, setRows] = React.useState(() => [newRow()]);
+  // A link (/home?idea=…&caps=…, from MCP check_idea) fills one feature and checks it; saving stays the person's.
+  const [prefill] = React.useState(() => parseIdeaParams(readParam("idea"), readParam("caps"), inventory));
+  const [idea, setIdea] = React.useState(prefill.idea);
+  const [rows, setRows] = React.useState(() => [{ ...newRow(), name: prefill.caps.length ? prefill.idea : "", caps: prefill.caps }]);
   const [report, setReport] = React.useState(null);
   const [busy, setBusy] = React.useState(null); // null | "check" | "save"
   const [error, setError] = React.useState(null);
@@ -128,6 +132,10 @@ function IdeaChecker({ inventory, canWrite }) {
       setBusy(null);
     }
   };
+
+  React.useEffect(() => {
+    if (prefill.idea && prefill.caps.length) check();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // A near name was confirmed: swap it in wherever that exact name was picked.
   const useCandidate = (from, to) => {
@@ -250,6 +258,7 @@ function Portfolio({ products }) {
               <a href={`/products?product=${p.id}`} style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap", padding: "9px 16px", textDecoration: "none" }}>
                 <span style={{ fontSize: "var(--text-sm)", fontWeight: "var(--weight-medium)", color: "var(--text-heading)" }}>{p.name}</span>
                 {p.external && <Badge>external</Badge>}
+                <span title="When its seed file was last imported" style={QUIET}>{freshness(p.seeded_at)}</span>
                 <span style={{ flex: 1 }} />
                 <ScoreLine score={scores[p.id]} />
               </a>

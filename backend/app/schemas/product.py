@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel, computed_field
@@ -36,6 +37,8 @@ class ProductRead(Stamped):
     status: DocStatus
     version: int
     external: bool
+    #: When a seed file import last loaded it; null if never.
+    seeded_at: datetime | None = None
 
     @computed_field
     @property

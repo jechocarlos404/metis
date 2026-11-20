@@ -1,8 +1,8 @@
 import React from "react";
 import { Icon, IconButton } from "../../ds";
 import { createForceGraph } from "./forceGraphEngine.js";
-import { buildFeatureGraph, buildAdjacency, edgeStyle, nodeAccentVar, wrapLabel, NODE_W, NODE_H } from "./graph-data.js";
-import { EDGE, LAYER, statusLabel } from "../../lib/words.js";
+import { buildFeatureGraph, buildHubGraph, buildAdjacency, edgeStyle, nodeAccentVar, wrapLabel, NODE_W, NODE_H, HUB_W, HUB_H } from "./graph-data.js";
+import { EDGE, count, statusLabel } from "../../lib/words.js";
 import { Term } from "../shared/Term.jsx";
 
 // useLayoutEffect must win in the browser (it runs before paint, so a
@@ -14,7 +14,9 @@ const useIsomorphicLayoutEffect = typeof window !== "undefined" ? React.useLayou
 const EDGE_KINDS = ["DEPENDS_ON", "BLOCKS", "RELATES_TO"];
 const STATUS_DOT = { pending: "var(--text-secondary)", in_progress: "var(--warn-fg)", done: "var(--ok-fg)" };
 
-export function FeatureGraphView({ layout, selectedId, onSelect, impactIds, cutStates, fadedIds, style, fitKey }) {
+// `hubs` (capabilityHubs() or goalHubs() from graph-data.js) groups the
+// features around hub pills instead of laying them out in build order.
+export function FeatureGraphView({ layout, hubs, selectedId, onSelect, recheckStates, cutStates, fadedIds, style, fitKey }) {
   const svgRef = React.useRef(null);
   const viewportRef = React.useRef(null);
   const engineRef = React.useRef(null);
@@ -29,11 +31,18 @@ export function FeatureGraphView({ layout, selectedId, onSelect, impactIds, cutS
     () => typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches
   );
 
-  const graphData = React.useMemo(() => buildFeatureGraph(layout), [layout]);
+  const graphData = React.useMemo(() => {
+    const features = buildFeatureGraph(layout);
+    return hubs ? buildHubGraph(features.nodes, hubs) : features;
+  }, [layout, hubs]);
   const adjacency = React.useMemo(() => buildAdjacency(graphData.edges), [graphData]);
+  const hubIds = React.useMemo(() => new Set(graphData.nodes.filter((n) => n.hub).map((n) => n.id)), [graphData]);
 
   useIsomorphicLayoutEffect(() => {
-    onSelectRef.current = onSelect;
+    // Dragging any node reports it; a hub is not a feature, so it selects nothing.
+    onSelectRef.current = (id) => {
+      if (onSelect && !hubIds.has(id)) onSelect(id);
+    };
   });
 
   React.useEffect(() => {
@@ -105,12 +114,33 @@ export function FeatureGraphView({ layout, selectedId, onSelect, impactIds, cutS
   }, [fitKey]);
 
   // With a cut overlay active, tier coloring owns the canvas — selection no
-  // longer dims non-neighbors (hover still focuses transiently).
-  const wantFocus = hoveredId ?? (cutStates != null ? null : selectedId) ?? null;
+  // longer dims non-neighbors (hover still focuses transiently). Same when
+  // grouped by hubs: every feature has a hub line, so selection would fade
+  // the whole graph; the selected ring is enough there.
+  const wantFocus = hoveredId ?? (cutStates != null || recheckStates != null || hubs ? null : selectedId) ?? null;
   // Fade the rest only when the focused card has relationships to show;
   // fading everything around a loner just makes the graph hard to read.
   const focusId = wantFocus != null && adjacency.get(wantFocus)?.size ? wantFocus : null;
   const focusNeighbors = focusId ? adjacency.get(focusId) : null;
+
+  const edgeRef = (id) => (el) => {
+    if (!el) return;
+    edgeElsRef.current.set(id, el);
+    engineRef.current?.registerEdge(id, el);
+    return () => {
+      edgeElsRef.current.delete(id);
+      engineRef.current?.unregisterEdge(id, el);
+    };
+  };
+  const nodeRef = (id) => (el) => {
+    if (!el) return;
+    nodeElsRef.current.set(id, el);
+    engineRef.current?.registerNode(id, el);
+    return () => {
+      nodeElsRef.current.delete(id);
+      engineRef.current?.unregisterNode(id, el);
+    };
+  };
 
   return (
     <div style={{ position: "relative", width: "100%", height: "100%", ...style }}>
@@ -134,18 +164,17 @@ export function FeatureGraphView({ layout, selectedId, onSelect, impactIds, cutS
                 (cutStates.get(e.source) === "deferrable" || cutStates.get(e.target) === "deferrable");
               const fadeDim = fadedIds != null && (fadedIds.has(e.source) || fadedIds.has(e.target));
               const dim = cutDim || fadeDim || (focusId != null && e.source !== focusId && e.target !== focusId);
+              if (e.kind === "USES") {
+                return (
+                  <line key={e.id} ref={edgeRef(e.id)} stroke={`var(${st.colorVar})`} strokeWidth={1}
+                    opacity={dim ? 0.06 : focusId != null ? 0.8 : e.faint ? 0.12 : 0.35}
+                    style={{ transition: "opacity var(--dur-med) var(--ease-out)" }} />
+                );
+              }
               return (
                 <line
                   key={e.id}
-                  ref={(el) => {
-                    if (!el) return;
-                    edgeElsRef.current.set(e.id, el);
-                    engineRef.current?.registerEdge(e.id, el);
-                    return () => {
-                      edgeElsRef.current.delete(e.id);
-                      engineRef.current?.unregisterEdge(e.id, el);
-                    };
-                  }}
+                  ref={edgeRef(e.id)}
                   stroke={`var(${st.colorVar})`}
                   strokeWidth={e.kind === "DEPENDS_ON" || e.kind === "BLOCKS" ? 1.6 : 1.2}
                   strokeDasharray={st.dash || undefined}
@@ -157,7 +186,15 @@ export function FeatureGraphView({ layout, selectedId, onSelect, impactIds, cutS
             })}
           </g>
           <g>
-            {graphData.nodes.map((n) => (
+            {graphData.nodes.map((n) => n.hub ? (
+              <HubNode
+                key={n.id}
+                node={n}
+                isDimmed={focusId != null && focusId !== n.id && !focusNeighbors?.has(n.id)}
+                onHoverChange={setHoveredId}
+                registerEl={nodeRef(n.id)}
+              />
+            ) : (
               <FeatureNode
                 key={n.id}
                 node={n}
@@ -166,20 +203,12 @@ export function FeatureGraphView({ layout, selectedId, onSelect, impactIds, cutS
                 isHovered={hoveredId === n.id}
                 isDimmed={focusId != null && focusId !== n.id && !focusNeighbors?.has(n.id)}
                 isFaded={fadedIds ? fadedIds.has(n.id) : false}
-                isImpacted={impactIds ? impactIds.has(n.id) : false}
+                recheck={recheckStates ? recheckStates.get(n.id) : null}
                 cutState={cutStates ? cutStates.get(n.id) : null}
                 isPinned={pinned.has(n.id)}
                 onSelect={onSelect}
                 onHoverChange={setHoveredId}
-                registerEl={(el) => {
-                  if (!el) return;
-                  nodeElsRef.current.set(n.id, el);
-                  engineRef.current?.registerNode(n.id, el);
-                  return () => {
-                    nodeElsRef.current.delete(n.id);
-                    engineRef.current?.unregisterNode(n.id, el);
-                  };
-                }}
+                registerEl={nodeRef(n.id)}
               />
             ))}
           </g>
@@ -191,7 +220,7 @@ export function FeatureGraphView({ layout, selectedId, onSelect, impactIds, cutS
         onZoomOut={() => engineRef.current?.zoomBy(1 / 1.4)}
         onFit={() => engineRef.current?.fitToView()}
       />
-      <GraphLegend cutActive={cutStates != null} />
+      <GraphLegend cutActive={cutStates != null} recheckActive={recheckStates != null} hubs={hubs} graphData={graphData} />
 
       <div style={{
         position: "absolute", bottom: 10, left: 12, pointerEvents: "none",
@@ -212,14 +241,15 @@ export function FeatureGraphView({ layout, selectedId, onSelect, impactIds, cutS
   );
 }
 
-function FeatureNode({ node, isSelected, isTabStop, isHovered, isDimmed, isFaded, isImpacted, cutState, isPinned, onSelect, onHoverChange, registerEl }) {
+function FeatureNode({ node, isSelected, isTabStop, isHovered, isDimmed, isFaded, recheck, cutState, isPinned, onSelect, onHoverChange, registerEl }) {
   const accent = `var(${nodeAccentVar(node.layer)})`;
   const ring = isSelected ? "var(--accent)"
-    : isImpacted ? "var(--danger-fg)"
+    : recheck === "breaks" ? "var(--danger-fg)"
+    : recheck === "retest" ? "var(--warn-fg)"
     : cutState === "target" ? "var(--accent)"
     : cutState === "essential" ? "var(--ok-fg)"
     : isHovered ? "var(--border-default)" : "var(--border-hairline)";
-  const ringWide = isSelected || cutState === "target" || cutState === "essential";
+  const ringWide = isSelected || recheck != null || cutState === "target" || cutState === "essential";
   // Deferrable and filtered-out nodes fade like focus-dimming does, but stay
   // readable on hover/select.
   const isDeferred = (cutState === "deferrable" || isFaded) && !isHovered && !isSelected;
@@ -263,19 +293,47 @@ function FeatureNode({ node, isSelected, isTabStop, isHovered, isDimmed, isFaded
           </g>
         </g>
       )}
-      <circle cx={-NODE_W / 2 + 11} cy={0} r={3} fill={accent} />
+      {node.layer && <circle cx={-NODE_W / 2 + 11} cy={0} r={3} fill={accent} />}
       <CardLabel name={node.name} x={-NODE_W / 2 + 19} />
     </g>
   );
 }
 
+const HUB_TONE = {
+  capability: { fill: "var(--accent-wash)", stroke: "var(--accent)", text: "var(--text-accent)" },
+  product: { fill: "var(--accent-wash)", stroke: "var(--accent)", text: "var(--text-accent)" },
+  org: { fill: "var(--surface-inverse)", stroke: "var(--surface-inverse)", text: "var(--text-inverse)" },
+  empty: { fill: "var(--surface-card)", stroke: "var(--border-default)", text: "var(--text-secondary)", dash: "4,3" },
+};
+
+// A capability or goal the features are grouped by. Not a feature, so it is
+// not a tab stop and clicking it selects nothing; hover shows its features.
+function HubNode({ node, isDimmed, onHoverChange, registerEl }) {
+  const tone = HUB_TONE[node.tone] ?? HUB_TONE.capability;
+  const label = `${node.kindLabel ? `${node.kindLabel}: ` : ""}${node.name}, ${count(node.count, "feature")}`;
+  return (
+    <g ref={registerEl} data-node-id={node.id} role="img" aria-label={label}
+      className={isDimmed ? "graph-node is-dim" : "graph-node"}
+      onMouseEnter={() => onHoverChange(node.id)} onMouseLeave={() => onHoverChange(null)}
+      style={{ cursor: "grab" }}>
+      <title>{label}</title>
+      <HubPill tone={tone} />
+      <CardLabel name={node.name} x={0} anchor="middle" fill={tone.text} />
+    </g>
+  );
+}
+
+function HubPill({ tone, w = HUB_W, h = HUB_H }) {
+  return <rect x={-w / 2} y={-h / 2} width={w} height={h} rx={h / 2} fill={tone.fill} stroke={tone.stroke} strokeDasharray={tone.dash} />;
+}
+
 // SVG text, not an HTML foreignObject: 462 HTML labels made pan and zoom
 // drop to about 29fps. Hidden when zoomed out too far to read (.graph-far).
-export function CardLabel({ name, x, fill = "var(--text-heading)" }) {
+export function CardLabel({ name, x, fill = "var(--text-heading)", anchor }) {
   const lines = wrapLabel(name);
   const lineH = 14;
   return (
-    <text x={x} y={-((lines.length - 1) * lineH) / 2} dominantBaseline="central" fill={fill}
+    <text x={x} y={-((lines.length - 1) * lineH) / 2} dominantBaseline="central" fill={fill} textAnchor={anchor}
       style={{ fontFamily: "var(--font-body)", fontSize: 11.5, fontWeight: 500, pointerEvents: "none" }}>
       {lines.map((l, i) => <tspan key={i} x={x} dy={i === 0 ? 0 : lineH}>{l}</tspan>)}
     </text>
@@ -308,7 +366,11 @@ function LegendRow({ mark, children, style }) {
 const LEGEND_HEAD = { color: "var(--text-heading)", marginTop: 2 };
 const dot = (color) => <span style={{ width: 6, height: 6, borderRadius: "50%", background: color }} />;
 
-function GraphLegend({ cutActive }) {
+const lineMark = (opacity) => (
+  <svg width="16" height="6"><line x1="0" y1="3" x2="16" y2="3" stroke="var(--ink-4)" strokeWidth="1" opacity={opacity} /></svg>
+);
+
+function GraphLegend({ cutActive, recheckActive, hubs, graphData }) {
   const CUT_TIERS = [
     ["target", "var(--accent)", 1],
     ["needed", "var(--ok-fg)", 1],
@@ -323,27 +385,59 @@ function GraphLegend({ cutActive }) {
     }}>
       <summary style={{ cursor: "pointer", color: "var(--text-heading)" }}>Key</summary>
       <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 6 }}>
-        <div style={LEGEND_HEAD}>Lines</div>
-        {EDGE_KINDS.map((kind) => {
-          const st = edgeStyle(kind);
-          return (
-            <LegendRow key={kind} mark={
-              <svg width="16" height="6">
-                <line x1="0" y1="3" x2="16" y2="3" stroke={`var(${st.colorVar})`} strokeWidth="1.6" strokeDasharray={st.dash || undefined} />
-              </svg>
-            }>
-              <Term dict={EDGE} value={kind} />
-            </LegendRow>
-          );
-        })}
-        <div style={LEGEND_HEAD}>Dot by the name: layer</div>
-        {Object.keys(LAYER).map((layer) => (
-          <LegendRow key={layer} mark={dot(`var(${nodeAccentVar(layer)})`)}><Term dict={LAYER} value={layer} /></LegendRow>
-        ))}
+        {hubs ? (
+          <>
+            <div style={LEGEND_HEAD}>Shapes</div>
+            {hubs.legend.shapes.filter(([tone]) => graphData.nodes.some((n) => n.hub && n.tone === tone)).map(([tone, label]) => (
+              <LegendRow key={tone} mark={<svg width="16" height="10"><g transform="translate(8,5)"><HubPill tone={HUB_TONE[tone]} w={14} h={8} /></g></svg>}>
+                {label}
+              </LegendRow>
+            ))}
+            <LegendRow mark={
+              <svg width="16" height="10"><rect x="1" y="1" width="14" height="8" rx="2" fill="var(--surface-card)" stroke="var(--border-default)" /></svg>
+            }>Feature</LegendRow>
+            <div style={LEGEND_HEAD}>Lines</div>
+            <LegendRow mark={lineMark(0.7)}>{hubs.legend.line}</LegendRow>
+            {graphData.edges.some((e) => e.faint) && (
+              <LegendRow mark={lineMark(0.25)}>Fainter: shared by over half</LegendRow>
+            )}
+            <div>Dependencies show in Build order.</div>
+          </>
+        ) : (
+          <>
+            <div style={LEGEND_HEAD}>Lines</div>
+            {EDGE_KINDS.map((kind) => {
+              const st = edgeStyle(kind);
+              return (
+                <LegendRow key={kind} mark={
+                  <svg width="16" height="6">
+                    <line x1="0" y1="3" x2="16" y2="3" stroke={`var(${st.colorVar})`} strokeWidth="1.6" strokeDasharray={st.dash || undefined} />
+                  </svg>
+                }>
+                  <Term dict={EDGE} value={kind} />
+                </LegendRow>
+              );
+            })}
+          </>
+        )}
         <div style={LEGEND_HEAD}>Corner dot: status</div>
         {Object.keys(STATUS_DOT).map((status) => (
           <LegendRow key={status} mark={dot(STATUS_DOT[status])}><span title={status}>{statusLabel(status)}</span></LegendRow>
         ))}
+        {recheckActive && (
+          <>
+            <div style={LEGEND_HEAD}>If this changes</div>
+            {[["breaks", "var(--danger-fg)"], ["retest", "var(--warn-fg)"]].map(([label, color]) => (
+              <LegendRow key={label} mark={
+                <svg width="16" height="10">
+                  <rect x="2" y="1" width="12" height="8" rx="2" fill="none" stroke={color} strokeWidth="1.5" />
+                </svg>
+              }>
+                {label}
+              </LegendRow>
+            ))}
+          </>
+        )}
         {cutActive && (
           <>
             <div style={LEGEND_HEAD}>Smallest version</div>

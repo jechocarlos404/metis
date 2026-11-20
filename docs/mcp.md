@@ -32,6 +32,7 @@ The inventory tools answer the portfolio questions:
 | `feature_why` | Why a feature exists, from its capabilities up through their parents to the goals that motivate them. | `GET /api/features/{id}/why` |
 | `journeys` | Lists journeys. Given a journey id, it returns each step's verdict (`buildable`, `known_covered`, `missing`, `unknown`) and whether a user can do the step today. | `GET /api/journeys`, `GET /api/journeys/{id}/analysis` |
 | `ready_features` | Our pending features whose dependencies are all done. Optionally limited to one product. When nothing is ready it says whether anything is pending at all and points to `check_idea`. | `GET /api/graph/ready`, and `GET /api/features` when nothing is ready |
+| `recheck` | If a feature changes, what else to recheck. Takes a feature id or its exact name (a name several features share is listed, not picked). Breaks: features that depend on it, through links of links. Retest (same product): features sharing a confirmed capability, rarest shared capability first. Broad (many features): capabilities used by more than half of the product (and at least 6 features), counted rather than listed. Same capability elsewhere (info only): our other products with the same capabilities; metis does not know whether they share code. Guesses are never counted. | `GET /api/graph/recheck/{id}` |
 
 The technology and buy tools, which stay hidden on the desktop until there is
 data for them:

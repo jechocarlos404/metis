@@ -113,6 +113,7 @@ timeline anywhere. Decisions baked in:
 | `rollup(c)` | how done is c? | aggregate of `WorkStatus` over `scope(c)`; capabilities have no stored status, this *is* their status |
 | `surface(p)` | what does product p do? | `BUNDLES` targets of p plus their submaps — the answer a Spec narrates |
 | `impact_capability(c)` | what breaks at product resolution if c changes? | ancestors of c in the capability coupling graph |
+| `recheck(f)` | if f changes, what must be rechecked? | `impact(f)` dependents (breaks), plus same-product features sharing a confirmed `REALIZES` target with f, rarest capability first (retest); capabilities used by more than half of the product (and at least 6 features) are counted, not listed; our other products with the same capabilities are information only. Crosses the bridge explicitly and says so per group; guesses never count |
 | `why(f)` | why does f exist? | f `—REALIZES→` c `—PART_OF*→` root capability `←MOTIVATES—` product goal `←parent—` org goal; every ticket can print this provenance chain — this traversal *is* the Metis pitch |
 
 ### Health and drift (new — these are findings generators)

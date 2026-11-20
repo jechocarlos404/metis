@@ -143,7 +143,19 @@ on the Docker frontend against `metis_verify`, a copy of the real database.
 | Share: one self-contained read-only HTML snapshot per product | done | browser: downloaded file has no ids or internal links |
 | Ideas answer "what next": `/home?idea=&caps=` prefill, `check_idea` Open: link, `metis-what-next` skill | done | browser: link survives login, check runs on load |
 
+## Graph lenses (2026-11-20)
+
+| Item | Status | Verified |
+|---|---|---|
+| Features graph: one product at a time, server grid leads, fit after settle | done | browser: Hanko fits at 1.26 (was 0.47), 0 overlaps, 145 fps |
+| Group by: Build order, Capability (architects), Goal (designers) | done | agent, browser: all views 0 overlaps; Hanko capability fits at 0.82 (98 nodes) |
+| Recheck: `GET /api/graph/recheck/{id}` (breaks, retest, broad, elsewhere), MCP `recheck`, panel + graph rings | done | 282 tests; browser: Camille Quizbot magic link shows 12 breaks, 6 retest |
+
 ## Open follow-ups
+- Recheck's "broad" threshold (over half the product, at least 6) leaves
+  Taskmaster007's Knowledge Graph listed one by one (23 of 26 to retest).
+  Tune once the owner has used it.
+- Layer is set on no feature, so the layer dots are gone from the key; journeys are empty.
 - The seed loaders never change a feature that already exists, so links that
   `metis-fill-gaps` confirms in code must be added on the desktop. Owner to
   decide whether loaders should add (never remove) confirmed links on reuse.

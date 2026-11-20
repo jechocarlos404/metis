@@ -51,6 +51,7 @@ chat and over MCP:
 | What can we already do, and which products reuse it? | `GET /api/capabilities/inventory` |
 | How much of this product idea already exists? | `POST /api/capabilities/coverage` |
 | What breaks if we change this? | `GET /api/graph/impact/{feature_id}` |
+| If this feature changes, what else must be rechecked or retested? | `GET /api/graph/recheck/{feature_id}` |
 | What can we start right now, with nothing blocking it? | `GET /api/graph/ready` |
 | What order do we have to build these in? | `GET /api/graph/topo` |
 | Why does this feature exist, all the way up to org intent? | `GET /api/features/{id}/why` |
@@ -254,7 +255,7 @@ and the gaps are the product.
 flowchart LR
   U["Browser"] --> FE["<b>frontend</b> · Astro 5 SSR<br/>OIDC BFF · session cookie<br/>same-origin /api proxy"]
   FE -->|bearer| API["<b>backend</b> · FastAPI<br/>domain API + JWT/RBAC<br/>agents over SSE<br/><i>one uvicorn worker</i>"]
-  MCPS["<b>mcp</b> · read-only<br/>16 tools · 4 resources"] -->|"same HTTP API"| API
+  MCPS["<b>mcp</b> · read-only<br/>17 tools · 4 resources"] -->|"same HTTP API"| API
   API --- GR["FeatureGraph<br/><i>networkx, in-process</i>"]
   API --> DB[("PostgreSQL 16<br/><i>system of record</i>")]
   FE -.->|OIDC| KC["Keycloak 26<br/><i>metis realm</i>"]

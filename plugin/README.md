@@ -9,10 +9,10 @@ desktop.
 
 ## What it gives you
 
-- **MCP server `metis`.** The read-only metis MCP server over SSE: 16 tools,
-  such as `check_idea`, `capability`, `capability_inventory`, `products` and
-  `ready_features`. Every answer is plain text. See [docs/mcp.md](../docs/mcp.md)
-  for the full tool list.
+- **MCP server `metis`.** The read-only metis MCP server over SSE: 17 tools,
+  such as `check_idea`, `capability`, `capability_inventory`, `products`,
+  `ready_features` and `recheck`. Every answer is plain text. See
+  [docs/mcp.md](../docs/mcp.md) for the full tool list.
 - **Skills.**
   - `metis-check-idea`: before building something new, check which of its
     capabilities already exist and in which products.

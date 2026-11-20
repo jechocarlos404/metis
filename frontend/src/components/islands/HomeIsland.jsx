@@ -72,7 +72,7 @@ export default function HomeIsland({ canWrite = false, isAdmin = false }) {
         title="Home"
         meta={`${count(ourProducts, "product")} of ours · ${count(products.length - ourProducts, "external product")} · ${count(ours.length, "capability", "capabilities")} of ours`}
       />
-      <div style={{ flex: 1, overflowY: "auto", padding: 20, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(340px, 100%), 1fr))", gap: 20, alignItems: "start" }}>
+      <div style={{ flex: 1, overflowY: "auto", padding: 20, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(340px, 100%), 1fr))", gap: 20, alignItems: "start", alignContent: "start" }}>
         <IdeaChecker inventory={inventory} canWrite={canWrite} />
         <div style={{ display: "flex", flexDirection: "column", gap: 20, minWidth: 0 }}>
           <Portfolio products={products} />

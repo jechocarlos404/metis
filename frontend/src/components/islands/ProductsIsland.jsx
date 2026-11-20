@@ -158,9 +158,18 @@ export default function ProductsIsland({ canWrite = true }) {
         const created = await api("/products", { method: "POST", body });
         await loadProducts();
         selectProduct(created.id);
+        setToast({ tone: "ok", title: `Created ${created.name}` });
       } else {
+        const goal = goals.find((g) => g.id === body.goal_id);
+        const changes = [
+          body.name !== product.name && `renamed from ${product.name}`,
+          body.summary !== (product.summary ?? null) && "summary updated",
+          body.goal_id !== (product.goal_id ?? null) && (goal ? `goal now ${goal.display_id} ${goal.title}` : "no goal now"),
+          body.external !== product.external && (body.external ? "now someone else's product" : "now one of ours"),
+        ].filter(Boolean);
         await api(`/products/${productId}`, { method: "PATCH", body });
         await loadProducts();
+        setToast({ tone: "ok", title: `Saved ${body.name}`, detail: changes.length ? `${changes.join(", ")}.` : "Nothing changed." });
       }
       setProductDialog(null);
     } catch (e) {
@@ -175,7 +184,7 @@ export default function ProductsIsland({ canWrite = true }) {
     try {
       await api(`/products/${productId}`, { method: "DELETE" });
       setProductDialog(null);
-      setToast({ tone: "ok", title: "Product deleted" });
+      setToast({ tone: "ok", title: `Deleted ${product.name}`, detail: features?.length ? `With its ${count(features.length, "feature")}.` : undefined });
       await loadProducts();
     } catch (e) {
       showError("Delete failed")(e);
@@ -413,10 +422,13 @@ export default function ProductsIsland({ canWrite = true }) {
               <DeleteConfirm armed={confirmingDelete} onArm={() => setConfirmingDelete(true)} onCancel={() => setConfirmingDelete(false)} onConfirm={deleteProduct}
                 disabled={saving || features == null} label="Delete" confirmLabel={"Delete product"} style={{ marginRight: "auto" }} />
             )}
-            <Button size="sm" variant="secondary" onClick={() => setProductDialog(null)}>Cancel</Button>
-            <Button size="sm" variant="accent" disabled={saving || !productDialog?.name?.trim()} onClick={saveProduct}>
-              {productDialog?.mode === "new" ? "Create product" : "Save"}
-            </Button>
+            {/* While a delete is armed, Keep is the one way back: Cancel would do the same, and Save is another act. */}
+            {!confirmingDelete && <>
+              <Button size="sm" variant="secondary" onClick={() => setProductDialog(null)}>Cancel</Button>
+              <Button size="sm" variant="accent" disabled={saving || !productDialog?.name?.trim()} onClick={saveProduct}>
+                {productDialog?.mode === "new" ? "Create product" : "Save"}
+              </Button>
+            </>}
           </>
         }
       >

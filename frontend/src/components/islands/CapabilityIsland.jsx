@@ -145,7 +145,9 @@ export default function CapabilityIsland({ slug, canWrite = false }) {
       setDialogOpen(false);
       await load();
     } catch (e) {
-      setDialogError(String(e.message));
+      setDialogError(e.status === 409 && e.detail?.slug
+        ? <>{e.detail.message}. <a href={`/capabilities/${e.detail.slug}`}>Open {e.detail.name}</a></>
+        : String(e.message));
     } finally {
       setSaving(false);
     }

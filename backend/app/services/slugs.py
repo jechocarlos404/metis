@@ -23,6 +23,19 @@ def slugify(value: str) -> str:
     return _NON_ALNUM.sub("-", value.strip().lower()).strip("-")
 
 
+def valid_slug(name: str, requested: str | None = None) -> str:
+    """The slug for `name`, or the one the caller asked for once it is checked
+    to be a slug. Says nothing about whether it is free."""
+    base = slugify(requested or name)
+    if requested is not None and base != requested:
+        raise HTTPException(
+            422, f"`{requested}` is not a slug — lowercase, digits and dashes only"
+        )
+    if not base:
+        raise HTTPException(422, "Name yields an empty slug — give one explicitly")
+    return base
+
+
 async def unique_slug(
     session: AsyncSession,
     model,
@@ -34,14 +47,9 @@ async def unique_slug(
 
     An explicit request that collides is an error, not something to silently
     suffix — the caller named it on purpose. A derived one gets `-2`, `-3` …
-    appended, because two capabilities may legitimately share a name."""
-    base = slugify(requested or name)
-    if requested is not None and base != requested:
-        raise HTTPException(
-            422, f"`{requested}` is not a slug — lowercase, digits and dashes only"
-        )
-    if not base:
-        raise HTTPException(422, "Name yields an empty slug — give one explicitly")
+    appended, because two products may legitimately share a name. Capabilities
+    don't use this: a second one by the same name is refused instead."""
+    base = valid_slug(name, requested)
 
     async def taken(candidate: str) -> bool:
         stmt = select(model.id).where(model.slug == candidate)

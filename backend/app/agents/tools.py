@@ -368,6 +368,16 @@ async def create_capability(
         )
         capability = await capability_service.create_capability(ctx.session, data)
     except HTTPException as e:
+        # Same name, different case: reuse the one that exists, so later
+        # proposals in the reply that name it still apply.
+        if e.status_code == 409 and isinstance(e.detail, dict):
+            existing = await ctx.session.scalar(
+                select(Capability).where(Capability.slug == e.detail["slug"])
+            )
+            return ToolResult(_dump({
+                **_capability_dict(existing),
+                "note": f"{e.detail['message']}; reused it, nothing was created",
+            }))
         raise ToolError(str(e.detail)) from None
     except ValueError as e:
         raise ToolError(str(e)) from None
@@ -384,6 +394,8 @@ async def update_capability(ctx: ToolContext, capability: str, **fields) -> Tool
         data = CapabilityUpdate(**{k: v for k, v in fields.items() if v not in (None, "")})
         updated = await capability_service.update_capability(ctx.session, capability_obj.id, data)
     except HTTPException as e:
+        if e.status_code == 409 and isinstance(e.detail, dict):
+            raise ToolError(f"{e.detail['message']} (`{e.detail['slug']}`): pick another name") from None
         raise ToolError(str(e.detail)) from None
     except ValueError as e:
         raise ToolError(str(e)) from None

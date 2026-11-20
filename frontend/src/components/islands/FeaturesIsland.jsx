@@ -51,8 +51,9 @@ export default function FeaturesIsland({ canWrite = true }) {
     setPanelOpen(true);
     writeParams({ feature: id }, { push: true });
   }, []);
-  const changeTab = (t) => { setTab(t); writeParams({ tab: t === "directory" ? "" : t }, { push: true }); };
-  const changeProduct = (v) => { setProductFilter(v); writeParams({ product: v }, { push: true }); };
+  // On a phone, changing the view closes the panel so the change shows.
+  const changeTab = (t) => { setTab(t); setPanelOpen(false); writeParams({ tab: t === "directory" ? "" : t }, { push: true }); };
+  const changeProduct = (v) => { setProductFilter(v); setPanelOpen(false); writeParams({ product: v }, { push: true }); };
   const [draft, setDraft] = React.useState(EMPTY_DRAFT);
   const [edgeDraft, setEdgeDraft] = React.useState({ kind: "DEPENDS_ON", targetId: "" });
   const [edgeError, setEdgeError] = React.useState(null); // shown under the relationship picker
@@ -380,6 +381,7 @@ export default function FeaturesIsland({ canWrite = true }) {
       await api(`/features/${detail.id}`, { method: "DELETE" });
       setDialog(null);
       setSelected(null);
+      setPanelOpen(false);
       await load();
     } catch (e) {
       setError(String(e.message));
@@ -428,7 +430,7 @@ export default function FeaturesIsland({ canWrite = true }) {
   const filters = (
     <>
       {products.length > 0 && (
-        <Select aria-label="Product" value={activeProduct} onChange={(e) => changeProduct(e.target.value)} style={phone ? { flex: 1, minWidth: 0 } : { width: 200 }}
+        <Select aria-label="Product" value={activeProduct} onChange={(e) => changeProduct(e.target.value)} style={phone ? { flex: 1, minWidth: 0 } : { width: 200, minWidth: 160 }}
           options={[tab === "graph" ? { value: "", label: "All products: the graph draws one at a time", disabled: true } : { value: "", label: "All products" },
             ...productOptions(products),
             { value: "unattributed", label: "No product" }]} />
@@ -437,6 +439,7 @@ export default function FeaturesIsland({ canWrite = true }) {
         value={query}
         onChange={(e) => {
           setQuery(e.target.value);
+          setPanelOpen(false);
           if (e.target.value.trim() && tab !== "directory") { setTab("directory"); writeParams({ tab: "" }); }
         }} />
     </>

@@ -234,7 +234,7 @@ export function FeatureGraphView({ layout, hubs, selectedId, onSelect, recheckSt
 
       <div style={{
         position: "absolute", bottom: 10, left: 12, pointerEvents: "none",
-        fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-secondary)",
+        fontFamily: "var(--font-mono)", fontSize: "var(--text-2xs)", color: "var(--text-secondary)",
       }}>
         drag to move · double-click to release · scroll to zoom
       </div>
@@ -393,7 +393,7 @@ function GraphLegend({ legendRef, cutActive, recheckActive, hubs, graphData }) {
       position: "absolute", top: 10, left: 10,
       background: "var(--surface-card)", border: "1px solid var(--border-hairline)",
       borderRadius: "var(--radius-sm)", boxShadow: "var(--shadow-card)", padding: "6px 10px",
-      fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-secondary)",
+      fontFamily: "var(--font-mono)", fontSize: "var(--text-2xs)", color: "var(--text-secondary)",
     }}>
       <summary style={{ cursor: "pointer", color: "var(--text-heading)" }}>Key</summary>
       <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 6 }}>

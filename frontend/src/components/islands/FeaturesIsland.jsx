@@ -486,7 +486,7 @@ export default function FeaturesIsland({ canWrite = true }) {
               // A fresh graph per grouping and product: pins and hubs from another one would not fit this one.
               <FeatureGraphView key={`${group}:${activeProduct}`}layout={visibleLayout} hubs={hubs} fitKey={activeProduct} selectedId={selected} onSelect={selectFeature} recheckStates={cutStates ? null : recheckStates} fadedIds={!cutStates && recheckStates ? new Set(visibleLayout.nodes.filter((n) => n.id !== selected && !recheckStates.has(n.id)).map((n) => n.id)) : null} cutStates={cutStates} />
             )}
-            <div role="group" aria-label="Group by" style={{ position: "absolute", ...(phone ? { bottom: 48, left: 10 } : narrowGraph ? { top: 10, left: 64 } : { top: 10, left: "50%", transform: "translateX(-50%)" }), display: "flex", alignItems: "center", gap: 8, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-secondary)" }}>
+            <div role="group" aria-label="Group by" style={{ position: "absolute", ...(phone ? { bottom: 48, left: 10 } : narrowGraph ? { top: 10, left: 64 } : { top: 10, left: "50%", transform: "translateX(-50%)" }), display: "flex", alignItems: "center", gap: 8, fontFamily: "var(--font-mono)", fontSize: "var(--text-2xs)", color: "var(--text-secondary)" }}>
               {!narrowGraph && "Group by"}
               <div style={{ display: "inline-flex", border: "1px solid var(--border-control)", borderRadius: "var(--radius-sm)", overflow: "hidden", boxShadow: "var(--shadow-card)" }}>
                 {GROUPS.map((g, i) => (
@@ -531,7 +531,7 @@ export default function FeaturesIsland({ canWrite = true }) {
         ) : (
         <div style={{ flex: 1, minWidth: 0, overflowY: "auto", padding: 20 }}>
           <div style={{ background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", overflow: "hidden" }}>
-            {!compactRows && <div style={{ display: "grid", gridTemplateColumns: COLUMNS, columnGap: 12, padding: "8px 16px", borderBottom: "1px solid var(--border-hairline)", fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: "var(--tracking-caps)", textTransform: "uppercase", color: "var(--text-secondary)" }}>
+            {!compactRows && <div style={{ display: "grid", gridTemplateColumns: COLUMNS, columnGap: 12, padding: "8px 16px", borderBottom: "1px solid var(--border-hairline)", fontFamily: "var(--font-mono)", fontSize: "var(--text-2xs)", letterSpacing: "var(--tracking-caps)", textTransform: "uppercase", color: "var(--text-secondary)" }}>
               <span>Feature</span><span>What it does</span><span>Product</span><span>Priority</span><span>Status</span>
             </div>}
             {directory.map((n, i) => {
@@ -687,7 +687,7 @@ function capabilityNames(ids, capabilityById) {
 }
 
 const CAPS_HEADER = {
-  fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: "var(--tracking-caps)",
+  fontFamily: "var(--font-mono)", fontSize: "var(--text-2xs)", letterSpacing: "var(--tracking-caps)",
   textTransform: "uppercase", color: "var(--text-secondary)",
 };
 const MONO_ROW = { fontFamily: "var(--font-mono)", fontSize: 11 };

@@ -3,7 +3,8 @@
 
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
-import { changeLabel, display, fieldRows, objects } from "../src/components/chat/proposal-words.js";
+import { readFileSync } from "node:fs";
+import { changeLabel, display, fieldRows, objects, stepLabel, stepRows } from "../src/components/chat/proposal-words.js";
 
 const GOAL_ID = "bc55de64-3d5a-4934-b404-b0945c6e2492";
 
@@ -52,5 +53,47 @@ describe("approval card", () => {
     assert.equal(changeLabel("motivate_capability"), "Link a goal to a capability");
     assert.equal(changeLabel("create_capability"), "New capability");
     assert.equal(changeLabel("some_new_tool"), "some new tool");
+  });
+});
+
+// "What it did": each step in plain words and names, as the approval card
+// says them (A36); the raw value stays the hover.
+describe("what it did", () => {
+  const CAP_ID = "cdca9ce1-ae77-4fab-add6-8d3dbc5000cf";
+
+  test("a step reads as what it did, not the tool's name", () => {
+    assert.equal(stepLabel("motivate_capability"), changeLabel("motivate_capability"));
+    assert.equal(stepLabel("list_goals"), "Read the goals");
+    assert.equal(stepLabel("existing_product_coverage"), "Score a product");
+    assert.equal(stepLabel("some_new_tool"), "some new tool");
+  });
+
+  test("every agent tool has words", () => {
+    const tools = readFileSync(new URL("../../backend/app/agents/tools.py", import.meta.url), "utf8");
+    const names = [...tools.matchAll(/_tool\(\s*"([a-z_]+)"/g)].map((m) => m[1]);
+    assert.ok(names.length > 20);
+    for (const name of names) assert.notEqual(stepLabel(name), name.replace(/_/g, " "), name);
+  });
+
+  test("IDs read as names, the UUID is the hover (chat1, QA c3)", () => {
+    const args = { goal: GOAL_ID, capability: CAP_ID };
+    const named = { goal: "PG-40 Plan work from goal to ticket with AI assistance", capability: "Knowledge Graph" };
+    assert.deepEqual(stepRows(args, named), [
+      { key: "goal", label: "goal", text: "PG-40 Plan work from goal to ticket with AI assistance", raw: GOAL_ID },
+      { key: "capability", label: "capability", text: "Knowledge Graph", raw: CAP_ID },
+    ]);
+  });
+
+  test("without names the raw values show; plain words for enum values", () => {
+    const rows = stepRows({ src: "Plan a route", dst: "Show the map", kind: "DEPENDS_ON", feature: null }, undefined);
+    assert.deepEqual(rows.map((r) => [r.label, r.text, r.raw]), [
+      ["from", "Plan a route", null], ["to", "Show the map", null], ["kind", "needs", "DEPENDS_ON"], ["feature", "none", null],
+    ]);
+  });
+
+  test("a document or a list of objects is counted, not printed", () => {
+    const doc = { epics: [{ title: "E" }], summary: "s" };
+    const rows = stepRows({ product: "Atlas", document: doc, features: [{ name: "a" }, { name: "b" }], targets: ["x", "y"] }, null);
+    assert.deepEqual(rows.map((r) => [r.key, r.text]), [["product", "Atlas"], ["document", "2 fields"], ["features", "2 items"], ["targets", "x, y"]]);
   });
 });

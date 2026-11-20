@@ -2,32 +2,25 @@ import React from "react";
 import { PageHeader } from "../shell/PageHeader.jsx";
 import { VizBlock } from "../chat/VizBlock.jsx";
 import { ProposalDraft } from "../chat/ProposalDraft.jsx";
-import { changeLabel } from "../chat/proposal-words.js";
+import { changeLabel, stepLabel, stepRows } from "../chat/proposal-words.js";
 import { Badge, Button, Icon, IconButton, Select, DeleteConfirm } from "../../ds";
 import { AGENT, PROPOSAL_STATUS, count } from "../../lib/words.js";
 import { Term } from "../shared/Term.jsx";
 import { api } from "../../lib/api.js";
 import { renderChatMarkdown } from "../../lib/chat-markdown.js";
 
-const stepLabel = (name) => name.replace(/_/g, " ");
 const STEP_STATUS = { started: "running…", finished: "done", failed: "failed", proposed: "proposed" };
 
-const agentLabel = (name) => AGENT[name] ?? (name ? stepLabel(name) : "Metis");
+const agentLabel = (name) => AGENT[name] ?? (name ? name.replace(/_/g, " ") : "Metis");
 
-const argValue = (v) => {
-  if (v == null) return "none";
-  if (typeof v !== "object") return String(v);
-  if (Array.isArray(v)) return v.every((x) => x == null || typeof x !== "object") ? v.join(", ") : count(v.length, "item");
-  return count(Object.keys(v).length, "field");
-};
-
-// A step's arguments as readable lines; the exact JSON stays one click away.
-function StepArgs({ args }) {
+// A step's arguments as readable lines, things by name as the approval card
+// names them; each raw value is the hover, the exact JSON one click away.
+function StepArgs({ args, named }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 2, color: "var(--text-secondary)" }}>
-      {Object.entries(args).map(([k, v]) => (
-        <div key={k} style={{ overflowWrap: "anywhere" }}>
-          {stepLabel(k)}: <span style={{ color: "var(--text-body)" }}>{argValue(v)}</span>
+      {stepRows(args, named).map((r) => (
+        <div key={r.key} style={{ overflowWrap: "anywhere" }}>
+          {r.label}: <span title={r.raw ?? undefined} style={{ color: "var(--text-body)" }}>{r.text}</span>
         </div>
       ))}
       <details>
@@ -62,7 +55,7 @@ function AgentSteps({ tools, waiting = false }) {
                 {STEP_STATUS[t.status] ?? t.status}
               </span>
             </span>
-            {t.arguments && Object.keys(t.arguments).length > 0 && <StepArgs args={t.arguments} />}
+            {t.arguments && Object.keys(t.arguments).length > 0 && <StepArgs args={t.arguments} named={t.named_arguments} />}
             {t.summary && t.status !== "proposed" && <div style={{ color: t.status === "failed" ? "var(--danger-fg)" : "var(--text-body)" }}>→ {t.summary}</div>}
           </li>
         ))}
@@ -262,7 +255,7 @@ export default function ChatIsland({ threadId: initialThreadId = null, canWrite 
   const [confirmingDelete, setConfirmingDelete] = React.useState(false);
   const [composerFocus, setComposerFocus] = React.useState(false);
   const [available, setAvailable] = React.useState(null); // null until /chat/status answers
-  const [products, setProducts] = React.useState([]);
+  const [products, setProducts] = React.useState(null); // null until /products answers
   const scrollRef = React.useRef(null);
   const stickRef = React.useRef(true); // follow new content only while the reader is at the bottom
   const threadRef = React.useRef(threadId);
@@ -277,8 +270,8 @@ export default function ChatIsland({ threadId: initialThreadId = null, canWrite 
   // Starter questions built from what is in metis, so each one has an answer.
   const examples = React.useMemo(() => {
     const byName = (a, b) => a.name.localeCompare(b.name);
-    const ours = products.filter((p) => !p.external).sort(byName)[0];
-    const theirs = products.filter((p) => p.external).sort(byName)[0];
+    const ours = (products ?? []).filter((p) => !p.external).sort(byName)[0];
+    const theirs = (products ?? []).filter((p) => p.external).sort(byName)[0];
     return [
       ours && `What could we build next from what ${ours.name} already has?`,
       "Which capabilities are shared by the most products?",
@@ -459,20 +452,39 @@ export default function ChatIsland({ threadId: initialThreadId = null, canWrite 
           )}
           {messages.length === 0 && (
             <div style={{ border: "1px dashed var(--border-default)", borderRadius: "var(--radius-md)", padding: 20, color: "var(--text-secondary)", fontSize: "var(--text-sm)", lineHeight: "var(--leading-body)" }}>
-              Ask about the inventory in plain words. For example:
-              {canWrite && available !== false ? (
-                <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 6, marginTop: 8 }}>
-                  {examples.map((q) => (
-                    <Button key={q} size="sm" variant="secondary" disabled={busy || running} onClick={() => send(q)}
-                      style={{ whiteSpace: "normal", height: "auto", minHeight: 28, padding: "4px 10px", textAlign: "left" }}>{q}</Button>
-                  ))}
-                </div>
+              {canWrite ? (
+                <>
+                  Ask about the inventory in plain words. For example:
+                  {available !== false ? (
+                    <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 6, marginTop: 8 }}>
+                      {examples.map((q) => (
+                        <Button key={q} size="sm" variant="secondary" disabled={busy || running} onClick={() => send(q)}
+                          style={{ whiteSpace: "normal", height: "auto", minHeight: 28, padding: "4px 10px", textAlign: "left" }}>{q}</Button>
+                      ))}
+                    </div>
+                  ) : (
+                    <ul style={{ margin: "8px 0 0", paddingLeft: 18 }}>
+                      {examples.map((q) => <li key={q}>{q}</li>)}
+                    </ul>
+                  )}
+                  <div style={{ marginTop: 10 }}>Agents keep working if you leave this page. Anything they want to change waits for your approval.</div>
+                </>
               ) : (
-                <ul style={{ margin: "8px 0 0", paddingLeft: 18 }}>
-                  {examples.map((q) => <li key={q}>{q}</li>)}
-                </ul>
+                <>
+                  {products?.length === 0 ? (
+                    // A viewer can't add the first product, so no question has an answer yet.
+                    "Nothing to ask about yet. Chat answers questions about products and their capabilities once an editor or admin adds the first product."
+                  ) : (
+                    <>
+                      Chat answers questions about the inventory in plain words, such as:
+                      <ul style={{ margin: "8px 0 0", paddingLeft: 18 }}>
+                        {examples.map((q) => <li key={q}>{q}</li>)}
+                      </ul>
+                    </>
+                  )}
+                  <div style={{ marginTop: 10 }}>Anything the agents want to change waits for an editor or admin to approve it.</div>
+                </>
               )}
-              <div style={{ marginTop: 10 }}>Agents keep working if you leave this page. Anything they want to change waits for your approval.</div>
             </div>
           )}
           {messages.filter((m) => !m.parent_id).map((m) =>

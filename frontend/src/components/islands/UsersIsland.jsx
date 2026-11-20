@@ -101,20 +101,32 @@ export default function UsersIsland() {
             temporary: draft.temporary,
           },
         });
-      } else {
-        await api(`/users/${editing.id}`, {
-          method: "PATCH",
-          body: {
-            email: draft.email.trim() || null,
-            first_name: draft.firstName.trim() || null,
-            last_name: draft.lastName.trim() || null,
-            role: draft.role || null,
-            enabled: draft.enabled,
-          },
+        await load();
+        setDialog(null);
+        setToast({
+          title: `Created ${draft.username.trim()} as ${roleLabel(draft.role)}`,
+          detail: draft.temporary ? "They choose their own password the first time they sign in." : undefined,
         });
+      } else {
+        const body = {
+          email: draft.email.trim() || null,
+          first_name: draft.firstName.trim() || null,
+          last_name: draft.lastName.trim() || null,
+          role: draft.role || null,
+          enabled: draft.enabled,
+        };
+        const changes = [
+          body.role !== (editing.role ?? null) && `role now ${roleLabel(body.role)}`,
+          body.enabled !== editing.enabled && (body.enabled ? "can sign in again" : "can't sign in now"),
+          body.email !== (editing.email ?? null) && "email updated",
+          (body.first_name !== (editing.first_name ?? null) || body.last_name !== (editing.last_name ?? null)) && "name updated",
+        ].filter(Boolean);
+        const { username } = editing;
+        await api(`/users/${editing.id}`, { method: "PATCH", body });
+        await load();
+        setDialog(null);
+        setToast({ title: `Saved ${username}`, detail: changes.length ? `${changes.join(", ")}.` : "Nothing changed." });
       }
-      await load();
-      setDialog(null);
     } catch (e) {
       setDialogError(String(e.message));
     } finally {
@@ -149,9 +161,11 @@ export default function UsersIsland() {
     setSaving(true);
     setDialogError(null);
     try {
+      const { username } = editing;
       await api(`/users/${editing.id}`, { method: "DELETE" });
       await load();
       setDialog(null);
+      setToast({ title: `Deleted ${username}` });
     } catch (e) {
       setDialogError(String(e.message));
       setConfirmingDelete(false);
@@ -241,10 +255,13 @@ export default function UsersIsland() {
               <DeleteConfirm armed={confirmingDelete} onArm={() => setConfirmingDelete(true)} onCancel={() => setConfirmingDelete(false)} onConfirm={remove} disabled={saving}
                 label="Delete" confirmLabel={"Delete user"} style={{ marginRight: "auto" }} />
             )}
-            <Button size="sm" variant="secondary" onClick={() => setDialog(null)}>Cancel</Button>
-            <Button size="sm" variant="accent" disabled={saving} onClick={save}>
-              {dialog?.mode === "new" ? "Create user" : "Save"}
-            </Button>
+            {/* While a delete is armed, Keep is the one way back. */}
+            {!confirmingDelete && <>
+              <Button size="sm" variant="secondary" onClick={() => setDialog(null)}>Cancel</Button>
+              <Button size="sm" variant="accent" disabled={saving} onClick={save}>
+                {dialog?.mode === "new" ? "Create user" : "Save"}
+              </Button>
+            </>}
           </>
         }
       >

@@ -1,4 +1,4 @@
-import { EDGE, LAYER, MATURITY, plain, priorityLabel, statusLabel } from "../../lib/words.js";
+import { EDGE, LAYER, MATURITY, count, plain, priorityLabel, statusLabel } from "../../lib/words.js";
 
 // The approval card's words: what a proposed change does, and each of its
 // fields as a person reads it. The raw value (tool name, enum, UUID or code
@@ -22,12 +22,37 @@ export const CHANGE = {
 
 export const changeLabel = (tool) => CHANGE[tool] ?? String(tool ?? "").replace(/_/g, " ");
 
+/** What each read tool does, as a step in "What it did". */
+const READ = {
+  list_goals: "Read the goals",
+  list_products: "Read the products",
+  list_features: "Read the features",
+  list_capabilities: "Read the capabilities",
+  capability_inventory: "Read what already exists",
+  product_coverage: "Check an idea",
+  existing_product_coverage: "Score a product",
+  search_features: "Search the features",
+  impact_query: "Find what needs a feature",
+  topo_order: "Work out the build order",
+  find_cycles: "Look for features that need each other in a loop",
+  ready_set: "Find what's ready to start",
+  capability_rollup: "Count a capability's progress",
+  why_feature: "Trace why a feature exists",
+  mvp_cut: "Work out the smallest version",
+  taxonomy_health: "Check the capability map for gaps",
+};
+
+/** A step in "What it did": a change in the approval card's words, a read in its own. */
+export const stepLabel = (tool) => CHANGE[tool] ?? READ[tool] ?? String(tool ?? "").replace(/_/g, " ");
+
 const FIELD = {
   unknown_capabilities: "capability list incomplete",
   evidence_anchors: "evidence",
   priority_rationale: "why this priority",
   context_budget: "size",
   affected_files: "files",
+  src: "from",
+  dst: "to",
 };
 
 const VALUE = {
@@ -67,6 +92,24 @@ export function fieldRows(args, named) {
   return Object.keys(args ?? {}).map((key) => {
     const value = text(key, shown[key]);
     const raw = text(null, args[key]);
+    return { key, label: FIELD[key] ?? key.replace(/_/g, " "), text: value, raw: raw === value ? null : raw };
+  });
+}
+
+/** One row per argument of a step in "What it did", as fieldRows: names from
+ *  the step's named arguments, plain words, the raw value for the hover. An
+ *  object, or a list of them (a PRD document, an idea's features), is counted;
+ *  the step's Raw block has it in full. */
+export function stepRows(args, named) {
+  const shown = named ?? args ?? {};
+  return Object.keys(args ?? {}).map((key) => {
+    const v = shown[key];
+    const nested = v != null && typeof v === "object" && !isNew(v)
+      && (!Array.isArray(v) || v.some((x) => x != null && typeof x === "object" && !isNew(x)));
+    const value = v == null ? "none"
+      : nested ? (Array.isArray(v) ? count(v.length, "item") : count(Object.keys(v).length, "field"))
+      : text(key, v);
+    const raw = nested || args[key] == null ? null : text(null, args[key]);
     return { key, label: FIELD[key] ?? key.replace(/_/g, " "), text: value, raw: raw === value ? null : raw };
   });
 }

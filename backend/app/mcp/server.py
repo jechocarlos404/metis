@@ -305,6 +305,23 @@ TOOLS = [
             },
         },
     ),
+    Tool(
+        name="recheck",
+        description=(
+            "If a feature changes, what else to recheck: features that break "
+            "(depend on it, through links of links), same-product features "
+            "sharing a confirmed capability (rarest first), capabilities most "
+            "of the product uses (counted), and our other products with the "
+            "same capabilities (information only). Guesses are not counted."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "feature": {"type": "string", "description": "Feature id or exact feature name"}
+            },
+            "required": ["feature"],
+        },
+    ),
 ]
 
 
@@ -446,6 +463,9 @@ async def _dispatch(name: str, args: dict) -> str:
             )
         return render.ready_features(ready, products, only, pending)
 
+    if name == "recheck":
+        return await _recheck(args["feature"])
+
     raise ValueError(f"Unknown tool: {name}")
 
 
@@ -456,6 +476,20 @@ def _match_product(products: list[dict], value: str) -> dict | None:
 
 async def _product(value: str) -> dict | None:
     return _match_product(await client.get("/api/products"), value)
+
+
+async def _recheck(value: str) -> str:
+    """By id, or by exact name. Never a near name, and a name two features
+    share is listed for the agent to pick from, not picked."""
+    products = await client.get("/api/products")
+    try:
+        feature_id = _safe_id(value)
+    except ValueError:
+        named = [f for f in await client.get("/api/features", {"q": value}) if f["name"] == value]
+        if len(named) != 1:
+            return render.no_feature(value, named, products)
+        feature_id = _safe_id(named[0]["id"])
+    return render.recheck(await client.get(f"/api/graph/recheck/{feature_id}"), products)
 
 
 async def _capability(slug: str) -> str:

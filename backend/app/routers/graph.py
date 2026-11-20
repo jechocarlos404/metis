@@ -2,9 +2,11 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
+from app.models import Product
 from app.services import capabilities as capability_service
 from app.services.graph_service import FeatureGraph, GraphCycleError
 
@@ -38,6 +40,21 @@ async def layout(request: Request):
 async def impact(feature_id: uuid.UUID, request: Request):
     graph = await _graph(request)
     return {"feature_id": str(feature_id), **graph.impact(feature_id)}
+
+
+@router.get("/recheck/{feature_id}")
+async def recheck(feature_id: uuid.UUID, request: Request, session: AsyncSession = Depends(get_db)):
+    """If this feature changes, what else to recheck: breaks (dependents),
+    retest (same product, shared confirmed capability, rarest first), broad
+    (capabilities most of the product uses, counted) and elsewhere (our other
+    products with the same capabilities, information only)."""
+    graph = await _graph(request)
+    capabilities = {c.id: c.name for c in await capability_service.list_capabilities(session)}
+    products = {p.id: p.name for p in await session.scalars(select(Product))}
+    result = graph.recheck(feature_id, capabilities, products)
+    if result is None:
+        raise HTTPException(404, f"Feature {feature_id} not found")
+    return result
 
 
 @router.get("/topo")

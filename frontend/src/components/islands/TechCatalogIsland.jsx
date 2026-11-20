@@ -172,8 +172,8 @@ export default function TechCatalogIsland({ initialView = "catalog", initialQuer
         meta={
           view === "exposure"
             ? [
-                techTotal > 0 && judged === 0 ? "no lifecycle data" : `${exposed} at risk`,
-                judged > 0 && unknown > 0 && `${unknown} without lifecycle data`,
+                exposed === 0 && techTotal > 0 && judged === 0 ? "no lifecycle data" : `${exposed} at risk`,
+                unknown > 0 && !(exposed === 0 && judged === 0) && `${unknown} without lifecycle data`,
                 formatAsOf(exposure?.as_of),
               ].filter(Boolean).join(" · ")
             : loading ? "loading" : count(total, "technology", "technologies")

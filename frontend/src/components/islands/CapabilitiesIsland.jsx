@@ -4,6 +4,7 @@ import { Badge, Button, Dialog, Icon, Input, Select } from "../../ds";
 import { MaturityBadge } from "../shared/coverage.jsx";
 import { Guesses } from "../shared/Guesses.jsx";
 import { api } from "../../lib/api.js";
+import { readParam, writeParams } from "../../lib/url-state.js";
 import { MATURITY, count } from "../../lib/words.js";
 
 // Health finding kinds this page shows, in plain words, and where each links.
@@ -65,8 +66,15 @@ export default function CapabilitiesIsland({ canWrite = true }) {
   const [draft, setDraft] = React.useState(EMPTY_DRAFT);
   const [saving, setSaving] = React.useState(false);
   const [dialogError, setDialogError] = React.useState(null);
+  const [deleted, setDeleted] = React.useState(null); // name a capability page just deleted
 
   React.useEffect(() => {
+    // The capability page sends you here after a delete; say so once.
+    const name = readParam("deleted");
+    if (name) {
+      setDeleted(name);
+      writeParams({ deleted: "" });
+    }
     Promise.all([api("/capabilities/inventory"), api("/capabilities/health")])
       .then(([inv, health]) => {
         setInventory(inv);
@@ -150,6 +158,7 @@ export default function CapabilitiesIsland({ canWrite = true }) {
         }
       />
       {error && <div style={{ padding: "8px 24px", fontSize: "var(--text-sm)", color: "var(--danger-fg)" }}>{error}</div>}
+      {deleted && <div role="status" style={{ padding: "8px 24px 0", fontSize: "var(--text-sm)", color: "var(--ok-fg)" }}>Deleted {deleted}.</div>}
       <div style={{ flex: 1, overflowY: "auto", padding: 20, display: "flex", flexDirection: "column", gap: 12, minHeight: 0 }}>
         <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
           <input type="search" value={find} onChange={(e) => setFind(e.target.value)}

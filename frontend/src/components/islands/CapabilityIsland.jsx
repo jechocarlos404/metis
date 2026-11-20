@@ -54,6 +54,7 @@ export default function CapabilityIsland({ slug, canWrite = false }) {
   const [motivations, setMotivations] = React.useState(null);
   const [notFound, setNotFound] = React.useState(false);
   const [error, setError] = React.useState(null);
+  const [saved, setSaved] = React.useState(null); // what the last edit changed, said in place
   const [dialogOpen, setDialogOpen] = React.useState(false);
   const [draft, setDraft] = React.useState(null);
   const [saving, setSaving] = React.useState(false);
@@ -123,6 +124,7 @@ export default function CapabilityIsland({ slug, canWrite = false }) {
   const addable = goals.filter((g) => !linked.has(g.id));
 
   const openEdit = () => {
+    setSaved(null);
     setDraft({ name: cap.name, description: cap.description ?? "", parentId: cap.parent_id ?? "", maturity: cap.maturity });
     setDialogError(null);
     setDialogOpen(true);
@@ -132,17 +134,23 @@ export default function CapabilityIsland({ slug, canWrite = false }) {
     if (!draft.name.trim()) return;
     setSaving(true);
     setDialogError(null);
+    const body = {
+      name: draft.name.trim(),
+      description: draft.description.trim() || null,
+      parent_id: draft.parentId || null,
+      maturity: draft.maturity,
+    };
+    const newParent = all.find((c) => c.id === body.parent_id);
+    const changes = [
+      body.name !== cap.name && `renamed from ${cap.name}`,
+      body.parent_id !== (cap.parent_id ?? null) && (newParent ? `moved under ${newParent.name}` : "moved to top level"),
+      body.maturity !== cap.maturity && `maturity now ${plain(MATURITY, body.maturity)}`,
+      body.description !== (cap.description ?? null) && "description updated",
+    ].filter(Boolean);
     try {
-      await api(`/capabilities/${cap.id}`, {
-        method: "PATCH",
-        body: {
-          name: draft.name.trim(),
-          description: draft.description.trim() || null,
-          parent_id: draft.parentId || null,
-          maturity: draft.maturity,
-        },
-      });
+      await api(`/capabilities/${cap.id}`, { method: "PATCH", body });
       setDialogOpen(false);
+      setSaved(changes.length ? `Saved: ${changes.join(", ")}.` : "Saved. Nothing changed.");
       await load();
     } catch (e) {
       setDialogError(e.status === 409 && e.detail?.slug
@@ -153,16 +161,41 @@ export default function CapabilityIsland({ slug, canWrite = false }) {
     }
   };
 
+  // What stops a delete, said before anyone confirms: features linked to this
+  // capability itself (not through a sub-capability) and technologies offered for it.
+  const inUse = () => {
+    const features = (supply?.realizations ?? []).filter((r) => !r.via);
+    const techs = supply?.answer ?? [];
+    if (!features.length && !techs.length) return null;
+    const named = [
+      ...features.map((r) => (r.product_name ? `${r.feature} (${r.product_name})` : r.feature)),
+      ...techs.map((o) => o.tech),
+    ];
+    const what = [
+      features.length && count(features.length, "feature"),
+      techs.length && count(techs.length, "technology", "technologies"),
+    ].filter(Boolean).join(" and ");
+    return `Can't delete: ${what} still use${features.length + techs.length === 1 ? "s" : ""} it: ${named.join(", ")}. Unlink ${features.length + techs.length === 1 ? "it" : "them"} first.`;
+  };
+
+  const armDelete = () => {
+    setSaved(null);
+    const blocked = inUse();
+    if (blocked) setError(blocked);
+    else {
+      setError(null);
+      setConfirmingDelete(true);
+    }
+  };
+
   const remove = async () => {
     setSaving(true);
     setError(null);
     try {
       await api(`/capabilities/${cap.id}`, { method: "DELETE" });
-      window.location.href = "/capabilities";
+      window.location.href = `/capabilities?deleted=${encodeURIComponent(cap.name)}`;
     } catch (e) {
-      setError(e.status === 409
-        ? "Features or technologies still use this capability. Unlink them first, then delete it."
-        : String(e.message));
+      setError(e.status === 409 ? `Can't delete: ${e.message}` : String(e.message));
       setConfirmingDelete(false);
       setSaving(false);
     }
@@ -220,7 +253,7 @@ export default function CapabilityIsland({ slug, canWrite = false }) {
                     : `Its ${children.length} sub-capabilities will move to the top level.`}
                 </span>
               )}
-              <DeleteConfirm armed={confirmingDelete} onArm={() => setConfirmingDelete(true)} onCancel={() => setConfirmingDelete(false)}
+              <DeleteConfirm armed={confirmingDelete} onArm={armDelete} onCancel={() => setConfirmingDelete(false)}
                 onConfirm={remove} disabled={saving} label="Delete" confirmLabel="Delete capability" />
             </span>
           )
@@ -229,6 +262,7 @@ export default function CapabilityIsland({ slug, canWrite = false }) {
 
       <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 16, maxWidth: 880 }}>
         {error && <div role="alert" style={{ fontSize: "var(--text-sm)", color: "var(--danger-fg)" }}>{error}</div>}
+        {saved && <div role="status" style={{ fontSize: "var(--text-sm)", color: "var(--ok-fg)" }}>{saved}</div>}
 
         <section style={SECTION}>
           <h2 style={H2}>What it is</h2>

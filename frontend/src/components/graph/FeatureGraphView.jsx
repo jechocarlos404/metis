@@ -104,13 +104,12 @@ export function FeatureGraphView({ layout, hubs, selectedId, onSelect, recheckSt
     engineRef.current?.setReducedMotion(reducedMotion);
   }, [reducedMotion]);
 
-  // Grouped, a graph opens on what it is grouped by: its hubs centred (B35),
-  // leaving out the "linked to none" one, which is not a goal or capability.
-  // In build order, on the selected feature.
+  // Grouped, a graph opens on what it is grouped by: its hubs centred, the
+  // biggest group first and as many more as fit with it, "linked to none"
+  // counted like the rest (B35). In build order, on the selected feature.
   const openFocus = () => {
-    const hubs = graphData.nodes.filter((n) => n.hub);
-    const named = hubs.filter((n) => n.tone !== "empty");
-    return hubs.length ? { ids: (named.length ? named : hubs).map((n) => n.id), centre: true } : selectedId;
+    const hubs = graphData.nodes.filter((n) => n.hub).sort((a, b) => b.count - a.count);
+    return hubs.length ? { ids: hubs.map((n) => n.id), centre: true } : selectedId;
   };
 
   useIsomorphicLayoutEffect(() => {
@@ -251,7 +250,7 @@ export function FeatureGraphView({ layout, hubs, selectedId, onSelect, recheckSt
       />
       <GraphLegend legendRef={legendRef} cutActive={cutStates != null} recheckActive={recheckStates != null} hubs={hubs} graphData={graphData} />
 
-      <GraphCaption name={named?.name} />
+      <GraphCaption name={named?.hub ? `${named.name} · ${count(named.count, "feature")}` : named?.name} />
 
       {graphData.nodes.length === 0 && (
         <div style={{
@@ -344,7 +343,7 @@ function HubNode({ node, isDimmed, onHoverChange, registerEl }) {
       style={{ cursor: "grab" }}>
       <title>{label}</title>
       <HubPill tone={tone} />
-      <CardLabel name={node.name} x={0} anchor="middle" fill={tone.text} />
+      <CardLabel name={node.name} x={0} anchor="middle" fill={tone.text} after={count(node.count, "feature")} />
     </g>
   );
 }
@@ -355,8 +354,9 @@ function HubPill({ tone, w = HUB_W, h = HUB_H }) {
 
 // SVG text, not an HTML foreignObject: 462 HTML labels made pan and zoom
 // drop to about 29fps. Hidden when zoomed out too far to read (.graph-far).
-export function CardLabel({ name, x, fill = "var(--text-heading)", anchor, maxLines = 2 }) {
-  const lines = wrapLabel(name, 19, maxLines);
+// `after`: one more line under the name, such as a hub's feature count.
+export function CardLabel({ name, x, fill = "var(--text-heading)", anchor, maxLines = 2, after }) {
+  const lines = after ? [...wrapLabel(name, 19, maxLines), after] : wrapLabel(name, 19, maxLines);
   const lineH = 14;
   return (
     <text x={x} y={-((lines.length - 1) * lineH) / 2} dominantBaseline="central" fill={fill} textAnchor={anchor}

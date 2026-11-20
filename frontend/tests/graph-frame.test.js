@@ -97,16 +97,17 @@ test("a selected goal opens centred at full size when the whole network can't be
   assert.equal((screenY(t, goal.y0) + screenY(t, goal.y1)) / 2, 220);
 });
 
-test("a grouped graph opens on as many of its hubs as show whole and readable (B35)", () => {
+test("a grouped graph opens on its biggest hub, with each next one that shows with it readable (B35)", () => {
   const b = { x0: -1000, y0: -600, x1: 1000, y1: 600 };
-  // Most used first; the two on the left sit close, the first far right.
+  // Biggest first: the first far right, the two on the left close together.
   const hubs = [{ x0: 400, y0: 0, x1: 548, y1: 40 }, { x0: -10, y0: -200, x1: 138, y1: -160 }, { x0: -10, y0: 0, x1: 138, y1: 40 }];
-  // 300 px wide: no two across 400 units, so the pair that does fit wins.
+  // 300 px wide: nothing else fits across 400 units with the biggest, so it
+  // opens on the biggest alone, never on the smaller pair without it.
   const narrow = readableUnion(hubs, 300, 600);
-  assert.deepEqual(narrow, { x0: -10, y0: -200, x1: 138, y1: 40 });
+  assert.deepEqual(narrow, hubs[0]);
   const t = openTransform(b, 300, 600, 0, 2.5, narrow, true);
   assert.ok(t.k >= READABLE_SCALE && t.k <= 1);
-  for (const h of hubs.slice(1)) assert.ok(inside(t, h, 0, 0, 300, 600));
+  assert.ok(inside(t, hubs[0], 0, 0, 300, 600));
   // Wide, all of them.
   assert.deepEqual(readableUnion(hubs, 900, 600), { x0: -10, y0: -200, x1: 548, y1: 40 });
   assert.equal(readableUnion([], 900, 600), null);

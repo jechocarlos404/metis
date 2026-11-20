@@ -400,6 +400,7 @@ export function createForceGraph(opts) {
 
   /** Every node in view, however small that makes them. */
   function fitToView(duration = 450) {
+    openPending = null; // pressed while settling: the view the graph opens on must not undo it (B40)
     const b = bounds();
     if (b) frameTo(fitTransform(b, svgEl.clientWidth || 1, svgEl.clientHeight || 1, o.frameInsets(), o.scaleExtent[1]), duration);
   }
@@ -472,6 +473,7 @@ export function createForceGraph(opts) {
   }
 
   function zoomBy(factor) {
+    openPending = null; // as Fit (B40)
     const w = svgEl.clientWidth || 1;
     const h = svgEl.clientHeight || 1;
     const cx = w / 2;

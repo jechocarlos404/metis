@@ -83,25 +83,19 @@ export function pickTransform(box, near, w, h, inset = 0, maxK = 1) {
 }
 
 /**
- * The box around as many of `boxes` as the frame shows together at a
- * readable scale: a grouped graph's hubs, most used first, so a narrow screen
- * opens on the groups it can show whole rather than on the middle of all of
- * them, cutting each. Each box in turn seeds a set that takes every later
- * one that still fits; the largest set wins, the earliest seed on a tie.
+ * The box around the first of `boxes` and each later one that still shows
+ * with it at a readable scale: a grouped graph's hubs, biggest group first,
+ * so a narrow screen opens on its biggest groups whole rather than on the
+ * middle of all of them, cutting each (B35).
  */
 export function readableUnion(boxes, w, h, inset = 0) {
-  let best = null;
-  for (const seed of boxes) {
-    let box = seed;
-    let n = 1;
-    for (const b of boxes) {
-      if (b === seed) continue;
-      const next = join(box, b);
-      if (fitTransform(next, w, h, inset, 1).k >= READABLE_SCALE) { box = next; n++; }
-    }
-    if (!best || n > best.n) best = { box, n };
+  if (!boxes.length) return null;
+  let box = boxes[0];
+  for (const b of boxes.slice(1)) {
+    const next = join(box, b);
+    if (fitTransform(next, w, h, inset, 1).k >= READABLE_SCALE) box = next;
   }
-  return best?.box ?? null;
+  return box;
 }
 
 /**
@@ -345,7 +339,7 @@ export function goalRoot(goalParent, id) {
 // Hub views (Group by capability or goal) draw a small pill per hub and a
 // line from each feature to each of its hubs.
 export const HUB_W = NODE_W;
-export const HUB_H = 40;
+export const HUB_H = NODE_H; // the name's two lines and its feature count (B41)
 const CELL_W = NODE_W + 16; // the engine's collision box, so anchors already clear it
 const CELL_H = NODE_H + 16;
 const UNIT_W = CELL_W / 2; // blocks sit on a grid of half cells

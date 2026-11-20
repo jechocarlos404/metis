@@ -3,20 +3,25 @@
 
 The inverse of seed_instance.py. Stdlib only — no dependencies. Entities are
 matched exactly the way the loader matches them (goals by type+title;
-capabilities and products by name, features by (product, name); edges by src+dst+kind;
-motivations by pair) and deleted via the REST API.
+capabilities and products by name, features by (product, name); technologies
+by slug; edges by src+dst+kind; motivations and satisfactions by pair) and
+deleted via the REST API.
 
 Entities entangled with material outside the seed are kept, with a warning:
 
 - a product is kept if features outside the seed belong to it
+- a technology is kept if a product outside the seed uses it, if it has an
+  adoption stance, or if it satisfies (or is guessed to satisfy) a capability
+  the seed does not link it to
 - a capability is kept if foreign features realize it (any of a feature's
-  capability_ids counts), or if any child
-  capability is foreign or itself kept
+  capability_ids counts), if a foreign feature or technology links to it
+  (confirmed or guessed), or if any child capability is foreign or itself kept
 - a goal is kept if it has foreign child goals or foreign products
 
-Deleting a feature cascades its edges — including edges foreign features had
-to it (reported as notes). Deleting a product cascades its PRD and all work
-items, including tickets created after seeding.
+Deleting a feature cascades its edges (including edges foreign features had
+to it, reported as notes) and its guesses. Deleting a product cascades its
+PRD, all work items (including tickets created after seeding) and its
+technology usage. Deleting a technology cascades its satisfactions and guesses.
 
 Usage:
     python3 unseed_instance.py metis-seed.json [--base-url http://localhost:8000] [--dry-run]
@@ -27,8 +32,10 @@ were kept or failed (see warnings).
 
 import argparse
 import json
+import re
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 
 
@@ -75,6 +82,14 @@ class Api:
         return self.request("DELETE", path)
 
 
+def tech_slug(tech):
+    """The loader's technology identity: explicit slug, else the backend's
+    slug rule applied to the name."""
+    if tech.get("slug") is not None:
+        return tech["slug"]
+    return re.sub(r"[^a-z0-9]+", "-", str(tech.get("name", "")).strip().lower()).strip("-")
+
+
 class Unseeder:
     def __init__(self, api, doc, dry_run):
         self.api = api
@@ -90,11 +105,13 @@ class Unseeder:
         self.inst_feats = api.get("/api/features")
         self.inst_edges = api.get("/api/features/edges")
         self.inst_prods = api.get("/api/products")
-        # Buy-side supply. A seed carries no tech, so any satisfaction on a
-        # seeded capability was recorded by someone else — it is shared state,
-        # like a foreign feature, and the capability is kept rather than
-        # deleted. Older instances predate the endpoint; treat that as none.
+        # Buy-side supply and guesses. A satisfaction or guess the seed did not
+        # declare was recorded by someone else; it is shared state, like a
+        # foreign feature, and the capability is kept rather than deleted.
+        # Older instances predate these endpoints; treat that as none.
         self.inst_sats = api.get_optional("/api/tech/satisfactions")
+        self.inst_guesses = api.get_optional("/api/guesses")
+        self.inst_techs = self._all_technologies()
 
         # seed ref -> matched instance entity
         self.goals = self._match(
@@ -120,6 +137,37 @@ class Unseeder:
             {(f.get("product_id"), f["name"]): f for f in self.inst_feats},
             lambda f: f.get("name"),
         )
+        self.techs = self._match(
+            "technologies", tech_slug,
+            {t["slug"]: t for t in self.inst_techs},
+            lambda t: t.get("name"),
+        )
+        # Usage of the seed's products, read now: deleting a product cascades
+        # its usage rows, and the technology guard runs after that.
+        self.inst_usage = {
+            p["id"]: api.get_optional(f"/api/stacks/usage?product_id={p['id']}")
+            for p in self.prods.values()
+        } if self.techs else {}
+        # (tech id, capability id) pairs the seed itself declares, confirmed
+        # or guessed: removing those is undoing the seed, not foreign data.
+        self.declared = set()
+        for t in self.doc.get("technologies") or []:
+            tech = self.techs.get(t.get("ref"))
+            for sat in t.get("satisfies") or []:
+                cap = self.caps.get(sat.get("capability_ref"))
+                if tech and cap:
+                    self.declared.add((tech["id"], cap["id"]))
+
+    def _all_technologies(self):
+        rows, offset = [], 0
+        while True:
+            status, page = self.api.request("GET", f"/api/tech?limit=200&offset={offset}")
+            if status != 200:
+                return rows
+            rows.extend(page["rows"])
+            offset += 200
+            if offset >= page["total"] or not page["rows"]:
+                return rows
 
     def _match(self, collection, key, existing, label):
         matched = {}
@@ -159,14 +207,25 @@ class Unseeder:
         """Matched capabilities safe to delete, leaves before parents."""
         matched_ids = {c["id"] for c in self.caps.values()}
         matched_feat_ids = {f["id"] for f in self.feats.values()}
-        children, feats_of, sats_of = {}, {}, {}
+        dead_techs = self._dead("techs")
+        children, feats_of, sats_of, guesses_of = {}, {}, {}, {}
         for c in self.inst_caps:
             children.setdefault(c["parent_id"], []).append(c)
         for f in self.inst_feats:
             for cid in f.get("capability_ids") or []:
                 feats_of.setdefault(cid, []).append(f)
         for s in self.inst_sats:
+            # Gone with its technology, or the seed's own (removed before
+            # the capability): neither holds the capability back.
+            if s["tech_id"] in dead_techs or (s["tech_id"], s["capability_id"]) in self.declared:
+                continue
             sats_of.setdefault(s["capability_id"], []).append(s)
+        for g in self.inst_guesses:
+            if g.get("feature_id") in matched_feat_ids or g.get("tech_id") in dead_techs:
+                continue
+            if g.get("tech_id") and (g["tech_id"], g["capability_id"]) in self.declared:
+                continue
+            guesses_of.setdefault(g["capability_id"], []).append(g)
 
         verdict = {}  # cap id -> bool
 
@@ -186,6 +245,9 @@ class Unseeder:
                     f"{len(sats)} technolog(ies) satisfy it — remove the satisfactions "
                     "first if you really mean to drop it"
                 )
+            guesses = guesses_of.get(cid, [])
+            if guesses:
+                reasons.append(f"{len(guesses)} guessed link(s) from outside the seed point at it")
             for child in children.get(cid, []):
                 if child["id"] not in matched_ids:
                     reasons.append(f"child capability {child['name']!r} is not in the seed")
@@ -256,12 +318,49 @@ class Unseeder:
 
     # ---- removal passes, safest order ----
 
+    def deletable_techs(self):
+        """Matched technologies safe to delete."""
+        foreign = self.foreign_feature_counts()
+        dead_prods = [p["id"] for p in self.prods.values() if p["id"] not in foreign]
+        seed_users = {}  # tech id -> how many deleted seed products use it
+        for pid in dead_prods:
+            for u in self.inst_usage.get(pid, []):
+                seed_users[u["tech_id"]] = seed_users.get(u["tech_id"], 0) + 1
+        cap_names = {c["id"]: c["name"] for c in self.inst_caps}
+        deletable = []
+        for tech in self.techs.values():
+            tid, reasons = tech["id"], []
+            others = (tech.get("used_by") or 0) - seed_users.get(tid, 0)
+            if others > 0:
+                reasons.append(f"{others} product(s) outside the seed use it")
+            if tech.get("adoption"):
+                reasons.append(f"it has an adoption stance ({tech['adoption']})")
+            links = [(s["capability_id"], "satisfies") for s in self.inst_sats if s["tech_id"] == tid]
+            links += [
+                (g["capability_id"], "is guessed to satisfy")
+                for g in self.inst_guesses
+                if g.get("tech_id") == tid
+            ]
+            for cid, verb in links:
+                if (tid, cid) not in self.declared:
+                    reasons.append(f"{verb} {cap_names.get(cid, cid)!r}, which the seed does not say")
+            if reasons:
+                self.keep("technologies", f"technology {tech['name']!r}", reasons)
+            else:
+                deletable.append(tech)
+        return deletable
+
     def _dead(self, kind):
-        """Ids the capability/goal passes will delete, computed once — the
-        deletable_* checks record keep-warnings, so they must not run twice."""
+        """Ids the technology/capability/goal passes will delete, computed
+        once: the deletable_* checks record keep-warnings, so they must not
+        run twice."""
         cache = self.__dict__.setdefault("_dead_cache", {})
         if kind not in cache:
-            rows = self.deletable_caps() if kind == "caps" else self.deletable_goals()
+            rows = {
+                "techs": self.deletable_techs,
+                "caps": self.deletable_caps,
+                "goals": self.deletable_goals,
+            }[kind]()
             cache[kind] = rows
         return {r["id"] for r in cache[kind]}
 
@@ -348,6 +447,36 @@ class Unseeder:
                 "features", f"/api/features/{feat['id']}", f"feature {feat['name']!r}"
             )
 
+    def remove_technologies(self):
+        """Deletable technologies go (cascading their satisfactions, guesses
+        and usage). On a kept one, the seed's confirmed satisfactions of a
+        capability that is about to be deleted go first: the capability
+        foreign key restricts, and the seed is what created them."""
+        for tech in self._dead_cache_rows("techs"):
+            self.remove(
+                "technologies",
+                f"/api/tech/{urllib.parse.quote(tech['slug'], safe='')}",
+                f"technology {tech['name']!r} (cascades its satisfactions and guesses)",
+            )
+        dead_techs, dead_caps = self._dead("techs"), self._dead("caps")
+        cap_names = {c["id"]: c["name"] for c in self.inst_caps}
+        for s in self.inst_sats:
+            pair = (s["tech_id"], s["capability_id"])
+            if s["tech_id"] in dead_techs or pair not in self.declared:
+                continue
+            if s["capability_id"] not in dead_caps:
+                self.note("satisfactions", "kept")
+                continue
+            self.remove(
+                "satisfactions",
+                f"/api/tech/satisfactions/{s['id']}",
+                f"satisfaction of {cap_names.get(s['capability_id'])!r}",
+            )
+
+    def _dead_cache_rows(self, kind):
+        self._dead(kind)
+        return self._dead_cache[kind]
+
     def remove_capabilities(self):
         self._dead("caps")
         for cap in self._dead_cache["caps"]:
@@ -363,7 +492,10 @@ class Unseeder:
             self.remove("goals", f"/api/goals/{goal['id']}", f"goal {goal['title']!r}")
 
     def report(self):
-        order = ["motivations", "edges", "products", "features", "capabilities", "goals"]
+        order = [
+            "motivations", "edges", "products", "features", "technologies",
+            "satisfactions", "capabilities", "goals",
+        ]
         for collection in order:
             actions = {a: n for (c, a), n in self.counts.items() if c == collection}
             if actions:
@@ -411,6 +543,7 @@ def main():
     unseeder.remove_edges()
     unseeder.remove_products()
     unseeder.remove_features()
+    unseeder.remove_technologies()
     unseeder.remove_capabilities()
     unseeder.remove_goals()
 

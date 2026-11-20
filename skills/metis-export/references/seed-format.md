@@ -1,1 +1,0 @@
-../../../backend/app/ontology/seed-format.md

@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """Validate a metis-seed JSON file (format v1) without touching an instance.
 
-Stdlib only. Runs the same structural checks as the loader in the metis repo
-(.claude/skills/metis-seed-instance/scripts/seed_instance.py — keep the validate()
-function in sync with the copy there): required fields, enum values, ref
-resolution, parent forests, and acyclicity of the precedence graph
-(DEPENDS_ON plus reversed BLOCKS).
+Stdlib only. Runs the same structural checks as the loader in the metis
+plugin (../../metis-seed-instance/scripts/seed_instance.py, next to this skill;
+keep everything from the constants through validate() identical to the copy
+there): required fields, enum values, ref resolution, guesses, technologies,
+parent forests, and acyclicity of the precedence graph (DEPENDS_ON plus
+reversed BLOCKS).
 
 Usage:
     python3 validate_seed.py metis-seed.json
@@ -13,6 +14,7 @@ Usage:
 
 import argparse
 import json
+import re
 import sys
 
 GOAL_TYPES = {"org", "product"}
@@ -20,6 +22,29 @@ WORK_STATUSES = {"pending", "in_progress", "done"}
 MATURITIES = {"planned", "alpha", "beta", "ga", "deprecated", "retired"}
 EDGE_KINDS = {"DEPENDS_ON", "BLOCKS", "RELATES_TO"}
 CONTEXT_BUDGETS = {"S", "M", "L"}
+CONFIDENCES = {"low", "medium", "high"}
+TECH_KINDS = {"language", "framework", "library", "runtime", "service", "model", "protocol"}
+TECH_LAYERS = {"data", "api", "web", "agent", "infra", "ops"}
+TECH_FITS = {"native", "partial", "workaround"}
+
+
+def slugify(value):
+    """The backend's slug rule: lowercase kebab, '' when nothing survives."""
+    return re.sub(r"[^a-z0-9]+", "-", value.strip().lower()).strip("-")
+
+
+def tech_slug(tech):
+    """A technology's identity: its explicit slug, else one derived from its name."""
+    if tech.get("slug") is not None:
+        return tech["slug"]
+    return slugify(tech["name"]) if isinstance(tech.get("name"), str) else ""
+
+
+def _check_guess(errors, where, item):
+    if item.get("confidence") not in CONFIDENCES:
+        errors.append(f"{where}: confidence must be one of {sorted(CONFIDENCES)}")
+    if item.get("basis") is not None and not isinstance(item["basis"], str):
+        errors.append(f"{where}: basis must be a string")
 
 
 def _check_priority(errors, where, item):
@@ -153,11 +178,82 @@ def validate(doc):
                     errors.append(f"{where}: capability ref {ref!r} does not match a capability")
             if len(set(map(str, refs))) != len(refs):
                 errors.append(f"{where}: capability_refs lists a capability twice")
+        guesses = f.get("capability_guesses")
+        if guesses is not None and not isinstance(guesses, list):
+            errors.append(f"{where}: capability_guesses must be a list")
+        elif guesses:
+            confirmed = set(map(str, refs)) if isinstance(refs, list) else set()
+            guessed = set()
+            for j, g in enumerate(guesses):
+                gwhere = f"{where}.capability_guesses[{j}]"
+                if not isinstance(g, dict):
+                    errors.append(f"{gwhere}: must be an object")
+                    continue
+                ref = g.get("capability_ref")
+                if not isinstance(ref, str) or ref not in cap_refs:
+                    errors.append(f"{gwhere}: capability_ref {ref!r} does not match a capability")
+                elif ref in confirmed:
+                    errors.append(f"{gwhere}: {ref!r} is also in capability_refs "
+                                  "(a link is confirmed or guessed, not both)")
+                elif ref in guessed:
+                    errors.append(f"{gwhere}: {ref!r} is guessed twice")
+                guessed.add(ref)
+                _check_guess(errors, gwhere, g)
         if f.get("product_ref") is not None and f["product_ref"] not in prod_refs:
             errors.append(f"{where}: unknown product_ref {f['product_ref']!r}")
         _check_priority(errors, where, f)
         _check_status(errors, where, f)
         _check_facets(errors, where, f)
+
+    check_refs("technologies")
+    seen_slugs = set()
+    for i, t in enumerate(doc.get("technologies") or []):
+        where = f"technologies[{i}] ({t.get('ref')})"
+        if not isinstance(t.get("name"), str) or not t["name"]:
+            errors.append(f"{where}: 'name' is required")
+        slug = tech_slug(t)
+        if not isinstance(slug, str) or not slug:
+            errors.append(f"{where}: slug must be a non-empty string "
+                          "(give one when the name yields none)")
+        elif slug in seen_slugs:
+            errors.append(f"{where}: duplicate technology slug {slug!r}")
+        else:
+            seen_slugs.add(slug)
+        if t.get("kind") not in TECH_KINDS:
+            errors.append(f"{where}: kind must be one of {sorted(TECH_KINDS)}")
+        if t.get("layer") is not None and t["layer"] not in TECH_LAYERS:
+            errors.append(f"{where}: layer must be one of {sorted(TECH_LAYERS)}")
+        products = t.get("products")
+        if products is not None and (
+            not isinstance(products, list)
+            or any(not isinstance(ref, str) or ref not in prod_refs for ref in products)
+        ):
+            errors.append(f"{where}: products must be product refs")
+        satisfies = t.get("satisfies")
+        if satisfies is not None and not isinstance(satisfies, list):
+            errors.append(f"{where}: satisfies must be a list")
+            continue
+        linked = set()
+        for j, s in enumerate(satisfies or []):
+            swhere = f"{where}.satisfies[{j}]"
+            if not isinstance(s, dict):
+                errors.append(f"{swhere}: must be an object")
+                continue
+            ref = s.get("capability_ref")
+            if not isinstance(ref, str) or ref not in cap_refs:
+                errors.append(f"{swhere}: capability_ref {ref!r} does not match a capability")
+            elif ref in linked:
+                errors.append(f"{swhere}: {ref!r} is listed twice")
+            linked.add(ref)
+            if s.get("confidence") is None:  # confirmed: observed in code
+                if s.get("fit") not in TECH_FITS:
+                    errors.append(f"{swhere}: fit must be one of {sorted(TECH_FITS)}")
+                if s.get("basis") is not None and not isinstance(s["basis"], str):
+                    errors.append(f"{swhere}: basis must be a string")
+            else:  # a guess
+                _check_guess(errors, swhere, s)
+                if s.get("fit") is not None and s["fit"] not in TECH_FITS:
+                    errors.append(f"{swhere}: fit must be one of {sorted(TECH_FITS)}")
 
     seen_edges = set()
     precedence = {}  # feature ref -> set of feature refs it depends on
@@ -283,9 +379,18 @@ def main():
     )
     counts = ", ".join(
         f"{len(doc.get(c) or [])} {c}"
-        for c in ("goals", "capabilities", "motivations", "features", "edges", "products")
+        for c in (
+            "goals", "capabilities", "motivations", "features", "edges", "products",
+            "technologies",
+        )
     )
-    print(f"{args.seed_file} is valid: {counts}, {tickets} tickets")
+    guesses = sum(len(f.get("capability_guesses") or []) for f in doc.get("features") or []) + sum(
+        1
+        for t in doc.get("technologies") or []
+        for s in t.get("satisfies") or []
+        if s.get("confidence") is not None
+    )
+    print(f"{args.seed_file} is valid: {counts}, {tickets} tickets, {guesses} guesses")
 
 
 if __name__ == "__main__":

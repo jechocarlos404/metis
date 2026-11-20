@@ -37,9 +37,22 @@ class UpstreamApi {
     return body;
   }
 
+  /** For endpoints an older instance may not have yet: absent reads as []. */
+  async getOptional(route) {
+    const { status, body } = await this.request("GET", route);
+    return status === 200 ? body : [];
+  }
+
   async delete(route) {
     return this.request("DELETE", route);
   }
+}
+
+/** The importer's technology identity: explicit slug, else the backend's slug
+ * rule applied to the name. */
+function techSlug(tech) {
+  if (tech.slug != null) return tech.slug;
+  return String(tech.name ?? "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
 }
 
 class Unseeder {
@@ -58,6 +71,18 @@ class Unseeder {
     this.instFeatures = await this.api.get("/api/features");
     this.instEdges = await this.api.get("/api/features/edges");
     this.instProducts = await this.api.get("/api/products");
+    // Buy-side supply and guesses. A satisfaction or guess the seed did not
+    // declare was recorded by someone else: shared state, like a foreign
+    // feature. Older instances predate these endpoints; treat that as none.
+    this.instSats = await this.api.getOptional("/api/tech/satisfactions");
+    this.instGuesses = await this.api.getOptional("/api/guesses");
+    this.instTechs = [];
+    for (let offset = 0; ; offset += 200) {
+      const { status, body } = await this.api.request("GET", `/api/tech?limit=200&offset=${offset}`);
+      if (status !== 200) break;
+      this.instTechs.push(...body.rows);
+      if (offset + 200 >= body.total || body.rows.length === 0) break;
+    }
 
     this.goals = this.match(
       "goals",
@@ -82,6 +107,29 @@ class Unseeder {
       (feature) => featureKey(this.products.get(feature.product_ref)?.id, feature.name),
       new Map(this.instFeatures.map((feature) => [featureKey(feature.product_id, feature.name), feature])),
     );
+    this.techs = this.match(
+      "technologies",
+      techSlug,
+      new Map(this.instTechs.map((tech) => [tech.slug, tech])),
+    );
+    // Usage of the seed's products, read now: deleting a product cascades its
+    // usage rows, and the technology guard runs after that.
+    this.instUsage = new Map();
+    if (this.techs.size > 0) {
+      for (const product of this.products.values()) {
+        this.instUsage.set(product.id, await this.api.getOptional(`/api/stacks/usage?product_id=${product.id}`));
+      }
+    }
+    // (tech, capability) pairs the seed itself declares, confirmed or
+    // guessed: removing those is undoing the seed, not foreign data.
+    this.declared = new Set();
+    for (const tech of this.doc.technologies || []) {
+      const found = this.techs.get(tech.ref);
+      for (const link of tech.satisfies || []) {
+        const cap = this.caps.get(link.capability_ref);
+        if (found && cap) this.declared.add(`${found.id}:${cap.id}`);
+      }
+    }
   }
 
   note(collection, action) {
@@ -133,9 +181,54 @@ class Unseeder {
     }
   }
 
+  deletableTechs() {
+    const foreign = this.foreignFeatureCounts();
+    const seedUsers = new Map(); // tech id -> how many deleted seed products use it
+    for (const product of this.products.values()) {
+      if (foreign.has(product.id)) continue;
+      for (const row of this.instUsage.get(product.id) || []) {
+        seedUsers.set(row.tech_id, (seedUsers.get(row.tech_id) || 0) + 1);
+      }
+    }
+    const capNames = new Map(this.instCaps.map((cap) => [cap.id, cap.name]));
+    const deletable = [];
+    for (const tech of this.techs.values()) {
+      const reasons = [];
+      const others = (tech.used_by || 0) - (seedUsers.get(tech.id) || 0);
+      if (others > 0) reasons.push(`${others} product(s) outside the seed use it`);
+      if (tech.adoption) reasons.push(`it has an adoption stance (${tech.adoption})`);
+      const links = [
+        ...this.instSats.filter((s) => s.tech_id === tech.id).map((s) => [s.capability_id, "satisfies"]),
+        ...this.instGuesses.filter((g) => g.tech_id === tech.id).map((g) => [g.capability_id, "is guessed to satisfy"]),
+      ];
+      for (const [capabilityId, verb] of links) {
+        if (!this.declared.has(`${tech.id}:${capabilityId}`)) {
+          reasons.push(`${verb} ${JSON.stringify(capNames.get(capabilityId) ?? capabilityId)}, which the seed does not say`);
+        }
+      }
+      if (reasons.length > 0) this.keep("technologies", `technology ${JSON.stringify(tech.name)}`, reasons);
+      else deletable.push(tech);
+    }
+    return deletable;
+  }
+
   deletableCaps() {
     const matchedCapIds = new Set([...this.caps.values()].map((cap) => cap.id));
     const matchedFeatureIds = new Set([...this.features.values()].map((feature) => feature.id));
+    const deadTechs = this.dead("techs");
+    // Gone with its technology, or the seed's own (removed before the
+    // capability): neither holds a capability back.
+    const holds = (link) =>
+      !deadTechs.has(link.tech_id) && !this.declared.has(`${link.tech_id}:${link.capability_id}`);
+    const satsOf = new Map();
+    for (const sat of this.instSats.filter(holds)) {
+      satsOf.set(sat.capability_id, (satsOf.get(sat.capability_id) || 0) + 1);
+    }
+    const guessesOf = new Map();
+    for (const guess of this.instGuesses) {
+      if (guess.feature_id ? matchedFeatureIds.has(guess.feature_id) : !holds(guess)) continue;
+      guessesOf.set(guess.capability_id, (guessesOf.get(guess.capability_id) || 0) + 1);
+    }
     const children = new Map();
     const featuresOf = new Map();
     for (const cap of this.instCaps) {
@@ -160,6 +253,12 @@ class Unseeder {
       );
       if (foreignFeatures.length > 0) {
         reasons.push(`${foreignFeatures.length} feature(s) outside the seed realize it`);
+      }
+      if (satsOf.has(cap.id)) {
+        reasons.push(`${satsOf.get(cap.id)} technolog(ies) satisfy it; remove the satisfactions first if you really mean to drop it`);
+      }
+      if (guessesOf.has(cap.id)) {
+        reasons.push(`${guessesOf.get(cap.id)} guessed link(s) from outside the seed point at it`);
       }
       for (const child of children.get(cap.id) || []) {
         if (!matchedCapIds.has(child.id)) reasons.push(`child capability ${JSON.stringify(child.name)} is not in the seed`);
@@ -249,11 +348,11 @@ class Unseeder {
     return [...this.goals.values()].filter(check).sort((a, b) => depth(b) - depth(a));
   }
 
-  /** Rows the capability/goal passes will delete, computed once — the
-   * deletable* checks record keep-warnings, so they must not run twice. */
+  /** Rows the technology/capability/goal passes will delete, computed once:
+   * the deletable* checks record keep-warnings, so they must not run twice. */
   deadRows(kind) {
     this.deadCache ??= {};
-    this.deadCache[kind] ??= kind === "caps" ? this.deletableCaps() : this.deletableGoals();
+    this.deadCache[kind] ??= { techs: () => this.deletableTechs(), caps: () => this.deletableCaps(), goals: () => this.deletableGoals() }[kind]();
     return this.deadCache[kind];
   }
 
@@ -345,6 +444,35 @@ class Unseeder {
     }
   }
 
+  /** Deletable technologies go (cascading their satisfactions, guesses and
+   * usage). On a kept one, the seed's confirmed satisfactions of a capability
+   * about to be deleted go first: the capability foreign key restricts, and
+   * the seed is what created them. */
+  async removeTechs() {
+    for (const tech of this.deadRows("techs")) {
+      await this.remove(
+        "technologies",
+        `/api/tech/${encodeURIComponent(tech.slug)}`,
+        `technology ${JSON.stringify(tech.name)} (cascades its satisfactions and guesses)`,
+      );
+    }
+    const deadTechs = this.dead("techs");
+    const deadCaps = this.dead("caps");
+    const capNames = new Map(this.instCaps.map((cap) => [cap.id, cap.name]));
+    for (const sat of this.instSats) {
+      if (deadTechs.has(sat.tech_id) || !this.declared.has(`${sat.tech_id}:${sat.capability_id}`)) continue;
+      if (!deadCaps.has(sat.capability_id)) {
+        this.note("satisfactions", "kept");
+        continue;
+      }
+      await this.remove(
+        "satisfactions",
+        `/api/tech/satisfactions/${sat.id}`,
+        `satisfaction of ${JSON.stringify(capNames.get(sat.capability_id))}`,
+      );
+    }
+  }
+
   async removeCaps() {
     for (const cap of this.deadRows("caps")) {
       await this.remove("capabilities", `/api/capabilities/${cap.id}`, `capability ${JSON.stringify(cap.name)}`);
@@ -363,6 +491,7 @@ class Unseeder {
     await this.removeEdges();
     await this.removeProducts();
     await this.removeFeatures();
+    await this.removeTechs();
     await this.removeCaps();
     await this.removeGoals();
     return {
@@ -372,6 +501,8 @@ class Unseeder {
         edges: this.count("edges"),
         products: this.count("products"),
         features: this.count("features"),
+        technologies: this.count("technologies"),
+        satisfactions: this.count("satisfactions"),
         capabilities: this.count("capabilities"),
         goals: this.count("goals"),
       },

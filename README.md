@@ -333,7 +333,7 @@ DB-backed and editable in Settings → AI models.
 ## Seed workflows
 
 Metis supports both **in-app** and **skill-driven** seed round-trips (seed file format:
-`skills/metis-export/references/seed-format.md`):
+`backend/app/ontology/seed-format.md`):
 
 - In the **Products** page, admins/editors can:
   - **Export seed**: download the selected Spec as a `metis-seed/v1` JSON file,
@@ -349,11 +349,11 @@ Metis supports both **in-app** and **skill-driven** seed round-trips (seed file 
 The repo ships a two-skill pipeline for seeding an instance from real codebases
 (using the same seed format and add-only semantics as the in-app flow):
 
-- `.claude/skills/metis-seed-instance` loads a `metis-seed.json` into the running
+- `plugin/skills/metis-seed-instance` loads a `metis-seed.json` into the running
   instance via the API — idempotent, add-only. Auto-available in this repo.
   With auth enabled, either use a browser session through the UI, set
   `AUTH_ENABLED=false`, or pass a bearer token.
-- `skills/metis-export` analyzes *any* repository and writes a `metis-seed.json`.
+- `plugin/skills/metis-export` analyzes *any* repository and writes a `metis-seed.json`.
   To use it from other repos, symlink it into your global skills once per machine:
 
   ```sh
@@ -427,6 +427,6 @@ backend/
   app/ontology/    model.md — served to the UI, the API and MCP from one file
 frontend/          Astro app: pages, React islands, design system (ds/), API proxy
 docs/              ontology design record (divergence, mental model, graph spec)
-skills/            metis-export (portable); .claude/skills/ for in-repo skills
+plugin/skills/     metis-export, metis-seed-instance, metis-unseed (Claude Code plugin)
 docker-compose.yml
 ```

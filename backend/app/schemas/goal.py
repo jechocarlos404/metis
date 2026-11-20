@@ -39,3 +39,10 @@ class GoalRead(Stamped):
     def display_id(self) -> str:
         prefix = "OG" if self.goal_type == GoalType.org else "PG"
         return display(prefix, self.seq, 2)
+
+
+class GoalOwnedRead(GoalRead):
+    """A goal from the goals API: with the product it belongs to
+    (services/goals.py), null when it belongs to none."""
+
+    product_id: uuid.UUID | None

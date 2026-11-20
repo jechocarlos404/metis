@@ -146,8 +146,11 @@ map them to the capabilities they need, declaring `unknown_capabilities` where y
 can't tell. External products show what exists in the world; they never count as what
 *we* can do — coverage of an idea counts only capabilities our own features realize. `GET /api/products/{id}/coverage` scores an existing product the same way: which of
 its features we could build from what we have — a lower bound, since a feature with
-unknown capabilities never counts as buildable. Alongside it, `known_covered` lists the
-unknown-capability features whose every *named* capability is ours — a weaker signal.
+unknown capabilities never counts as buildable. Every feature lands in exactly one
+group: `buildable`, `partly` (every *named* capability is ours, but the list is
+incomplete), `missing` (needs a capability that isn't ours) or `not_described` (no
+capability named yet). `missing_capabilities` ranks what's missing by how many
+features it would complete, and `closest_products` names our nearest products.
 
 **Journeys** (`/journeys`, `/api/journeys`) are ordered paths of features a person moves
 through — inside one product or across several, ours or external. A step can also be one

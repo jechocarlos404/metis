@@ -579,7 +579,8 @@ async def coverage(session: AsyncSession, request: CoverageRequest) -> CoverageR
     it, if anyone) but counts as missing: knowing it exists, or having named
     it, is not having it."""
     capabilities = await list_capabilities(session)
-    by_slug = {c.slug: c for c in capabilities}
+    # A rename keeps the slug, so a capability is also found by its current name.
+    by_slug = {slugify(c.name): c for c in capabilities} | {c.slug: c for c in capabilities}
     usage = await _usage(session)
 
     def as_match(c: Capability) -> CapabilityMatch:

@@ -7,7 +7,7 @@ from fastapi import HTTPException
 from sqlalchemy import select
 
 from app.models import CapabilityMaturity, Feature, FeatureCapability, Product
-from app.schemas.capability import CapabilityCreate, CoverageRequest
+from app.schemas.capability import CapabilityCreate, CapabilityUpdate, CoverageRequest
 from app.schemas.feature import FeatureCreate, FeatureUpdate
 from app.services import capabilities as capability_service
 from app.services import features as feature_service
@@ -182,6 +182,25 @@ async def test_a_capability_nobody_builds_is_not_ours(db):
     assert any(
         f.kind == "aspirational_gap" and f.subject_name == "Route planner" for f in health
     )
+
+
+@pytest.mark.asyncio
+async def test_a_renamed_capability_is_found_by_its_new_name(db):
+    """A rename keeps the slug, so coverage must also match the current name."""
+    async with db() as session:
+        caps = await two_products(session)
+        await capability_service.update_capability(
+            session, caps["strava"].id, CapabilityUpdate(name="Activity import")
+        )
+        report = await capability_service.coverage(
+            session,
+            CoverageRequest.model_validate(
+                {"features": [{"name": "Sync rides", "capabilities": ["Activity import", "Strava import"]}]}
+            ),
+        )
+    by_name = {n.name: n.match for n in report.features[0].capabilities}
+    assert by_name["Activity import"] is not None and by_name["Activity import"].ours
+    assert by_name["Strava import"].slug == "strava-import"  # the old name still resolves by slug
 
 
 @pytest.mark.asyncio

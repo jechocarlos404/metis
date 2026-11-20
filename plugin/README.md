@@ -20,6 +20,12 @@ desktop.
     and point at its recorded evidence paths.
   - `metis-next-work`: list the features that are ready to start, and why each
     one exists.
+  - `metis-map-outside-product`: describe someone else's product from its
+    public pages as a seed file of features and guessed capability links,
+    for you to review and load.
+  - `metis-fill-gaps`: in one of your repos, read the code behind features
+    whose capabilities are unknown, and hand you a seed file of guesses plus
+    the links the code confirms, to add on the desktop.
 - **Hooks.** Each one is silent when metis is unreachable or the repo is not a
   known product:
   - *Session start:* a short brief on this repo's product. It gives the
@@ -168,5 +174,6 @@ plugin/
   .mcp.json                     the metis SSE server
   hooks/hooks.json              SessionStart, UserPromptSubmit, Stop
   hooks/metis_hooks.py          all three hooks, Python stdlib only
-  skills/                       metis-check-idea, metis-find-reuse, metis-next-work
+  skills/                       metis-check-idea, metis-find-reuse, metis-next-work,
+                                metis-map-outside-product, metis-fill-gaps
 ```

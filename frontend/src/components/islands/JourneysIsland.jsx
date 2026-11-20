@@ -2,7 +2,7 @@ import React from "react";
 import { PageHeader } from "../shell/PageHeader.jsx";
 import { Badge, Button, DeleteConfirm, Input } from "../../ds";
 import { api } from "../../lib/api.js";
-import { MATURITY, NEED, VERDICT, count, lackingKey, needKey, plain, statusLabel } from "../../lib/words.js";
+import { MATURITY, NEED, VERDICT, andList, count, lackingKey, needKey, plain, statusLabel } from "../../lib/words.js";
 import { readParam, useParamRestore, writeParams } from "../../lib/url-state.js";
 import { CoverageReport } from "../shared/coverage.jsx";
 import { CapabilityPicker } from "../shared/CapabilityPicker.jsx";
@@ -59,9 +59,11 @@ export default function JourneysIsland({ canWrite }) {
   const [editing, setEditing] = React.useState(null); // { base, draft } or null
   const [inventory, setInventory] = React.useState([]);
   const [error, setError] = React.useState(null);
+  const [notice, setNotice] = React.useState(null); // what the last delete did, said in place
+  const listHeading = React.useRef(null);
 
   useParamRestore("id", (v) => v && setSelected(v));
-  const select = (id) => { setSelected(id); writeParams({ id }, { push: true }); };
+  const select = (id) => { setNotice(null); setSelected(id); writeParams({ id }, { push: true }); };
 
   const loadList = React.useCallback(async () => {
     const list = await api("/journeys");
@@ -97,12 +99,14 @@ export default function JourneysIsland({ canWrite }) {
   const productById = React.useMemo(() => new Map(products.map((p) => [p.id, p])), [products]);
 
   function startNew() {
+    setNotice(null);
     const base = { id: null, name: "", persona: "", description: "", steps: [] };
     setEditing({ base, draft: base });
   }
 
   // swap = { from, to }: open with that need swapped in every unbuilt step.
   function startEdit(swap) {
+    setNotice(null);
     const j = analysis.journey;
     const base = {
       id: j.id,
@@ -146,8 +150,12 @@ export default function JourneysIsland({ canWrite }) {
   }
 
   async function remove(id) {
+    const name = journeys.find((j) => j.id === id)?.name;
     await api(`/journeys/${id}`, { method: "DELETE" });
     await loadList(); // the selection falls back to the first one
+    setNotice(`Deleted ${name}.`);
+    // Focus the list, not whatever button now sits where Delete was.
+    listHeading.current?.focus();
   }
 
   return (
@@ -158,9 +166,10 @@ export default function JourneysIsland({ canWrite }) {
         actions={canWrite && !editing && <Button size="sm" variant="accent" onClick={startNew}>New idea or journey</Button>}
       />
       {error && <div style={{ padding: "8px 24px", color: "var(--danger-fg)", fontSize: "var(--text-xs)" }}>{error}</div>}
+      {notice && <div role="status" style={{ padding: "8px 24px 0", color: "var(--ok-fg)", fontSize: "var(--text-sm)" }}>{notice}</div>}
       <div style={{ flex: 1, minHeight: 0, overflowY: "auto", display: "flex", flexWrap: "wrap", alignItems: "flex-start", alignContent: "flex-start", gap: 16, padding: "16px 24px" }}>
         <div style={{ flex: "1 0 260px", maxWidth: "100%" }}>
-          <JourneyList journeys={journeys} selected={selected} onSelect={select} />
+          <JourneyList journeys={journeys} selected={selected} onSelect={select} headingRef={listHeading} />
         </div>
         <div style={{ flex: "999 1 420px", minWidth: 0 }}>
           {editing && (
@@ -185,14 +194,18 @@ export default function JourneysIsland({ canWrite }) {
               onError={setError}
             />
           )}
-          {!editing && journeys && journeys.length === 0 && <EmptyState canWrite={canWrite} />}
+          {!editing && journeys && journeys.length === 0 && (
+            <EmptyState canWrite={canWrite} canCheck={inventory.length > 0 || products.some((p) => !p.external)} />
+          )}
         </div>
       </div>
     </>
   );
 }
 
-function EmptyState({ canWrite }) {
+// canCheck: Home shows the idea check, which it does once metis has a product
+// of ours or a capability (before that Home is the first-run guide).
+function EmptyState({ canWrite, canCheck }) {
   return (
     <div style={{ ...PANEL, padding: 24, display: "flex", flexDirection: "column", gap: 10, fontSize: "var(--text-sm)", color: "var(--text-secondary)", maxWidth: 620 }}>
       <div style={{ color: "var(--text-heading)", fontWeight: "var(--weight-medium)" }}>No ideas or journeys yet</div>
@@ -212,19 +225,21 @@ function EmptyState({ canWrite }) {
         </div>
       ) : (
         <div>
-          Someone who can edit saves ideas from the idea check on <a href="/home" style={{ color: "var(--text-accent)" }}>Home</a>.
-          You can check an idea there yourself; it just won’t be saved. A coding agent with the
-          metis plugin can also propose ideas with <code>metis-what-next</code>.
+          An editor or admin saves ideas from the idea check on <a href="/home" style={{ color: "var(--text-accent)" }}>Home</a>.{" "}
+          {canCheck
+            ? "You can check an idea there yourself; it just won’t be saved."
+            : "Nothing is in metis yet, so the idea check opens once an editor or admin adds the first product."}{" "}
+          A coding agent with the metis plugin can also propose ideas with <code>metis-what-next</code>.
         </div>
       )}
     </div>
   );
 }
 
-function JourneyList({ journeys, selected, onSelect }) {
+function JourneyList({ journeys, selected, onSelect, headingRef }) {
   return (
     <div style={{ ...PANEL, overflow: "hidden" }}>
-      <div style={{ ...CAPS, padding: "10px 12px", borderBottom: "1px solid var(--border-hairline)" }}>Saved</div>
+      <div ref={headingRef} tabIndex={-1} style={{ ...CAPS, padding: "10px 12px", borderBottom: "1px solid var(--border-hairline)" }}>Saved</div>
       {!journeys && <div style={{ padding: 12, fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>loading…</div>}
       {journeys?.length === 0 && <div style={{ padding: 12, fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>Nothing saved yet.</div>}
       {journeys?.map((j) => (
@@ -343,7 +358,8 @@ function capInfo(need) {
 
 function stepWhere(step) {
   const f = step.feature;
-  if (!f) return "not built";
+  // An idea's step: the verdict above already says whether we could build it.
+  if (!f) return "no feature yet";
   const where = `${f.product ? f.product.name : "no product"}${f.external ? " (external)" : ""}`;
   return !f.external && !step.live ? `${where} · ${statusLabel(f.status)}` : where;
 }
@@ -375,20 +391,47 @@ function JourneyMap({ steps }) {
   }
   const height = CAP_Y + (row + 1) * (CAP_H + 10) + 14;
 
-  // Many steps still run past the panel: say so instead of a silent scroll.
+  // Steps and capabilities that run past the panel: say so instead of a silent scroll.
   const scrollRef = React.useRef(null);
-  const [hidden, setHidden] = React.useState(0);
+  const [hidden, setHidden] = React.useState({ steps: 0, caps: 0 });
+  const capEdges = placed.map((c) => c.x + c.w).join(",");
   React.useEffect(() => {
     const el = scrollRef.current;
     if (!el) return undefined;
     const measure = () => {
-      const visible = Math.floor((el.clientWidth - 16 + GAP) / (STEP_W + GAP));
-      setHidden(el.scrollWidth > el.clientWidth + 1 ? Math.max(0, steps.length - visible) : 0);
+      const edge = el.clientWidth;
+      const scrolls = el.scrollWidth > edge + 1;
+      setHidden({
+        steps: scrolls ? steps.filter((_, i) => stepX(i) + STEP_W > edge).length : 0,
+        caps: scrolls ? capEdges.split(",").filter((right) => Number(right) > edge).length : 0,
+      });
     };
     measure();
     window.addEventListener("resize", measure);
     return () => window.removeEventListener("resize", measure);
-  }, [steps.length, width]);
+  }, [steps.length, width, capEdges]); // eslint-disable-line react-hooks/exhaustive-deps
+  const hiddenWords = [
+    hidden.steps > 0 && count(hidden.steps, "more step", "more steps"),
+    hidden.caps > 0 && count(hidden.caps, "more capability", "more capabilities"),
+  ].filter(Boolean);
+
+  // A tap has no hover, so on a touch screen the first tap on a linked step or
+  // capability traces it and a second opens its page. A mouse click and Enter
+  // open it straight away: pointing or focusing has already traced it.
+  const [pinned, setPinned] = React.useState(null);
+  const pointer = React.useRef(null);
+  const tapToTrace = (item) => ({
+    onPointerDown: (e) => { pointer.current = e.pointerType; },
+    onClick: (e) => {
+      const type = pointer.current;
+      pointer.current = null;
+      const key = `${item.kind}:${item.key}`;
+      if ((type !== "touch" && type !== "pen") || pinned === key) return;
+      e.preventDefault();
+      setHover(item);
+      setPinned(key);
+    },
+  });
 
   const active = (stepIdx, capKey) => {
     if (!hover) return true;
@@ -398,13 +441,14 @@ function JourneyMap({ steps }) {
 
   const hoveredCap = hover?.kind === "cap" ? placed.find((c) => c.key === hover.key) : null;
   const hoveredStep = hover?.kind === "step" ? steps[hover.key] : null;
-  const leave = () => setHover(null);
+  const leave = () => { setHover(null); setPinned(null); };
+  const tapAgain = pinned ? " · tap again to open it" : "";
 
   return (
     <div style={{ ...PANEL, padding: "12px 0 4px" }}>
       <div style={{ ...CAPS, padding: "0 16px 6px" }}>
-        {count(steps.length, "step")} and the {count(placed.length, "capability", "capabilities")} they need. Point at or tab to either to trace it.
-        {hidden > 0 && ` Scroll sideways for ${count(hidden, "more step", "more steps")}.`}
+        {count(steps.length, "step")} and the {count(placed.length, "capability", "capabilities")} they need. Point at, tap or tab to either to trace it.
+        {hiddenWords.length > 0 && ` Scroll sideways for ${andList(hiddenWords)}.`}
       </div>
       <div ref={scrollRef} style={{ overflowX: "auto" }}>
         <svg width={width} height={height} style={{ display: "block", fontFamily: "var(--font-body)" }}>
@@ -434,7 +478,7 @@ function JourneyMap({ steps }) {
           }))}
           {steps.map((s, i) => (
             <StepCard key={i} step={s} x={stepX(i)} dim={!active(i, null)}
-              onEnter={() => setHover({ kind: "step", key: i })} onLeave={leave} />
+              onEnter={() => setHover({ kind: "step", key: i })} onLeave={leave} tap={tapToTrace({ kind: "step", key: i })} />
           ))}
           {placed.map((c) => {
             const kind = needKind(c.need);
@@ -453,7 +497,7 @@ function JourneyMap({ steps }) {
               </g>
             );
             return c.need.match
-              ? <a key={c.key} href={`/capabilities/${c.need.match.slug}`} onFocus={enter} onBlur={leave}>{chip}</a>
+              ? <a key={c.key} href={`/capabilities/${c.need.match.slug}`} onFocus={enter} onBlur={leave} {...tapToTrace({ kind: "cap", key: c.key })}>{chip}</a>
               : <g key={c.key} tabIndex={0} onFocus={enter} onBlur={leave} onClick={enter}>{chip}</g>;
           })}
         </svg>
@@ -461,7 +505,7 @@ function JourneyMap({ steps }) {
       <div style={{ display: "flex", flexWrap: "wrap", gap: 14, alignItems: "center", padding: "6px 16px 8px", fontSize: "var(--text-xs)", color: "var(--text-secondary)", minHeight: 22 }}>
         {hoveredCap && (
           <span>
-            <b style={{ color: "var(--text-heading)" }}>{hoveredCap.need.match?.name ?? hoveredCap.need.name}</b>: {capInfo(hoveredCap.need)} · used by {count(hoveredCap.steps.length, "step")} here
+            <b style={{ color: "var(--text-heading)" }}>{hoveredCap.need.match?.name ?? hoveredCap.need.name}</b>: {capInfo(hoveredCap.need)} · used by {count(hoveredCap.steps.length, "step")} here{tapAgain}
           </span>
         )}
         {hoveredStep && (
@@ -469,6 +513,7 @@ function JourneyMap({ steps }) {
             <b style={{ color: "var(--text-heading)" }}>{hoveredStep.label}</b>: {stepWhere(hoveredStep)} · {VERDICT[stepKind(hoveredStep)].hint}
             {verdictOf(stepKind(hoveredStep), stepMatches(hoveredStep)).elsewhere ? ` · ${NEED.elsewhere.label}` : ""}
             {hoveredStep.note ? ` · ${hoveredStep.note}` : ""}
+            {tapAgain}
           </span>
         )}
         {!hover && Object.values(NEED).map((n) => (
@@ -491,7 +536,7 @@ function fitWhere(where, n) {
   return `${truncate(where.slice(0, i), Math.max(4, n - tail.length))}${tail}`;
 }
 
-function StepCard({ step, x, dim, onEnter, onLeave }) {
+function StepCard({ step, x, dim, onEnter, onLeave, tap }) {
   const v = verdictOf(stepKind(step), stepMatches(step));
   const t = TONE[v.tone];
   const f = step.feature;
@@ -515,7 +560,7 @@ function StepCard({ step, x, dim, onEnter, onLeave }) {
     </g>
   );
   return f
-    ? <a href={`/features?feature=${f.id}`} onFocus={onEnter} onBlur={onLeave}>{card}</a>
+    ? <a href={`/features?feature=${f.id}`} onFocus={onEnter} onBlur={onLeave} {...tap}>{card}</a>
     : <g tabIndex={0} onFocus={onEnter} onBlur={onLeave} onClick={onEnter}>{card}</g>;
 }
 
@@ -623,7 +668,10 @@ function JourneyEditor({ base, draft: start, features, productById, inventory, o
         const f = s.feature_id ? featureById.get(s.feature_id) : null;
         const product = f ? productById.get(f.product_id) : null;
         const v = verdictOf(kinds[i], matchesOf(s));
-        const elsewhere = s.feature_id ? [] : s.needs.filter((n) => needKey(bySlug.get(slugify(n))) === "elsewhere");
+        const needing = (key) => (s.feature_id ? [] : s.needs.filter((n) => needKey(bySlug.get(slugify(n))) === key));
+        const elsewhere = needing("elsewhere");
+        // Named only beside other gaps: alone, "missing" already says it.
+        const unbuilt = elsewhere.length > 0 ? needing("none") : [];
         return (
           <div key={i} style={{ display: "grid", gridTemplateColumns: "24px minmax(0,1fr) auto", gap: 8, alignItems: "start", padding: 10, border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-sm)", borderStyle: s.feature_id ? "solid" : "dashed" }}>
             <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-secondary)", paddingTop: 9 }}>{i + 1}</div>
@@ -634,7 +682,7 @@ function JourneyEditor({ base, draft: start, features, productById, inventory, o
                 <div onKeyDown={(e) => { if (e.key === "Escape") e.stopPropagation(); }}>
                   <CapabilityPicker id={`step-${i}-needs`} label={`Step ${i + 1} capabilities`} allowNew
                     options={options} value={s.needs} onChange={(needs) => setStep(i, { needs })}
-                    placeholder="Not built yet: capabilities it would need (optional)" />
+                    placeholder="Capabilities it would need (optional)" />
                 </div>
               )}
               <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>
@@ -648,6 +696,10 @@ function JourneyEditor({ base, draft: start, features, productById, inventory, o
                 {elsewhere.length > 0 && <>
                   {!v.elsewhere && <span title={NEED.elsewhere.hint}><Badge tone={NEED.elsewhere.tone}>{NEED.elsewhere.label}</Badge></span>}
                   <span>{elsewhere.join(", ")}</span>
+                </>}
+                {unbuilt.length > 0 && <>
+                  <span title={NEED.none.hint}><Badge tone={NEED.none.tone}>{NEED.none.label}</Badge></span>
+                  <span>{unbuilt.join(", ")}</span>
                 </>}
               </div>
               <Input aria-label={`Step ${i + 1} note`} value={s.note} onChange={(e) => setStep(i, { note: e.target.value })} placeholder="Note (optional)" />

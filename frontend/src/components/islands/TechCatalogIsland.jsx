@@ -216,7 +216,7 @@ export default function TechCatalogIsland({ initialView = "catalog", initialQuer
         title="Technology"
         meta={
           view === "exposure"
-            ? lifecycle == null ? "loading" : [
+            ? lifecycle == null ? (error ? null : "loading") : [
                 noneUsed ? "no technology recorded" : exposed === 0 && techTotal > 0 && judged === 0 ? "no lifecycle data" : `${exposed} at risk`,
                 unknown > 0 && !(exposed === 0 && judged === 0) && `${unknown} without lifecycle data`,
                 formatAsOf(exposure?.as_of),

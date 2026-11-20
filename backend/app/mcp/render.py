@@ -255,9 +255,16 @@ def _end(lines: list[str], href: str) -> str:
     return "\n".join(lines)
 
 
+def _not_ours(c: dict) -> str:
+    """`ours` false means one of two things; external_products tells which."""
+    if c["ours"]:
+        return ""
+    return ", external only" if c["external_products"] else ", nobody has it"
+
+
 def _candidates(candidates: list[dict]) -> str:
     return ", ".join(
-        f"{c['slug']} ({c['maturity']}{'' if c['ours'] else ', external only'})"
+        f"{c['slug']} ({c['maturity']}{_not_ours(c)})"
         for c in candidates
     )
 
@@ -292,17 +299,17 @@ def capability_inventory(rows: list[dict], query: str | None, limit: int = 50) -
         q = query.lower()
         rows = [r for r in rows if q in r["name"].lower() or q in r["slug"]]
     shown = rows[: max(0, limit)]
-    in_use = sum(1 for r in rows if r["ours"] and r["features"])
-    unbuilt = sum(1 for r in rows if r["ours"] and not r["features"])
-    outside = sum(1 for r in rows if not r["ours"])
+    in_use = sum(1 for r in rows if r["ours"])
+    outside = sum(1 for r in rows if not r["ours"] and r["external_products"])
+    unbuilt = len(rows) - in_use - outside
     head = (
         f"{len(rows)} of {total} capabilit(ies) match {query!r}"
         if query
         else f"{total} capabilit(ies)"
     )
     lines = [
-        f"{head}: {in_use} ours with features, {unbuilt} ours with no feature yet, "
-        f"{outside} known only from external products; showing {len(shown)}.",
+        f"{head}: {in_use} ours, {outside} known only from external products, "
+        f"{unbuilt} that nobody has yet; showing {len(shown)}.",
         "",
     ]
     lines += _table(
@@ -313,7 +320,11 @@ def capability_inventory(rows: list[dict], query: str | None, limit: int = 50) -
                 f"{r['features']} feature(s)",
                 f"ours in: {_names(r['products'])}" if r["products"] else "ours in: —",
                 f"external: {_names(r['external_products'])}" if r["external_products"] else "",
-                "" if r["ours"] else "external only — not ours",
+                ""
+                if r["ours"]
+                else "external only — not ours"
+                if r["external_products"]
+                else "nobody has it — not ours",
             ]
             for r in shown
         ]
@@ -334,10 +345,15 @@ def _need(need: dict) -> list[str]:
             f"  ours           {need['name']} → {match['slug']} "
             f"({match['maturity']}; in {where})"
         ]
-    if match:
+    if match and match["external_products"]:
         return [
             f"  external only  {need['name']} → {match['slug']} "
             f"(only in {_names(match['external_products'])}) — exists, not ours"
+        ]
+    if match:
+        return [
+            f"  nobody has it  {need['name']} → {match['slug']} "
+            "(no feature realizes it) — not ours"
         ]
     lines = [f"  no match       {need['name']}"]
     if need["candidates"]:
@@ -385,41 +401,62 @@ def idea_link(idea: str, report: dict) -> str:
 
 
 def product_score(score: dict) -> str:
-    """Four groups that sum to the total. The API gives three lists; the fourth
-    — features fully described but missing a capability — is what's left."""
+    """Four groups that sum to the total, as the API partitions them."""
     total = score["total_features"]
     buildable = score["buildable"]
-    partly = score["known_covered"]
-    not_described = [n for n in score["unknown_features"] if n not in partly]
-    missing = total - len(buildable) - len(score["unknown_features"])
+    partly = score["partly"]
+    not_described = score["not_described"]
+    missing = score["missing"]
     product = score["product"]
     lines = [
         f"{len(buildable)}/{total} feature(s) of {product['slug']} buildable from what we "
         f"have; {len(partly)} partly known, {len(not_described)} not described, "
-        f"{missing} missing a capability.",
+        f"{len(missing)} missing a capability.",
         "",
     ]
     report = score.get("report")
-    short = [
-        f["name"]
-        for f in (report["features"] if report else [])
-        if f["existing"] < f["total"] and f["name"] not in score["unknown_features"]
-    ]
     for label, names in (
         ("Buildable — every capability known and ours", buildable),
-        ("Partly known (known_covered) — every named capability ours, list incomplete", partly),
-        ("Not described — capability list incomplete and not covered", not_described),
-        ("Missing a capability — fully described, needs one we don't have", short),
+        ("Partly known (partly) — every named capability ours, list incomplete", partly),
+        ("Not described (not_described) — no capability named", not_described),
+        ("Missing a capability — names one we don't have", missing),
     ):
         if names:
             lines.append(f"{label} ({len(names)}): {', '.join(names)}")
+    if score["missing_incomplete"]:
+        lines.append(
+            f"Of the missing, {len(score['missing_incomplete'])} also have an incomplete "
+            "capability list: what's named may not be all they need."
+        )
     if report:
         lines.append(
             f"Across its named capabilities: {report['existing']}/{report['needed']} ours, "
             f"{report['mature']} proven (beta or ga)."
         )
-        if report["missing"]:
-            lines.append(f"Not ours ({len(report['missing'])}): {', '.join(report['missing'])}")
+        gaps = score["missing_capabilities"]
+        if gaps:
+            lines.append(
+                f"Not ours ({len(gaps)}), most useful first. only_gap: features for which "
+                "it is the one named capability we lack, so adding it covers what they name:"
+            )
+            lines += _table(
+                [
+                    [
+                        f"  {g['slug'] or g['name']}",
+                        f"needed by {g['features']}",
+                        f"only_gap {g['only_gap']}",
+                        f"elsewhere: {_names(g['elsewhere']) or 'none'}",
+                    ]
+                    for g in gaps
+                ]
+            )
+        closest = score["closest_products"]
+        if closest:
+            lines.append(
+                f"Closest of our products, by how many of the {report['needed']} named "
+                "capabilities each has: "
+                + ", ".join(f"{c['product']['slug']} {c['capabilities']}" for c in closest)
+            )
     else:
         lines.append("No capability is named on any of its features, so nothing can be scored.")
     lines += [
@@ -447,8 +484,10 @@ def capability(
         f"{entry['features']} feature(s) of ours realize {slug} across "
         f"{len(entry['products'])} product(s); maturity {entry['maturity']}.",
     ]
-    if not entry["ours"]:
+    if not entry["ours"] and entry["external_products"]:
         lines.append("Known only from external products: it exists, we don't have it.")
+    elif not entry["ours"]:
+        lines.append("Nobody has it yet: no feature realizes it, so it isn't ours.")
     description = entry.get("description")
     lines.append(entry["name"] + (f" — {description}" if description else ""))
     lines += [

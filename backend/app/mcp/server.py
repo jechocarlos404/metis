@@ -196,7 +196,8 @@ TOOLS = [
         description=(
             "What we can already do, most reused first: each capability with "
             "its maturity, our products, our feature count, and external "
-            "products that have it. Ours first, then known only from outside."
+            "products that have it. Ours first, then known only from outside, "
+            "then named but realized by no feature."
         ),
         inputSchema={
             "type": "object",
@@ -211,7 +212,8 @@ TOOLS = [
         description=(
             "How much of a product idea we already have. Give features, each "
             "with the capability names it needs. Each need comes back ours, "
-            "external only, or no match with near names as candidates. Exact "
+            "external only, nobody has it (named, no feature realizes it), or "
+            "no match with near names as candidates. Exact "
             "names only: a candidate is never counted as a match. Ends with an "
             "Open: link that pre-fills Home's idea check; it saves nothing."
         ),
@@ -246,8 +248,11 @@ TOOLS = [
         name="product_score",
         description=(
             "How much of a product (ours or external) we could build from what "
-            "we have: buildable, partly known, not described, missing a "
-            "capability. A lower bound."
+            "we have: its features split into four groups that sum to the "
+            "total — buildable, partly known, not described, missing a "
+            "capability. A lower bound. Then the capabilities we lack, ranked by "
+            "how many features each alone would cover, and the three products of "
+            "ours that already have the most of what it names."
         ),
         inputSchema={
             "type": "object",

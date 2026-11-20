@@ -157,6 +157,34 @@ async def test_coverage_of_a_product_idea(db):
 
 
 @pytest.mark.asyncio
+async def test_a_capability_nobody_builds_is_not_ours(db):
+    """Naming a capability is not having it: with no feature realizing it
+    anywhere, it is neither ours nor known from an external product."""
+    async with db() as session:
+        await two_products(session)
+        report = await capability_service.coverage(
+            session,
+            CoverageRequest.model_validate(
+                {"features": [{"name": "Plan a route", "capabilities": ["Route planner"]}]}
+            ),
+        )
+        inventory = {e.name: e for e in await capability_service.inventory(session)}
+        health = await capability_service.health(session)
+
+    match = report.features[0].capabilities[0].match
+    assert match is not None and match.name == "Route planner"
+    assert match.ours is False
+    assert (match.products, match.external_products) == ([], [])
+    assert (report.needed, report.existing) == (1, 0)
+    assert report.missing == ["Route planner"]
+    assert inventory["Route planner"].ours is False
+    # Still ours to explain: planned, and nothing builds toward it.
+    assert any(
+        f.kind == "aspirational_gap" and f.subject_name == "Route planner" for f in health
+    )
+
+
+@pytest.mark.asyncio
 async def test_coverage_suggests_near_names_instead_of_guessing(db):
     async with db() as session:
         await make_capability(session, "Authentication")

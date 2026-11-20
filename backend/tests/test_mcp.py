@@ -431,13 +431,15 @@ async def test_inventory_is_most_reused_first_and_filters_in_order(api):
     await _world(*api)
     text = await server._dispatch("capability_inventory", {})
     _conventions(text)
+    # A capability no feature realizes isn't ours, and nobody else has it either.
     assert text.startswith(
-        "5 capabilit(ies): 3 ours with features, 1 ours with no feature yet, "
-        "1 known only from external products"
+        "5 capabilit(ies): 3 ours, 1 known only from external products, "
+        "1 that nobody has yet"
     )
     rows = [line.split()[0] for line in text.splitlines()[2:7]]
-    assert rows[-1] == "weather-forecast"
+    assert rows[-2:] == ["weather-forecast", "route-planner"]
     assert "external only — not ours" in text
+    assert "nobody has it — not ours" in text
 
     text = await server._dispatch("capability_inventory", {"q": "data"})
     assert text.startswith("1 of 5 capabilit(ies) match 'data'")
@@ -468,6 +470,15 @@ async def test_check_idea_never_counts_a_near_name(api):
     assert lines[-1] == (
         "Open: /home?idea=Climb%20planner&caps=strava-import,weather-forecast,Elevaton%20data"
     )
+    # Named, but no feature anywhere realizes it: not ours, and not "external only".
+    unbuilt = await server._dispatch(
+        "check_idea", {"features": [{"name": "Plan", "capabilities": ["Route planner"]}]}
+    )
+    assert unbuilt.startswith("0/1 distinct capabilit(ies) are ours")
+    assert (
+        "  nobody has it  Route planner → route-planner (no feature realizes it) — not ours"
+        in unbuilt.splitlines()
+    )
 
     named = await server._dispatch(
         "check_idea",
@@ -491,7 +502,14 @@ async def test_product_score_groups_sum_to_the_total(api):
     )
     assert "Partly known" in text and "Rival map" in text
     assert "Not described" in text and "Rival social" in text
-    assert "Missing a capability — fully described, needs one we don't have (1): Rival weather" in text
+    assert "Missing a capability — names one we don't have (1): Rival weather" in text
+    # Ranked gaps by slug, and the product of ours with the most of what's named.
+    assert "Not ours (1), most useful first." in text
+    assert "  weather-forecast  needed by 1  only_gap 1  elsewhere: none" in text.splitlines()
+    assert (
+        "Closest of our products, by how many of the 2 named capabilities each has: "
+        "can-i-climb 1"
+    ) in text
     assert "Lower bound" in text
     assert text.endswith(f"Open: /products?product={w['rival'].id}")
     by_id = await server._dispatch("product_score", {"product": str(w["climb"].id)})

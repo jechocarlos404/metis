@@ -5,7 +5,7 @@ saying what *we* can do: external usage is shown, never counted as ours."""
 import pytest
 from fastapi import HTTPException
 
-from app.models import CapabilityMaturity, Product, WorkStatus
+from app.models import CapabilityMaturity, Feature, Product, WorkStatus
 from app.schemas.capability import CapabilityCreate, CoverageRequest
 from app.schemas.feature import FeatureCreate, FeatureUpdate
 from app.services import capabilities as capability_service
@@ -171,10 +171,12 @@ async def test_how_much_of_an_external_product_we_could_build(db):
     # Only a feature whose every capability is known AND ours counts. Share routes
     # needs only sync as far as we know — but "as far as we know" is not covered.
     assert score.buildable == ["Sync activities"]
-    assert score.unknown_features == ["Beacon live tracking", "Share routes"]
     # The softer signal: every capability anyone named for Share routes is ours.
     # Beacon names none, so it never counts.
-    assert score.known_covered == ["Share routes"]
+    assert score.partly == ["Share routes"]
+    assert score.missing == ["Compete on segments"]
+    assert score.missing_incomplete == []
+    assert score.not_described == ["Beacon live tracking"]
     report = score.report
     assert (report.needed, report.existing) == (2, 1)
     assert report.missing == ["Segment leaderboards"]
@@ -190,5 +192,100 @@ async def test_a_product_with_only_unknown_features_scores_zero(db):
         )
         score = await capability_service.product_coverage(session, p.id)
     assert score.report is None
-    assert (score.total_features, score.buildable, score.unknown_features) == (1, [], ["Magic"])
-    assert score.known_covered == []
+    assert (score.total_features, score.buildable, score.not_described) == (1, [], ["Magic"])
+    assert score.partly == score.missing == []
+
+
+@pytest.mark.asyncio
+async def test_a_product_score_partitions_its_features(db):
+    """Every feature lands in exactly one group, decided by its own links —
+    never by name, never by subtracting one list from another."""
+    async with db() as session:
+        s = await estate(session)
+        strava = s["strava"]
+
+        async def feature(name, caps, unknown):
+            await feature_service.create_feature(
+                session,
+                FeatureCreate(
+                    name=name,
+                    product_id=strava.id,
+                    capability_ids=[c.id for c in caps],
+                    unknown_capabilities=unknown,
+                ),
+            )
+
+        # estate() gave Strava: Sync activities (buildable), Compete on
+        # segments (missing, complete list), Beacon live tracking (flagged, none).
+        await feature("Share routes", [s["sync"]], True)  # partly
+        # Flagged, and what is named exists only at Strava: missing, not "not described".
+        await feature("Segment challenges", [s["segments"]], True)
+        await feature("Synced segments", [s["sync"], s["segments"]], True)
+        # Unflagged with no link: the write path refuses it (422), but a row like
+        # this can exist, so the score must still place it.
+        session.add(Feature(name="Legacy import", product_id=strava.id))
+        await session.commit()
+        score = await capability_service.product_coverage(session, strava.id)
+
+    groups = [score.buildable, score.partly, score.missing, score.not_described]
+    names = [n for g in groups for n in g]
+    assert sum(map(len, groups)) == score.total_features == 7
+    assert sorted(names) == sorted(set(names))  # disjoint
+    assert score.buildable == ["Sync activities"]
+    assert score.partly == ["Share routes"]
+    assert score.missing == ["Compete on segments", "Segment challenges", "Synced segments"]
+    assert score.missing_incomplete == ["Segment challenges", "Synced segments"]
+    assert score.not_described == ["Beacon live tracking", "Legacy import"]
+
+
+@pytest.mark.asyncio
+async def test_what_to_build_next_is_ranked_and_the_closest_product_named(db):
+    """Missing capabilities rank by how many features each alone would cover,
+    then by how many need it; the closest products are ours, never the one
+    scored, by how many of its named capabilities they have."""
+    async with db() as session:
+        names = ["Route planning", "Base maps", "Offline maps", "Turn by turn", "Heatmaps", "Beacon"]
+        c = {n: await cap(session, n) for n in names}
+        climb = await product(session, "Can I Climb")
+        atlas = await product(session, "Atlas")
+        rival = await product(session, "Rival", external=True)
+        target = await product(session, "Target", external=True)
+
+        async def feature(name, prod, caps):
+            await feature_service.create_feature(
+                session,
+                FeatureCreate(name=name, product_id=prod.id, capability_ids=[c[n].id for n in caps]),
+            )
+
+        await feature("Plan", climb, ["Route planning", "Base maps"])
+        await feature("Map", atlas, ["Base maps"])
+        await feature("Offline", rival, ["Offline maps"])
+        await feature("Plan offline", target, ["Route planning", "Offline maps"])
+        await feature("Download an area", target, ["Base maps", "Offline maps"])
+        await feature("Navigate", target, ["Route planning", "Turn by turn"])
+        await feature("Navigate offline", target, ["Turn by turn", "Offline maps"])
+        await feature("Heat", target, ["Heatmaps"])
+        await feature("Beacon", target, ["Beacon", "Turn by turn"])
+        score = await capability_service.product_coverage(session, target.id)
+        own = await capability_service.product_coverage(session, climb.id)
+
+    ranked = [(g.name, g.features, g.only_gap) for g in score.missing_capabilities]
+    assert ranked == [
+        ("Offline maps", 3, 2),
+        ("Turn by turn", 3, 1),
+        ("Heatmaps", 1, 1),
+        ("Beacon", 1, 0),
+    ]
+    by_name = {g.name: g for g in score.missing_capabilities}
+    assert by_name["Offline maps"].slug == "offline-maps"
+    # Target has every one of these itself; elsewhere means some other product.
+    assert [p.name for p in by_name["Offline maps"].elsewhere] == ["Rival"]
+    assert by_name["Heatmaps"].elsewhere == []
+    assert score.report.needed == 6
+    assert [(p.product.name, p.capabilities) for p in score.closest_products] == [
+        ("Can I Climb", 2),
+        ("Atlas", 1),
+    ]
+    # Our own product lacks nothing, and is never its own closest product.
+    assert own.missing_capabilities == []
+    assert [(p.product.name, p.capabilities) for p in own.closest_products] == [("Atlas", 1)]

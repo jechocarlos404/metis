@@ -36,12 +36,14 @@ from app.schemas.capability import (
     CapabilityNode,
     CapabilityRead,
     CapabilityUpdate,
+    ClosestProduct,
     CoverageReport,
     CoverageRequest,
     FeatureCoverage,
     HealthFinding,
     IdeaFeature,
     InventoryEntry,
+    MissingCapability,
     ProductCoverage,
     ProductRef,
     Rollup,
@@ -489,8 +491,9 @@ def ours_clause():
 @dataclass(frozen=True)
 class Usage:
     """Who realizes a capability, over its submap. `ours` is the inventory's
-    whole question: false only when features realize it and every one of them
-    belongs to an external product — then we know it exists, not that we have it."""
+    whole question: true only when at least one of our features realizes it.
+    False when only external products do (we know it exists, not that we have
+    it) and when nothing does (a name nobody builds)."""
 
     products: list[ProductRef]
     external_products: list[ProductRef]
@@ -504,7 +507,6 @@ async def _usage(session: AsyncSession) -> dict[uuid.UUID, Usage]:
     children = await _children_index(session)
     by_id = {p.id: p for p in (await session.scalars(select(Product))).all()}
     ours_f: dict[uuid.UUID, set[uuid.UUID]] = defaultdict(set)
-    ext_f: dict[uuid.UUID, set[uuid.UUID]] = defaultdict(set)
     ours_p: dict[uuid.UUID, set[uuid.UUID]] = defaultdict(set)
     ext_p: dict[uuid.UUID, set[uuid.UUID]] = defaultdict(set)
     rows = await session.execute(
@@ -514,7 +516,8 @@ async def _usage(session: AsyncSession) -> dict[uuid.UUID, Usage]:
     )
     for capability_id, feature_id, product_id in rows:
         external = product_id is not None and by_id[product_id].external
-        (ext_f if external else ours_f)[capability_id].add(feature_id)
+        if not external:
+            ours_f[capability_id].add(feature_id)
         if product_id is not None:
             (ext_p if external else ours_p)[capability_id].add(product_id)
 
@@ -525,12 +528,11 @@ async def _usage(session: AsyncSession) -> dict[uuid.UUID, Usage]:
     for capability in (c for group in children.values() for c in group):
         submap = _submap_ids(capability.id, children)
         ours_features = gather(ours_f, submap)
-        external_features = gather(ext_f, submap)
         usage[capability.id] = Usage(
             products=_refs(gather(ours_p, submap), by_id),
             external_products=_refs(gather(ext_p, submap), by_id),
             features=len(ours_features),
-            ours=bool(ours_features) or not external_features,
+            ours=bool(ours_features),
         )
     return usage
 
@@ -544,7 +546,8 @@ def _refs(ids: set[uuid.UUID], by_id: dict[uuid.UUID, Product]) -> list[ProductR
 
 async def inventory(session: AsyncSession) -> list[InventoryEntry]:
     """Everything we can already do, most-reused first, then what we only know
-    from external products: the raw material for the next product."""
+    from external products, then what is named but realized by no feature:
+    the raw material for the next product."""
     usage = await _usage(session)
     entries = [
         InventoryEntry(
@@ -572,8 +575,9 @@ async def coverage(session: AsyncSession, request: CoverageRequest) -> CoverageR
     """How much of a product idea we already have. Needs resolve by exact slug
     only — a wrong match would overstate what we have, which is worse than an
     honest gap — and every unresolved need lists near names to confirm. A
-    capability known only from external products resolves (so you see who has
-    it) but counts as missing: knowing it exists is not having it."""
+    capability that none of our features realize resolves (so you see who has
+    it, if anyone) but counts as missing: knowing it exists, or having named
+    it, is not having it."""
     capabilities = await list_capabilities(session)
     by_slug = {c.slug: c for c in capabilities}
     usage = await _usage(session)
@@ -689,7 +693,9 @@ async def health(session: AsyncSession) -> list[HealthFinding]:
     usage = await _usage(session)
     for capability in capabilities:
         # Known only from someone else's product: not our promise to keep.
-        if not usage[capability.id].ours:
+        # One nothing realizes isn't ours either, but is still ours to explain.
+        u = usage[capability.id]
+        if not u.ours and u.external_products:
             continue
         in_scope = sum(
             counts_by_capability.get(cid, 0)
@@ -794,16 +800,64 @@ async def product_coverage(session: AsyncSession, product_id: uuid.UUID) -> Prod
     report, scored = await score_items(
         session, [(f.name, [names[c] for c in f.capability_ids]) for f in features]
     )
-    covered = {i for i, fc in enumerate(scored) if fc is not None and fc.existing == fc.total}
+    # One pass, by position, so the groups partition the features — the same
+    # precedence a journey step's verdict uses.
+    groups: dict[str, list[str]] = {
+        "buildable": [], "partly": [], "missing": [], "missing_incomplete": [], "not_described": []
+    }
+    for f, fc in zip(features, scored):
+        if fc is None:
+            groups["not_described"].append(f.name)
+        elif fc.existing < fc.total:
+            groups["missing"].append(f.name)
+            if f.unknown_capabilities:
+                groups["missing_incomplete"].append(f.name)
+        else:
+            groups["partly" if f.unknown_capabilities else "buildable"].append(f.name)
+    missing_capabilities, closest_products = _what_to_build(scored, product.id)
     return ProductCoverage(
         product=ProductRef.model_validate(product),
         total_features=len(features),
-        buildable=[
-            f.name for i, f in enumerate(features) if i in covered and not f.unknown_capabilities
-        ],
-        unknown_features=[f.name for f in features if f.unknown_capabilities],
-        known_covered=[
-            f.name for i, f in enumerate(features) if i in covered and f.unknown_capabilities
-        ],
+        **groups,
         report=report,
+        missing_capabilities=missing_capabilities,
+        closest_products=closest_products,
     )
+
+
+def _what_to_build(
+    scored: list[FeatureCoverage | None], product_id: uuid.UUID
+) -> tuple[list[MissingCapability], list[ClosestProduct]]:
+    """From the matches coverage() already made, never a second lookup: the
+    capabilities we lack, ranked by how many features each alone would cover,
+    and the products of ours that already have the most of what's named.
+    Needs are keyed by slug, as coverage() resolves them."""
+    gaps: dict[str, MissingCapability] = {}
+    ours: dict[uuid.UUID, tuple[ProductRef, set[str]]] = {}
+    for fc in scored:
+        if fc is None:
+            continue
+        lacking: dict[str, CapabilityNeed] = {}
+        for need in fc.capabilities:
+            key = need.match.slug if need.match else slugify(need.name)
+            if need.match and need.match.ours:
+                for p in need.match.products:
+                    if p.id != product_id:
+                        ours.setdefault(p.id, (p, set()))[1].add(key)
+            else:
+                lacking[key] = need
+        for key, need in lacking.items():
+            m = need.match
+            gap = gaps.setdefault(key, MissingCapability(
+                name=m.name if m else need.name,
+                slug=m.slug if m else None,
+                features=0,
+                only_gap=0,
+                elsewhere=[p for p in m.external_products if p.id != product_id] if m else [],
+            ))
+            gap.features += 1
+            if len(lacking) == 1:
+                gap.only_gap += 1
+    missing = sorted(gaps.values(), key=lambda g: (-g.only_gap, -g.features, g.name.lower()))
+    closest = sorted(ours.values(), key=lambda pc: (-len(pc[1]), pc[0].name.lower()))[:3]
+    return missing, [ClosestProduct(product=p, capabilities=len(caps)) for p, caps in closest]

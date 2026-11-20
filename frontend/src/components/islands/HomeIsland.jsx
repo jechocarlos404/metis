@@ -2,7 +2,7 @@ import React from "react";
 import { PageHeader } from "../shell/PageHeader.jsx";
 import { Badge, Button, Input } from "../../ds";
 import { api } from "../../lib/api.js";
-import { VERDICT, count, freshness } from "../../lib/words.js";
+import { NEED, VERDICT, count, freshness, needKey, scoreGroups } from "../../lib/words.js";
 import { CapabilityPicker } from "../shared/CapabilityPicker.jsx";
 import { CoverageReport } from "../shared/coverage.jsx";
 import GetStartedIsland from "./GetStartedIsland.jsx";
@@ -97,7 +97,7 @@ function IdeaChecker({ inventory, canWrite }) {
 
   const options = React.useMemo(() => inventory.map((c) => ({
     id: c.id, name: c.name, slug: c.slug,
-    hint: c.ours ? (c.products.length ? `in ${count(c.products.length, "product")}` : "ours, in no product") : "only elsewhere",
+    hint: c.ours ? (c.products.length ? `in ${count(c.products.length, "product")}` : "ours, in no product") : NEED[needKey(c)].label,
   })), [inventory]);
 
   const setRow = (key, patch) => setRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...patch } : r)));
@@ -209,12 +209,9 @@ function IdeaChecker({ inventory, canWrite }) {
 // ---- Portfolio -----------------------------------------------------------
 
 function scoreCounts(score) {
-  const partly = score.known_covered.length;
   return {
     total: score.total_features,
-    buildable: score.buildable.length,
-    partly,
-    unknown: score.unknown_features.filter((n) => !score.known_covered.includes(n)).length,
+    groups: scoreGroups(score).map((g) => [g.key, g.names.length]),
   };
 }
 
@@ -227,7 +224,9 @@ function Portfolio({ products }) {
 
   React.useEffect(() => {
     let cancelled = false;
-    const queue = sorted.map((p) => p.id);
+    // Only external products: ours realize their own capabilities, so they
+    // would always read "all buildable".
+    const queue = sorted.filter((p) => p.external).map((p) => p.id);
     const worker = async () => {
       while (!cancelled && queue.length) {
         const id = queue.shift();
@@ -260,7 +259,7 @@ function Portfolio({ products }) {
                 {p.external && <Badge>external</Badge>}
                 <span title="When its seed file was last imported" style={QUIET}>{freshness(p.seeded_at)}</span>
                 <span style={{ flex: 1 }} />
-                <ScoreLine score={scores[p.id]} />
+                {p.external && <ScoreLine score={scores[p.id]} />}
               </a>
             </li>
           ))}
@@ -274,7 +273,7 @@ function ScoreLine({ score }) {
   if (score == null) return <span style={QUIET}>scoring…</span>;
   if (score === "error") return <span style={QUIET}>couldn't score</span>;
   if (score.total === 0) return <span style={QUIET}>no features yet</span>;
-  const parts = [["buildable", score.buildable], ["partly", score.partly], ["unknown", score.unknown]].filter(([, n]) => n > 0);
+  const parts = score.groups.filter(([, n]) => n > 0);
   return (
     <span style={{ ...QUIET, display: "inline-flex", gap: 10, flexWrap: "wrap" }}>
       {parts.map(([kind, n]) => (

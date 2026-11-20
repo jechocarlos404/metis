@@ -2,7 +2,7 @@ import React from "react";
 import { PageHeader } from "../shell/PageHeader.jsx";
 import { Badge, Button, DeleteConfirm, Input } from "../../ds";
 import { api } from "../../lib/api.js";
-import { MATURITY, NEED, VERDICT, count, plain, statusLabel } from "../../lib/words.js";
+import { MATURITY, NEED, VERDICT, count, needKey, plain, statusLabel } from "../../lib/words.js";
 import { readParam, useParamRestore, writeParams } from "../../lib/url-state.js";
 import { CoverageReport } from "../shared/coverage.jsx";
 import { CapabilityPicker } from "../shared/CapabilityPicker.jsx";
@@ -34,7 +34,7 @@ const TONE = {
 // The analysis's step verdicts, in the shared VERDICT words.
 const VERDICT_KEY = { buildable: "buildable", known_covered: "partly", missing: "missing", unknown: "unknown" };
 const stepKind = (step) => (step.live ? "live" : VERDICT_KEY[step.verdict] ?? "unknown");
-const needKind = (need) => (need.match ? (need.match.ours ? "ours" : "elsewhere") : "none");
+const needKind = (need) => needKey(need.match);
 
 const STEP_W = 176;
 const STEP_H = 92;
@@ -494,7 +494,7 @@ function JourneyEditor({ base, draft: start, features, productById, inventory, o
   const byId = React.useMemo(() => new Map(inventory.map((c) => [c.id, c])), [inventory]);
   const bySlug = React.useMemo(() => new Map(inventory.map((c) => [c.slug, c])), [inventory]);
   const options = React.useMemo(() => inventory.map((c) => ({
-    id: c.id, name: c.name, slug: c.slug, hint: NEED[c.ours ? "ours" : "elsewhere"].label,
+    id: c.id, name: c.name, slug: c.slug, hint: NEED[needKey(c)].label,
   })), [inventory]);
   const dirty = JSON.stringify(draft) !== JSON.stringify(base);
 
@@ -573,7 +573,7 @@ function JourneyEditor({ base, draft: start, features, productById, inventory, o
         const f = s.feature_id ? featureById.get(s.feature_id) : null;
         const product = f ? productById.get(f.product_id) : null;
         const v = VERDICT[kinds[i]];
-        const elsewhere = s.feature_id ? [] : s.needs.filter((n) => bySlug.get(slugify(n))?.ours === false);
+        const elsewhere = s.feature_id ? [] : s.needs.filter((n) => needKey(bySlug.get(slugify(n))) === "elsewhere");
         return (
           <div key={i} style={{ display: "grid", gridTemplateColumns: "24px minmax(0,1fr) auto", gap: 8, alignItems: "start", padding: 10, border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-sm)", borderStyle: s.feature_id ? "solid" : "dashed" }}>
             <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-secondary)", paddingTop: 9 }}>{i + 1}</div>

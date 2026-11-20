@@ -1,6 +1,6 @@
 export const prerender = false;
 
-import { EDGE, count } from "../../../lib/words.js";
+import { EDGE, andList, count } from "../../../lib/words.js";
 
 const backend = () =>
   (process.env.API_INTERNAL_URL || "http://localhost:8000").replace(/\/$/, "");
@@ -155,12 +155,14 @@ class Unseeder {
       techSlug,
       new Map(this.instTechs.map((tech) => [tech.slug, tech])),
     );
-    // Usage of the seed's products, read now: deleting a product cascades its
-    // usage rows, which its line names, and the technology guard runs after.
+    // Usage, read now: deleting a product cascades its usage rows, which its
+    // line names, and the technology guard runs after. Every product's, since
+    // another product's use can name a slot of a stack that goes.
     this.instUsage = new Map();
-    for (const product of this.products.values()) {
+    for (const product of this.instProducts) {
       this.instUsage.set(product.id, await this.optional(`/api/stacks/usage?product_id=${product.id}`, "technology use"));
     }
+    await this.readAttached();
     // (tech, capability) pairs the seed itself declares, confirmed or
     // guessed: removing those is undoing the seed, not foreign data.
     this.declared = new Set();
@@ -200,6 +202,82 @@ class Unseeder {
           `Those can keep a capability or technology, so where the removal depends on them this preview says "can't tell" instead of "would delete".`,
       );
     }
+  }
+
+  /** Rows no seed file carries that hang off what a removal deletes: plans,
+   * stacks, journeys, constraints, and what people recorded about a
+   * technology. Each one either keeps its row or is named on its line. Read
+   * across the whole instance: another product's epic, slot or journey step
+   * can point at a row the seed made. */
+  async readAttached() {
+    this.instStacks = await this.optional("/api/stacks", "stacks");
+    this.instSlots = [];
+    this.instAnswers = [];
+    for (const stack of this.instStacks) {
+      const view = await this.api.getOptional(`/api/stacks/${stack.id}`);
+      if (view === null && !this.unreadable.includes("stacks")) this.unreadable.push("stacks");
+      this.instSlots.push(...(view?.slots || []));
+      this.instAnswers.push(...await this.optional(`/api/stacks/${stack.id}/concerns`, "stacks"));
+    }
+    this.instScopes = [];
+    for (const constraint of await this.optional("/api/constraints", "constraints")) {
+      const scopes = await this.optional(`/api/constraints/${constraint.id}/scopes`, "constraints");
+      this.instScopes.push(...scopes.map((scope) => ({ ...scope, constraint_name: constraint.name })));
+    }
+    this.instJourneys = await this.optional("/api/journeys", "journeys");
+    this.instTickets = await this.optional("/api/tickets", "plans");
+    this.instEpics = [];
+    for (const product of this.instProducts) {
+      this.instEpics.push(...await this.optional(`/api/products/${product.id}/epics`, "plans"));
+    }
+    this.instPlans = new Map();
+    this.instStrategies = new Map();
+    for (const product of this.products.values()) {
+      this.instPlans.set(product.id, await this.optional(`/api/products/${product.id}/decompositions`, "plans"));
+      this.instStrategies.set(product.id, await this.optional(`/api/products/${product.id}/strategies`, "plans"));
+    }
+    // Who used each technology, its versions and its links to other
+    // technologies are on its own page only, so every one is read.
+    this.instTechDetail = new Map();
+    for (const tech of this.instTechs) {
+      const detail = await this.api.getOptional(`/api/tech/${encodeURIComponent(tech.slug)}`);
+      if (detail === null && !this.unreadable.includes("technologies")) this.unreadable.push("technologies");
+      if (detail && !Array.isArray(detail)) this.instTechDetail.set(tech.id, detail);
+    }
+  }
+
+  /** Matched products that go: one a feature outside the seed belongs to stays. */
+  deadProductIds() {
+    const foreign = this.foreignFeatureCounts();
+    return new Set([...this.products.values()].map((product) => product.id).filter((id) => !foreign.has(id)));
+  }
+
+  productName(productId) {
+    return this.instProducts.find((product) => product.id === productId)?.name ?? productId;
+  }
+
+  /** Stacks that go with their product. */
+  deadStackIds() {
+    const deadProducts = this.deadProductIds();
+    return new Set(this.instStacks.filter((stack) => deadProducts.has(stack.product_id)).map((stack) => stack.id));
+  }
+
+  /** Slots of stacks that stay: each holds its technology and capability. */
+  liveSlots() {
+    const deadStacks = this.deadStackIds();
+    return this.instSlots.filter((slot) => !deadStacks.has(slot.stack_id));
+  }
+
+  slotLabel(slot) {
+    const stack = this.instStacks.find((row) => row.id === slot.stack_id);
+    const owner = stack?.product_id ? ` of product ${JSON.stringify(this.productName(stack.product_id))}` : "";
+    return `slot ${JSON.stringify(slot.role)} of stack ${JSON.stringify(stack?.name ?? slot.stack_id)}${owner}`;
+  }
+
+  /** Epics that stay: another product's plan, pinned to a capability. */
+  liveEpics() {
+    const deadProducts = this.deadProductIds();
+    return this.instEpics.filter((epic) => !deadProducts.has(epic.product_id));
   }
 
   note(collection, action) {
@@ -276,6 +354,7 @@ class Unseeder {
       }
     }
     const capNames = new Map(this.instCaps.map((cap) => [cap.id, cap.name]));
+    const techNames = new Map(this.instTechs.map((tech) => [tech.id, tech.name]));
     const deletable = [];
     for (const tech of this.techs.values()) {
       const reasons = [];
@@ -290,6 +369,19 @@ class Unseeder {
         if (!this.declared.has(`${tech.id}:${capabilityId}`)) {
           reasons.push(`${verb} ${JSON.stringify(capNames.get(capabilityId) ?? capabilityId)}, which the seed does not say`);
         }
+      }
+      // What people recorded about it, which no seed file carries.
+      const detail = this.instTechDetail.get(tech.id) || {};
+      const people = [...new Set((detail.encounters || []).map((row) => row.person))];
+      if (people.length > 0) reasons.push(`${andList(people)} recorded using it`);
+      const versions = (detail.versions || []).map((row) => row.label);
+      if (versions.length > 0) reasons.push(`it has ${count(versions.length, "recorded version")} (${versions.join(", ")})`);
+      const linked = [...(detail.outgoing || []).map((edge) => edge.dst_id), ...(detail.incoming || []).map((edge) => edge.src_id)];
+      if (linked.length > 0) {
+        reasons.push(`it is linked to ${andList(linked.map((id) => JSON.stringify(techNames.get(id) ?? id)))}`);
+      }
+      for (const slot of this.liveSlots().filter((row) => row.tech_id === tech.id)) {
+        reasons.push(`${this.slotLabel(slot)} uses it`);
       }
       if (reasons.length > 0) this.keep("technologies", `technology ${JSON.stringify(tech.name)}`, reasons);
       else deletable.push(tech);
@@ -362,6 +454,13 @@ class Unseeder {
         if (bundle.capability_id === cap.id && !deadProducts.has(bundle.product_id)) {
           reasons.push(`product ${JSON.stringify(bundle.product_name)} lists it as a capability added by hand`);
         }
+      }
+      // Another product's plan or stack names it.
+      for (const epic of this.liveEpics().filter((row) => row.capability_id === cap.id)) {
+        reasons.push(`epic ${JSON.stringify(epic.title)} of product ${JSON.stringify(this.productName(epic.product_id))} is about it`);
+      }
+      for (const slot of this.liveSlots().filter((row) => row.capability_id === cap.id)) {
+        reasons.push(`${this.slotLabel(slot)} answers it`);
       }
       for (const child of children.get(cap.id) || []) {
         if (!matchedCapIds.has(child.id)) reasons.push(`child capability ${JSON.stringify(child.name)} is not in the seed`);
@@ -538,51 +637,134 @@ class Unseeder {
         ]);
         continue;
       }
-      // What goes with it: its own rows, named so none goes unlisted.
-      const byHand = this.instBundles.filter((bundle) => bundle.product_id === product.id).length;
-      const uses = (this.instUsage.get(product.id) || []).length;
-      const parts = [
-        "its plan document",
-        "tickets",
-        ...(uses > 0 ? [`its use of ${count(uses, "technology", "technologies")}`] : []),
-        ...(byHand > 0 ? [`${count(byHand, "capability", "capabilities")} added by hand`] : []),
-      ];
-      await this.remove(
-        "products",
-        `/api/products/${product.id}`,
-        `product ${JSON.stringify(product.name)}, with ${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}`,
+      await this.remove("products", `/api/products/${product.id}`, this.productLine(product));
+    }
+  }
+
+  /** A product's delete takes its plan, stacks and the rest of its own rows
+   * with it; each is counted here. What only pointed at it stays, and says so. */
+  productLine(product) {
+    const id = product.id;
+    const epics = this.instEpics.filter((epic) => epic.product_id === id);
+    const epicIds = new Set(epics.map((epic) => epic.id));
+    const storyIds = new Set(epics.flatMap((epic) => (epic.stories || []).map((story) => story.id)));
+    const tickets = this.instTickets.filter((ticket) => ticket.product_id === id || epicIds.has(ticket.epic_id));
+    const loose = this.instTickets.filter((ticket) => !tickets.includes(ticket) && storyIds.has(ticket.story_id));
+    const stacks = this.instStacks.filter((stack) => stack.product_id === id);
+    const stackIds = new Set(stacks.map((stack) => stack.id));
+    const slotIds = new Set(this.instSlots.filter((slot) => stackIds.has(slot.stack_id)).map((slot) => slot.id));
+    const uses = (this.instUsage.get(id) || []).length;
+    const byHand = this.instBundles.filter((bundle) => bundle.product_id === id).length;
+    const n = (rows) => rows.length;
+    const parts = [
+      [n(this.instPlans.get(id) || []), "plan document"],
+      [n(epics), "epic"],
+      [storyIds.size, "story", "stories"],
+      [n(tickets), "ticket"],
+      [n(this.instStrategies.get(id) || []), "delivery strategy", "delivery strategies"],
+    ].filter(([k]) => k > 0).map(([k, one, many]) => count(k, one, many));
+    if (uses > 0) parts.push(`its use of ${count(uses, "technology", "technologies")}`);
+    if (byHand > 0) parts.push(`${count(byHand, "capability", "capabilities")} added by hand`);
+    for (const stack of stacks) {
+      const inner = [
+        [this.instSlots.filter((slot) => slot.stack_id === stack.id).length, "slot"],
+        [this.instAnswers.filter((answer) => answer.stack_id === stack.id).length, "concern answer"],
+      ].filter(([k]) => k > 0).map(([k, one]) => count(k, one));
+      parts.push(`its stack ${JSON.stringify(stack.name)}${inner.length > 0 ? ` (${andList(inner)})` : ""}`);
+    }
+    const after = [];
+    const scopes = this.instScopes.filter((scope) => scope.product_id === id || stackIds.has(scope.stack_id));
+    for (const name of new Set(scopes.map((scope) => scope.constraint_name))) {
+      after.push(`constraint ${JSON.stringify(name)} stops applying to it`);
+    }
+    for (const stack of this.instStacks.filter((row) => stackIds.has(row.parent_id) && !stackIds.has(row.id))) {
+      after.push(`stack ${JSON.stringify(stack.name)} of product ${JSON.stringify(this.productName(stack.product_id))} stays, no longer based on its stack`);
+    }
+    const viaSlot = [...this.instUsage.entries()]
+      .filter(([owner]) => owner !== id)
+      .flatMap(([, rows]) => rows)
+      .filter((row) => slotIds.has(row.via_slot_id)).length;
+    if (viaSlot > 0) after.push(`${count(viaSlot, "technology use")} of other products ${agree(viaSlot, "stays", "stay")}, no longer in its slots`);
+    const answers = this.instAnswers.filter((answer) => !stackIds.has(answer.stack_id) && slotIds.has(answer.slot_id)).length;
+    if (answers > 0) after.push(`${count(answers, "concern answer")} of other stacks ${agree(answers, "stays", "stay")}, no longer naming its slots`);
+    if (loose.length > 0) after.push(`${count(loose.length, "ticket")} of other products ${agree(loose.length, "stays", "stay")}, no longer under its stories`);
+    const recorded = [...this.instTechDetail.values()].flatMap((detail) =>
+      (detail.encounters || []).filter((row) => row.product_id === id).map(() => detail.name));
+    if (recorded.length > 0) {
+      after.push(
+        `${count(recorded.length, "recorded use")} of ${andList([...new Set(recorded)].map((name) => JSON.stringify(name)))} ` +
+          `${agree(recorded.length, "stays", "stay")}, no longer naming it`,
       );
     }
+    return [
+      `product ${JSON.stringify(product.name)}${parts.length > 0 ? `, with ${andList(parts)}` : ""}`,
+      ...after,
+    ].join("; ");
+  }
+
+  /** A feature's delete takes its guesses and capability links. Another
+   * product's story and a journey step that pointed at it stay. */
+  featureLine(feature) {
+    const parts = [];
+    const guesses = this.instGuesses.filter((guess) => guess.feature_id === feature.id).length;
+    if (guesses > 0) parts.push(`its ${count(guesses, "guess", "guesses")}`);
+    const file = [...this.features.entries()].find(([, row]) => row.id === feature.id)?.[0];
+    const declared = new Set(
+      ((this.doc.features || []).find((row) => row.ref === file)?.capability_refs || [])
+        .map((ref) => this.caps.get(ref)?.id),
+    );
+    const capNames = new Map(this.instCaps.map((cap) => [cap.id, cap.name]));
+    const extra = (feature.capability_ids || []).filter((cid) => !declared.has(cid));
+    if (extra.length > 0) {
+      parts.push(
+        `its ${agree(extra.length, "link", "links")} to ${andList(extra.map((cid) => JSON.stringify(capNames.get(cid) ?? cid)))}, ` +
+          `which the seed does not have`,
+      );
+    }
+    const after = [];
+    const deadProducts = this.deadProductIds();
+    for (const epic of this.instEpics.filter((row) => !deadProducts.has(row.product_id))) {
+      for (const story of (epic.stories || []).filter((row) => row.feature_id === feature.id)) {
+        after.push(`story ${JSON.stringify(story.title)} of product ${JSON.stringify(this.productName(epic.product_id))} stays, no longer about it`);
+      }
+    }
+    for (const journey of this.instJourneys) {
+      const steps = (journey.steps || []).filter((step) => step.feature_id === feature.id).length;
+      if (steps > 0) after.push(`journey ${JSON.stringify(journey.name)} keeps its ${agree(steps, "step", "steps")}, no longer linked to it`);
+    }
+    return [`feature ${JSON.stringify(feature.name)}${parts.length > 0 ? `, with ${andList(parts)}` : ""}`, ...after].join("; ");
   }
 
   async removeFeatures() {
     for (const feature of this.features.values()) {
-      const guesses = this.instGuesses.filter((guess) => guess.feature_id === feature.id).length;
-      await this.remove(
-        "features",
-        `/api/features/${feature.id}`,
-        `feature ${JSON.stringify(feature.name)}${guesses > 0 ? `, with its ${count(guesses, "guess", "guesses")}` : ""}`,
-      );
+      await this.remove("features", `/api/features/${feature.id}`, this.featureLine(feature));
     }
   }
 
-  /** Deletable technologies go (cascading their satisfactions, guesses and
-   * usage). On a kept one, the seed's confirmed satisfactions of a capability
+  /** Deletable technologies go, with their links to capabilities, each
+   * named. On a kept one, the seed's confirmed satisfactions of a capability
    * about to be deleted go first: the capability foreign key restricts, and
    * the seed is what created them. */
   async removeTechs() {
+    const capNames = new Map(this.instCaps.map((cap) => [cap.id, cap.name]));
+    const techNames = new Map(this.instTechs.map((tech) => [tech.id, tech.name]));
+    const names = (rows) => andList(rows.map((row) => JSON.stringify(capNames.get(row.capability_id) ?? row.capability_id)));
     for (const tech of this.deadRows("techs")) {
+      const sats = this.instSats.filter((row) => row.tech_id === tech.id);
+      const guesses = this.instGuesses.filter((row) => row.tech_id === tech.id);
+      const parts = [
+        ...(sats.length > 0 ? [`its ${agree(sats.length, "link", "links")} to ${names(sats)}`] : []),
+        ...(guesses.length > 0 ? [`its ${agree(guesses.length, "guessed link", "guessed links")} to ${names(guesses)}`] : []),
+      ];
       await this.remove(
         "technologies",
         `/api/tech/${encodeURIComponent(tech.slug)}`,
-        `technology ${JSON.stringify(tech.name)}, with its links to capabilities`,
+        `technology ${JSON.stringify(tech.name)}${parts.length > 0 ? `, with ${andList(parts)}` : ""}`,
         true,
       );
     }
     const deadTechs = this.dead("techs");
     const deadCaps = this.dead("caps");
-    const capNames = new Map(this.instCaps.map((cap) => [cap.id, cap.name]));
-    const techNames = new Map(this.instTechs.map((tech) => [tech.id, tech.name]));
     for (const sat of this.instSats) {
       if (deadTechs.has(sat.tech_id) || !this.declared.has(`${sat.tech_id}:${sat.capability_id}`)) continue;
       const label = `${JSON.stringify(techNames.get(sat.tech_id))} satisfies ${JSON.stringify(capNames.get(sat.capability_id))}`;
@@ -594,9 +776,19 @@ class Unseeder {
     }
   }
 
+  /** A seed technology that stays keeps the guesses the seed made for it,
+   * except one about a capability that goes: that guess goes with it. */
   async removeCaps() {
+    const deadTechs = this.dead("techs");
+    const techNames = new Map(this.instTechs.map((tech) => [tech.id, tech.name]));
     for (const cap of this.deadRows("caps")) {
-      await this.remove("capabilities", `/api/capabilities/${cap.id}`, `capability ${JSON.stringify(cap.name)}`, true);
+      const guesses = this.instGuesses.filter(
+        (guess) => guess.capability_id === cap.id && guess.tech_id && !deadTechs.has(guess.tech_id),
+      );
+      const tail = guesses.length > 0
+        ? `, with the ${agree(guesses.length, "guess", "guesses")} that ${andList(guesses.map((g) => JSON.stringify(techNames.get(g.tech_id) ?? g.tech_id)))} ${agree(guesses.length, "satisfies", "satisfy")} it`
+        : "";
+      await this.remove("capabilities", `/api/capabilities/${cap.id}`, `capability ${JSON.stringify(cap.name)}${tail}`, true);
     }
   }
 
@@ -617,6 +809,18 @@ class Unseeder {
     await this.removeTechs();
     await this.removeCaps();
     await this.removeGoals();
+    // Display numbers come from a sequence, so a re-import cannot restore them.
+    if (Object.keys(this.counts).some((key) => key.endsWith(":would delete") || key.endsWith(":deleted"))) {
+      const example = this.deadRows("goals").findLast((goal) => goal.display_id)?.display_id;
+      // First, after any "can't read" note, so it is read before the rows.
+      const at = this.notes.findIndex((note) => !note.startsWith("This account can't read"));
+      this.notes.splice(
+        at === -1 ? this.notes.length : at,
+        0,
+        `Numbers are not kept: importing this file again adds these rows back under new numbers` +
+          `${example ? ` (${example} would not come back as ${example})` : ""}.`,
+      );
+    }
     return {
       dryRun: this.dryRun,
       counts: {

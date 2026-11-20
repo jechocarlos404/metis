@@ -11,11 +11,13 @@ Entities entangled with material outside the seed are kept, with the reason:
 
 - a product is kept if features outside the seed belong to it
 - a technology is kept if a product outside the seed uses it, if it has an
-  adoption stance, or if it satisfies (or is guessed to satisfy) a capability
-  the seed does not link it to
+  adoption stance, if it satisfies (or is guessed to satisfy) a capability
+  the seed does not link it to, or if people recorded who used it, a version,
+  a link to another technology, or a slot of a stack that stays binds it
 - a capability is kept if foreign features realize it (any of a feature's
   capability_ids counts), if a foreign feature or technology links to it
-  (confirmed or guessed), or if any child capability is foreign or itself kept
+  (confirmed or guessed), if another product's epic or a surviving stack's
+  slot names it, or if any child capability is foreign or itself kept
 - a goal is kept if it has foreign child goals or foreign products
 - a goal link (motivation) the seed does not declare keeps whichever of its
   ends the seed names, the goal and the capability; so does a capability
@@ -24,9 +26,12 @@ Entities entangled with material outside the seed are kept, with the reason:
 
 Every row a delete takes with it is listed first: a deleted feature's edges
 (including ones the seed does not declare, or that foreign features had to it)
-are deleted one by one, and its guesses are named on its line. Deleting a product cascades its
-PRD, all work items (including tickets created after seeding) and its
-technology usage. Deleting a technology cascades its satisfactions and guesses.
+are deleted one by one, and its guesses are named on its line. Deleting a
+product cascades its PRD, epics, stories, tickets (including ones created after
+seeding), delivery strategies, technology usage, hand-added capabilities and
+its own stacks, each counted on its line; rows that only pointed at it stay,
+and the line says so. Deleting a technology cascades its satisfactions and
+guesses, each named on its line by capability.
 
 With auth on, pass a token (--token, or METIS_TOKEN / METIS_API_TOKEN). Any
 valid token can run --dry-run; a delete needs a person's desktop session, which
@@ -127,6 +132,12 @@ class Api:
         return self.request("DELETE", path)
 
 
+def _and(names):
+    """'A', 'A and B', 'A, B and C'."""
+    names = list(names)
+    return "".join(names) if len(names) <= 1 else f"{', '.join(names[:-1])} and {names[-1]}"
+
+
 def tech_slug(tech):
     """The loader's technology identity: explicit slug, else the backend's
     slug rule applied to the name."""
@@ -217,12 +228,14 @@ class Unseeder:
             {t["slug"]: t for t in self.inst_techs},
             lambda t: t.get("name"),
         )
-        # Usage of the seed's products, read now: deleting a product cascades
-        # its usage rows, and the technology guard runs after that.
+        # Usage, read now: deleting a product cascades its usage rows, and the
+        # technology guard runs after that. Every product's, since another
+        # product's use can name a slot of a stack that goes.
         self.inst_usage = {
             p["id"]: self._optional(f"/api/stacks/usage?product_id={p['id']}", "technology use")
-            for p in self.prods.values()
+            for p in self.inst_prods
         }
+        self._read_attached()
         # (tech id, capability id) pairs the seed itself declares, confirmed
         # or guessed: removing those is undoing the seed, not foreign data.
         self.declared = set()
@@ -272,6 +285,67 @@ class Unseeder:
         if rows is None and what not in self.unreadable:
             self.unreadable.append(what)
         return rows or []
+
+    def _read_attached(self):
+        """Rows no seed file carries that hang off what a removal deletes:
+        plans, stacks, journeys, constraints, and what people recorded about a
+        technology. Each one either keeps its row or is named on its line.
+        Read across the whole instance: another product's epic, slot or
+        journey step can point at a row the seed made."""
+        self.inst_stacks = self._optional("/api/stacks", "stacks")
+        self.inst_slots, self.inst_answers = [], []
+        for stack in self.inst_stacks:
+            view = self._optional(f"/api/stacks/{stack['id']}", "stacks")
+            self.inst_slots += view.get("slots", []) if isinstance(view, dict) else []
+            self.inst_answers += self._optional(f"/api/stacks/{stack['id']}/concerns", "stacks")
+        self.inst_scopes = []
+        for constraint in self._optional("/api/constraints", "constraints"):
+            for scope in self._optional(f"/api/constraints/{constraint['id']}/scopes", "constraints"):
+                self.inst_scopes.append({**scope, "constraint_name": constraint["name"]})
+        self.inst_journeys = self._optional("/api/journeys", "journeys")
+        self.inst_tickets = self._optional("/api/tickets", "plans")
+        self.inst_epics = []
+        for p in self.inst_prods:
+            self.inst_epics += self._optional(f"/api/products/{p['id']}/epics", "plans")
+        self.inst_plans = {
+            p["id"]: self._optional(f"/api/products/{p['id']}/decompositions", "plans")
+            for p in self.prods.values()
+        }
+        self.inst_strategies = {
+            p["id"]: self._optional(f"/api/products/{p['id']}/strategies", "plans")
+            for p in self.prods.values()
+        }
+        # Who used each technology, its versions and its links to other
+        # technologies are on its own page only, so every one is read.
+        self.inst_tech_detail = {}
+        for t in self.inst_techs:
+            detail = self._optional(f"/api/tech/{urllib.parse.quote(t['slug'], safe='')}", "technologies")
+            if isinstance(detail, dict):
+                self.inst_tech_detail[t["id"]] = detail
+
+    def _dead_prod_ids(self):
+        """Matched products that go: one a feature outside the seed belongs to stays."""
+        foreign = self.foreign_feature_counts()
+        return {p["id"] for p in self.prods.values() if p["id"] not in foreign}
+
+    def _product_name(self, pid):
+        return next((p["name"] for p in self.inst_prods if p["id"] == pid), pid)
+
+    def _live_slots(self):
+        """Slots of stacks that stay: each holds its technology and capability."""
+        dead = self._dead_prod_ids()
+        dead_stacks = {s["id"] for s in self.inst_stacks if s.get("product_id") in dead}
+        return [s for s in self.inst_slots if s["stack_id"] not in dead_stacks]
+
+    def _slot_label(self, slot):
+        stack = next((s for s in self.inst_stacks if s["id"] == slot["stack_id"]), {})
+        owner = f" of product {self._product_name(stack['product_id'])!r}" if stack.get("product_id") else ""
+        return f"slot {slot['role']!r} of stack {stack.get('name', slot['stack_id'])!r}{owner}"
+
+    def _live_epics(self):
+        """Epics that stay: another product's plan, pinned to a capability."""
+        dead = self._dead_prod_ids()
+        return [e for e in self.inst_epics if e["product_id"] not in dead]
 
     def _goal_name(self, goal_id):
         goal = next((g for g in self.inst_goals if g["id"] == goal_id), None)
@@ -387,6 +461,15 @@ class Unseeder:
             for b in self.inst_bundles:
                 if b["capability_id"] == cid and b["product_id"] not in dead_prods:
                     reasons.append(f"product {b['product_name']!r} lists it as a capability added by hand")
+            # Another product's plan or stack names it.
+            for e in self._live_epics():
+                if e.get("capability_id") == cid:
+                    reasons.append(
+                        f"epic {e['title']!r} of product {self._product_name(e['product_id'])!r} is about it"
+                    )
+            for s in self._live_slots():
+                if s.get("capability_id") == cid:
+                    reasons.append(f"{self._slot_label(s)} answers it")
             for child in children.get(cid, []):
                 if child["id"] not in matched_ids:
                     reasons.append(f"child capability {child['name']!r} is not in the seed")
@@ -470,6 +553,7 @@ class Unseeder:
             for u in self.inst_usage.get(pid, []):
                 seed_users[u["tech_id"]] = seed_users.get(u["tech_id"], 0) + 1
         cap_names = {c["id"]: c["name"] for c in self.inst_caps}
+        tech_names = {t["id"]: t["name"] for t in self.inst_techs}
         deletable = []
         for tech in self.techs.values():
             tid, reasons = tech["id"], []
@@ -487,6 +571,21 @@ class Unseeder:
             for cid, verb in links:
                 if (tid, cid) not in self.declared:
                     reasons.append(f"{verb} {cap_names.get(cid, cid)!r}, which the seed does not say")
+            # What people recorded about it, which no seed file carries.
+            detail = self.inst_tech_detail.get(tid, {})
+            people = list(dict.fromkeys(e["person"] for e in detail.get("encounters", [])))
+            if people:
+                reasons.append(f"{_and(people)} recorded using it")
+            versions = [v["label"] for v in detail.get("versions", [])]
+            if versions:
+                reasons.append(f"it has {len(versions)} recorded version(s) ({', '.join(versions)})")
+            linked = [e["dst_id"] for e in detail.get("outgoing", [])]
+            linked += [e["src_id"] for e in detail.get("incoming", [])]
+            if linked:
+                reasons.append(f"it is linked to {_and([repr(tech_names.get(i, i)) for i in linked])}")
+            for s in self._live_slots():
+                if s.get("tech_id") == tid:
+                    reasons.append(f"{self._slot_label(s)} uses it")
             if reasons:
                 self.keep("technologies", f"technology {tech['name']!r}", reasons)
             else:
@@ -588,48 +687,150 @@ class Unseeder:
                     [f"{foreign[prod['id']]} feature(s) outside the seed belong to it"],
                 )
                 continue
-            # What goes with it: its own rows, named so none goes unlisted.
-            by_hand = sum(1 for b in self.inst_bundles if b["product_id"] == prod["id"])
-            uses = len(self.inst_usage.get(prod["id"], []))
-            parts = ["its PRD", "work items"]
-            if uses:
-                parts.append(f"{uses} technology usage row(s)")
-            if by_hand:
-                parts.append(f"{by_hand} hand-added capability link(s)")
-            self.remove(
-                "products",
-                f"/api/products/{prod['id']}",
-                f"product {prod['name']!r} (cascades {', '.join(parts[:-1])} and {parts[-1]})",
+            self.remove("products", f"/api/products/{prod['id']}", self._product_line(prod))
+
+    def _product_line(self, prod):
+        """A product's delete takes its plan, stacks and the rest of its own
+        rows with it; each is counted here. What only pointed at it stays,
+        and says so."""
+        pid = prod["id"]
+        epics = [e for e in self.inst_epics if e["product_id"] == pid]
+        epic_ids = {e["id"] for e in epics}
+        story_ids = {st["id"] for e in epics for st in e.get("stories", [])}
+        tickets = [t for t in self.inst_tickets if t["product_id"] == pid or t.get("epic_id") in epic_ids]
+        loose = [t for t in self.inst_tickets if t not in tickets and t.get("story_id") in story_ids]
+        stacks = [s for s in self.inst_stacks if s.get("product_id") == pid]
+        stack_ids = {s["id"] for s in stacks}
+        slot_ids = {s["id"] for s in self.inst_slots if s["stack_id"] in stack_ids}
+        parts = [
+            f"{n} {word}"
+            for n, word in (
+                (len(self.inst_plans.get(pid, [])), "plan document(s)"),
+                (len(epics), "epic(s)"),
+                (len(story_ids), "story(ies)"),
+                (len(tickets), "ticket(s)"),
+                (len(self.inst_strategies.get(pid, [])), "delivery strategy(ies)"),
+                (len(self.inst_usage.get(pid, [])), "technology usage row(s)"),
+                (sum(1 for b in self.inst_bundles if b["product_id"] == pid), "hand-added capability link(s)"),
             )
+            if n
+        ]
+        for stack in stacks:
+            inner = [
+                f"{n} {word}"
+                for n, word in (
+                    (sum(1 for s in self.inst_slots if s["stack_id"] == stack["id"]), "slot(s)"),
+                    (sum(1 for a in self.inst_answers if a["stack_id"] == stack["id"]), "concern answer(s)"),
+                )
+                if n
+            ]
+            parts.append(f"its stack {stack['name']!r}" + (f" with {_and(inner)}" if inner else ""))
+        after = []
+        scoped = [c for c in self.inst_scopes if c.get("product_id") == pid or c.get("stack_id") in stack_ids]
+        for name in dict.fromkeys(c["constraint_name"] for c in scoped):
+            after.append(f"constraint {name!r} stops applying to it")
+        for stack in self.inst_stacks:
+            if stack.get("parent_id") in stack_ids and stack["id"] not in stack_ids:
+                after.append(
+                    f"stack {stack['name']!r} of product {self._product_name(stack['product_id'])!r} "
+                    "stays, no longer based on its stack"
+                )
+        via_slot = sum(
+            1
+            for owner, rows in self.inst_usage.items()
+            if owner != pid
+            for u in rows
+            if u.get("via_slot_id") in slot_ids
+        )
+        if via_slot:
+            after.append(f"{via_slot} technology usage row(s) of other products stay, no longer in its slots")
+        answers = sum(1 for a in self.inst_answers if a["stack_id"] not in stack_ids and a.get("slot_id") in slot_ids)
+        if answers:
+            after.append(f"{answers} concern answer(s) of other stacks stay, no longer naming its slots")
+        if loose:
+            after.append(f"{len(loose)} ticket(s) of other products stay, no longer under its stories")
+        recorded = [
+            d["name"]
+            for d in self.inst_tech_detail.values()
+            for e in d.get("encounters", [])
+            if e.get("product_id") == pid
+        ]
+        if recorded:
+            after.append(
+                f"{len(recorded)} recorded use(s) of {_and([repr(n) for n in dict.fromkeys(recorded)])} "
+                "stay, no longer naming it"
+            )
+        head = f"product {prod['name']!r}" + (f" (cascades {_and(parts)})" if parts else "")
+        return "; ".join([head, *after])
+
+    def _feature_line(self, feat):
+        """A feature's delete takes its guesses and capability links. Another
+        product's story and a journey step that pointed at it stay."""
+        parts = []
+        guesses = sum(1 for g in self.inst_guesses if g.get("feature_id") == feat["id"])
+        if guesses:
+            parts.append(f"its {guesses} guess(es)")
+        ref = next((r for r, f in self.feats.items() if f["id"] == feat["id"]), None)
+        entry = next((f for f in self.doc.get("features") or [] if f.get("ref") == ref), {})
+        refs = entry.get("capability_refs") or ([entry["capability_ref"]] if entry.get("capability_ref") else [])
+        declared = {(self.caps.get(r) or {}).get("id") for r in refs}
+        cap_names = {c["id"]: c["name"] for c in self.inst_caps}
+        extra = [cid for cid in feat.get("capability_ids") or [] if cid not in declared]
+        if extra:
+            parts.append(
+                f"its link(s) to {_and([repr(cap_names.get(c, c)) for c in extra])}, which the seed does not have"
+            )
+        after = []
+        dead = self._dead_prod_ids()
+        for e in self.inst_epics:
+            if e["product_id"] in dead:
+                continue
+            for st in e.get("stories", []):
+                if st.get("feature_id") == feat["id"]:
+                    after.append(
+                        f"story {st['title']!r} of product {self._product_name(e['product_id'])!r} "
+                        "stays, no longer about it"
+                    )
+        for j in self.inst_journeys:
+            steps = sum(1 for st in j.get("steps", []) if st.get("feature_id") == feat["id"])
+            if steps:
+                after.append(f"journey {j['name']!r} keeps its {steps} step(s), no longer linked to it")
+        head = f"feature {feat['name']!r}" + (f" (cascades {_and(parts)})" if parts else "")
+        return "; ".join([head, *after])
 
     def remove_features(self):
         for feat in self.feats.values():
-            guesses = sum(1 for g in self.inst_guesses if g.get("feature_id") == feat["id"])
-            self.remove(
-                "features",
-                f"/api/features/{feat['id']}",
-                f"feature {feat['name']!r}" + (f" (cascades its {guesses} guess(es))" if guesses else ""),
-            )
+            self.remove("features", f"/api/features/{feat['id']}", self._feature_line(feat))
 
     def remove_technologies(self):
-        """Deletable technologies go (cascading their satisfactions, guesses
-        and usage). On a kept one, the seed's confirmed satisfactions of a
+        """Deletable technologies go, with their links to capabilities, each
+        named. On a kept one, the seed's confirmed satisfactions of a
         capability that is about to be deleted go first: the capability
         foreign key restricts, and the seed is what created them."""
+        cap_names = {c["id"]: c["name"] for c in self.inst_caps}
+        tech_names = {t["id"]: t["name"] for t in self.inst_techs}
+
+        def names(rows):
+            return _and([repr(cap_names.get(r["capability_id"], r["capability_id"])) for r in rows])
+
         for tech in self._dead_cache_rows("techs"):
+            sats = [s for s in self.inst_sats if s["tech_id"] == tech["id"]]
+            guesses = [g for g in self.inst_guesses if g.get("tech_id") == tech["id"]]
+            parts = ([f"its satisfaction(s) of {names(sats)}"] if sats else []) + (
+                [f"its guess(es) about {names(guesses)}"] if guesses else []
+            )
             self.remove(
                 "technologies",
                 f"/api/tech/{urllib.parse.quote(tech['slug'], safe='')}",
-                f"technology {tech['name']!r} (cascades its satisfactions and guesses)",
+                f"technology {tech['name']!r}" + (f" (cascades {_and(parts)})" if parts else ""),
                 unsure=True,
             )
         dead_techs, dead_caps = self._dead("techs"), self._dead("caps")
-        cap_names = {c["id"]: c["name"] for c in self.inst_caps}
         for s in self.inst_sats:
             pair = (s["tech_id"], s["capability_id"])
             if s["tech_id"] in dead_techs or pair not in self.declared:
                 continue
-            label = f"satisfaction of {cap_names.get(s['capability_id'])!r}"
+            label = f"{tech_names.get(s['tech_id'])!r} satisfies {cap_names.get(s['capability_id'])!r}"
             if s["capability_id"] not in dead_caps:
                 self.keep("satisfactions", label, ["the technology and the capability both stay"])
                 continue
@@ -640,13 +841,34 @@ class Unseeder:
         return self._dead_cache[kind]
 
     def remove_capabilities(self):
+        """A seed technology that stays keeps the guesses the seed made for
+        it, except one about a capability that goes: that guess goes with it."""
+        dead_techs = self._dead("techs")
         self._dead("caps")
+        tech_names = {t["id"]: t["name"] for t in self.inst_techs}
         for cap in self._dead_cache["caps"]:
+            guesses = [
+                g for g in self.inst_guesses
+                if g["capability_id"] == cap["id"] and g.get("tech_id") and g["tech_id"] not in dead_techs
+            ]
+            who = _and([repr(tech_names.get(g["tech_id"])) for g in guesses])
             self.remove(
                 "capabilities",
                 f"/api/capabilities/{cap['id']}",
-                f"capability {cap['name']!r}",
+                f"capability {cap['name']!r}" + (f" (cascades the guess(es) that {who} satisfy it)" if guesses else ""),
                 unsure=True,
+            )
+
+    def numbers_note(self):
+        """Display numbers come from a sequence, so a re-import cannot restore them."""
+        if any(action in ("would delete", "deleted") for _, action in self.counts):
+            self._dead("goals")
+            goals = [g for g in self._dead_cache["goals"] if g.get("display_id")]
+            example = f" ({goals[-1]['display_id']} would not come back as {goals[-1]['display_id']})" if goals else ""
+            # First, after any "cannot read" note, so it is read before the rows.
+            at = next((i for i, n in enumerate(self.notes) if not n.startswith("this token cannot read")), len(self.notes))
+            self.notes.insert(
+                at, f"Numbers are not kept: importing this file again adds these rows back under new numbers{example}."
             )
 
     def remove_goals(self):
@@ -727,6 +949,7 @@ def main():
     unseeder.remove_technologies()
     unseeder.remove_capabilities()
     unseeder.remove_goals()
+    unseeder.numbers_note()
 
     print(("dry run — nothing deleted" if args.dry_run else "unseed complete") + ":")
     unseeder.report()

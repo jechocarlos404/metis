@@ -29,6 +29,14 @@ class FakeMetis {
     // Capabilities someone else creates after the importer read the list.
     this.racing = [];
     this.rejectPatch = false;
+    // Rows no seed carries: plans, stacks, journeys, recorded uses.
+    this.techs = [];
+    this.encounters = [];
+    this.epics = [];
+    this.tickets = [];
+    this.stacks = [];
+    this.slots = [];
+    this.journeys = [];
   }
 
   id(prefix) {
@@ -98,6 +106,19 @@ class FakeMetis {
       return this.guessesStatus === 200 ? [200, this.guesses] : [this.guessesStatus, { detail: "Requires editor or admin role" }];
     }
     if (route === "GET /api/tech/satisfactions") return [200, []];
+    if (route === "GET /api/tech" && this.techs.length > 0) return [200, { rows: this.techs, total: this.techs.length }];
+    if ((m = route.match(/^GET \/api\/tech\/([a-z0-9-]+)$/)) && this.techs.some((t) => t.slug === m[1])) {
+      const tech = this.techs.find((t) => t.slug === m[1]);
+      return [200, { ...tech, versions: [], outgoing: [], incoming: [], encounters: this.encounters.filter((e) => e.tech_id === tech.id) }];
+    }
+    if (route === "GET /api/stacks") return [200, this.stacks];
+    if ((m = route.match(/^GET \/api\/stacks\/(stk[^/]*)$/))) return [200, { stack: this.stacks.find((s) => s.id === m[1]), slots: this.slots.filter((s) => s.stack_id === m[1]) }];
+    if ((m = route.match(/^GET \/api\/stacks\/([^/]+)\/concerns$/))) return [200, []];
+    if (route === "GET /api/constraints") return [200, []];
+    if (route === "GET /api/journeys") return [200, this.journeys];
+    if (route === "GET /api/tickets") return [200, this.tickets];
+    if ((m = route.match(/^GET \/api\/products\/([^/]+)\/epics$/))) return [200, this.epics.filter((e) => e.product_id === m[1])];
+    if ((m = route.match(/^GET \/api\/products\/([^/]+)\/strategies$/))) return [200, []];
     if (route === "GET /api/tech") return [200, { rows: [], total: 0 }];
     if (route === "GET /api/motivations") return [200, this.motivations];
     if (route === "GET /api/product-bundles") return [200, this.bundles];
@@ -568,7 +589,7 @@ describe("removing a seeded product names every row it deletes or keeps", () => 
       'deleted link "Other feature" needs "Probe feature" (feature "Other feature" is outside the seed; the link goes with the deleted one)',
       'deleted feature "Probe feature"',
       'deleted feature "Second feature", with its 1 guess',
-      'deleted product "Probe", with its plan document, tickets, its use of 1 technology and 1 capability added by hand',
+      'deleted product "Probe", with its use of 1 technology and 1 capability added by hand',
       'deleted capability "Probe Cap"',
       'deleted goal "Probe org goal"',
     ]);
@@ -609,6 +630,58 @@ describe("removing a seeded product names every row it deletes or keeps", () => 
     assert.ok(!body.notes.some((n) => n.startsWith("would delete capability")));
     // The goal goes for sure, so its declared link does too.
     assert.ok(body.notes.includes('would delete goal link "Probe org goal" → "Probe Cap"'));
+  });
+
+  test("a technology someone recorded using is kept, and says who", async () => {
+    use(probe());
+    const [prod] = metis.products;
+    metis.techs.push({ id: "tech-q", slug: "qdrant", name: "Qdrant", used_by: 1 });
+    metis.usage.push({ id: "u1", product_id: prod.id, tech_id: "tech-q" });
+    metis.encounters.push({ id: "enc-1", tech_id: "tech-q", person: "ana", product_id: prod.id });
+    const doc = { ...probeSeed(), technologies: [{ ref: "t", name: "Qdrant", kind: "service", products: ["p"] }] };
+    const { body } = await unseed(doc);
+    assert.ok(body.notes.includes('kept technology "Qdrant": ana recorded using it'), body.notes.join("\n"));
+    assert.ok(!body.notes.some((n) => n.startsWith('would delete technology "Qdrant"')));
+    // The product goes; the recorded use stays and says it loses the product.
+    assert.ok(body.notes.some((n) =>
+      n.startsWith('would delete product "Probe"') && n.endsWith('; 1 recorded use of "Qdrant" stays, no longer naming it')));
+  });
+
+  test("a product's line counts its plan and stack; another product's rows that point in stay", async () => {
+    use(probe());
+    const [cap] = metis.capabilities;
+    const [prod, other] = metis.products;
+    metis.epics.push(
+      { id: "ep1", product_id: prod.id, capability_id: cap.id, title: "Own epic", stories: [{ id: "st1", title: "Own story", feature_id: "feat-probe" }] },
+      { id: "ep2", product_id: other.id, capability_id: cap.id, title: "Their epic", stories: [{ id: "st2", title: "Their story", feature_id: "feat-second" }] },
+    );
+    metis.tickets.push({ id: "tk1", product_id: prod.id, epic_id: "ep1", story_id: "st1" }, { id: "tk2", product_id: prod.id, epic_id: null, story_id: null });
+    metis.stacks.push({ id: "stk1", name: "Probe stack", product_id: prod.id, parent_id: null });
+    metis.slots.push({ id: "sl1", stack_id: "stk1", role: "db", capability_id: null, tech_id: null });
+    metis.journeys.push({ id: "j1", name: "Sign up", steps: [{ id: "js1", feature_id: "feat-probe" }] });
+    const { body } = await unseed(probeSeed());
+    assert.ok(body.notes.includes(
+      'would delete product "Probe", with 1 epic, 1 story, 2 tickets and its stack "Probe stack" (1 slot)',
+    ), body.notes.join("\n"));
+    assert.ok(body.notes.includes('would delete feature "Probe feature"; journey "Sign up" keeps its step, no longer linked to it'));
+    assert.ok(body.notes.includes('would delete feature "Second feature"; story "Their story" of product "Other" stays, no longer about it'));
+    assert.ok(body.notes.includes('kept capability "Probe Cap": epic "Their epic" of product "Other" is about it'));
+  });
+
+  test("a slot of a stack that stays keeps its capability", async () => {
+    use(probe());
+    const [cap] = metis.capabilities;
+    metis.stacks.push({ id: "stk2", name: "Other stack", product_id: metis.products[1].id, parent_id: null });
+    metis.slots.push({ id: "sl2", stack_id: "stk2", role: "search", capability_id: cap.id, tech_id: null });
+    const { body } = await unseed(probeSeed());
+    assert.ok(body.notes.includes('kept capability "Probe Cap": slot "search" of stack "Other stack" of product "Other" answers it'));
+  });
+
+  test("the preview says a re-import gets new numbers", async () => {
+    use(probe());
+    const { body } = await unseed(probeSeed());
+    const [goal] = metis.goals;
+    assert.equal(body.notes[0], `Numbers are not kept: importing this file again adds these rows back under new numbers (${goal.display_id} would not come back as ${goal.display_id}).`);
   });
 
   test("an account that can't read guesses can't remove anything", async () => {

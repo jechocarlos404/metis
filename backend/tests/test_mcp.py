@@ -70,6 +70,7 @@ INVENTORY_TOOLS = {
     "feature_why",
     "journeys",
     "ready_features",
+    "recheck",
 }
 
 
@@ -83,7 +84,7 @@ def test_tool_names_are_the_question_keys():
         "propose_binding",
         *INVENTORY_TOOLS,
     }
-    assert len(TOOLS) == 16
+    assert len(TOOLS) == 17
     assert len(RESOURCES) + len(RESOURCE_TEMPLATES) == 4
     assert len(PROMPTS) == 3
 
@@ -564,6 +565,34 @@ async def test_ready_features_filters_by_product(api):
     assert "Nothing is ready: 2 pending feature(s), each waits on one not done." in blocked
     assert "check_idea" in blocked and blocked.endswith("Open: /home")
     assert (await server._dispatch("ready_features", {"product": "nope"})).startswith("0 products")
+
+
+async def test_recheck_by_exact_name_or_id(api):
+    """Estimate climb power is needed by Show ride history: it breaks. Rival
+    map shares a capability but its product is external, so not elsewhere."""
+    w = await _world(*api)
+    text = await server._dispatch("recheck", {"feature": "Estimate climb power"})
+    _conventions(text)
+    assert text.startswith(
+        "1 feature(s) break and 0 to retest in the same product if Estimate climb power "
+        "changes; 0 broad capabilit(ies), 0 other product(s) with the same capabilities."
+    )
+    lines = text.splitlines()
+    for heading in ("Breaks (1)", "Retest (same product) (0)", "Broad (many features) (0)",
+                    "Same capability elsewhere (info only) (0)"):
+        assert any(line.startswith(heading) for line in lines), heading
+    row = next(line for line in lines if "Show ride history" in line)
+    assert "direct" in row and "can-i-climb" in row and str(w["forecast"].id) in row
+    assert "—" not in text
+
+    by_id = await server._dispatch("recheck", {"feature": str(w["forecast"].id)})
+    assert by_id.startswith("0 feature(s) break and 1 to retest")
+    assert "Estimate climb power  score 0.5  shares: Strava import" in by_id
+    assert by_id.endswith(f"Open: /features?feature={w['forecast'].id}")
+
+    near = await server._dispatch("recheck", {"feature": "Estimate climb"})
+    assert near.startswith("0 features are named 'Estimate climb'.")
+    assert near.endswith("Open: /features")
 
 
 @pytest.mark.parametrize(

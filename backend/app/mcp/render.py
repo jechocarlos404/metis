@@ -610,3 +610,84 @@ def ready_features(
         "",
     ]
     return _end(lines, "/home")
+
+
+def recheck(result: dict, products: list[dict]) -> str:
+    """Four groups in the endpoint's order, most relevant first. Only breaks
+    and retest are lists to work through; broad is a count and elsewhere is
+    information, because metis does not know whether products share code."""
+    feature = result["feature"]
+    by_id = {p["id"]: p["slug"] for p in products}
+    breaks, retest, broad, elsewhere = (
+        result[k] for k in ("breaks", "retest", "broad", "elsewhere")
+    )
+    lines = [
+        f"{len(breaks)} feature(s) break and {len(retest)} to retest in the same product "
+        f"if {feature['name']} changes; {len(broad)} broad capabilit(ies), "
+        f"{len(elsewhere)} other product(s) with the same capabilities.",
+        "",
+        f"Breaks ({len(breaks)}): they depend on it, directly or through links of links.",
+    ]
+    lines += _table(
+        [
+            [
+                "  " + b["name"],
+                "direct" if b["direct"] else "via " + " → ".join(b["via"]),
+                by_id.get(b["product_id"], "(no product)"),
+                b["id"],
+            ]
+            for b in breaks
+        ]
+    )
+    lines += [
+        "",
+        f"Retest (same product) ({len(retest)}): they share a confirmed capability, "
+        "rarest shared capability first.",
+    ]
+    lines += _table(
+        [
+            [
+                "  " + r["name"],
+                f"score {r['score']}",
+                "shares: " + ", ".join(c["name"] for c in r["shared"]),
+                r["id"],
+            ]
+            for r in retest
+        ]
+    )
+    if not feature["capability_ids"]:
+        lines.append("  It has no confirmed capability, so nothing to retest by capability.")
+    lines += [
+        "",
+        f"Broad (many features) ({len(broad)}): used by most of the product, counted not listed.",
+    ]
+    lines += _table([["  " + b["name"], f"{b['features']} feature(s)"] for b in broad])
+    lines += [
+        "",
+        f"Same capability elsewhere (info only) ({len(elsewhere)}): metis does not know "
+        "whether these products share code.",
+    ]
+    lines += _table(
+        [
+            ["  " + e["name"], f"{e['features']} feature(s)", ", ".join(e["capabilities"])]
+            for e in elsewhere
+        ]
+    )
+    lines += ["", "Capability guesses are not counted, only confirmed links.", ""]
+    return _end(lines, f"/features?feature={feature['id']}")
+
+
+def no_feature(value: str, named: list[dict], products: list[dict]) -> str:
+    """Exact names only. A name several features share is listed, not picked."""
+    if not named:
+        return _end(
+            [f"0 features are named {value!r}. Matching is exact: pass an id or the exact name."],
+            "/features",
+        )
+    by_id = {p["id"]: p["slug"] for p in products}
+    lines = [f"{len(named)} features are named {value!r}. Pass one id:", ""]
+    lines += _table(
+        [["  " + f["name"], by_id.get(f["product_id"], "(no product)"), f["id"]] for f in named]
+    )
+    lines.append("")
+    return _end(lines, "/features")

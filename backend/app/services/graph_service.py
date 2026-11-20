@@ -198,6 +198,108 @@ class FeatureGraph:
             "dependencies": [self._summary(n) for n in nx.descendants(dep, feature_id)],
         }
 
+    def recheck(
+        self,
+        feature_id: uuid.UUID,
+        capability_names: dict[uuid.UUID, str],
+        product_names: dict[uuid.UUID, str],
+    ) -> dict[str, Any] | None:
+        """If this feature changes, what else must be rechecked? None if unknown.
+
+        breaks: its dependents on the precedence graph (same set as impact),
+        nearest first; `via` names the chain from this feature outward.
+        retest: same-product features sharing a confirmed capability, rare
+        shared capabilities first (score = sum of 1 / product features using
+        it). A capability used by more than half of the product's features, and
+        by at least 6, is broad: counted, not listed. elsewhere: our other
+        products with the same capabilities, information only. Crosses the
+        bridge explicitly; capability_ids are confirmed links, never guesses."""
+        if not self._g.has_node(feature_id):
+            return None
+        nodes = self._g.nodes
+        me = nodes[feature_id]
+        product = me.get("product_id")
+        caps = set(me.get("capability_ids", ()))
+
+        # Reversed precedence: u -> v means v needs u, so paths run outward.
+        paths = nx.single_source_shortest_path(self._precedence_subgraph().reverse(), feature_id)
+        del paths[feature_id]
+        breaks = [
+            {
+                **self._summary(n),
+                "direct": len(path) == 2,
+                "via": [nodes[v]["name"] for v in path[1:-1]],
+            }
+            for n, path in sorted(paths.items(), key=lambda i: (len(i[1]), nodes[i[0]]["name"]))
+        ]
+
+        peers = [n for n in nodes if product is not None and nodes[n].get("product_id") == product]
+        users: dict[uuid.UUID, set[uuid.UUID]] = {}
+        for n in peers:
+            for cid in nodes[n].get("capability_ids", ()):
+                if cid in caps:
+                    users.setdefault(cid, set()).add(n)
+        skip = set(paths) | {feature_id}
+        broad_ids = {c for c, us in users.items() if len(us) > len(peers) / 2 and len(us) >= 6}
+
+        shared: dict[uuid.UUID, list[uuid.UUID]] = {}
+        rarest_first = sorted(
+            users.keys() - broad_ids, key=lambda c: (len(users[c]), capability_names.get(c, ""))
+        )
+        for cid in rarest_first:
+            for n in users[cid] - skip:
+                shared.setdefault(n, []).append(cid)
+        retest = [
+            {
+                **self._summary(n),
+                "shared": [{"id": str(c), "name": capability_names.get(c, str(c))} for c in cids],
+                "score": round(sum(1 / len(users[c]) for c in cids), 4),
+            }
+            for n, cids in shared.items()
+        ]
+        retest.sort(key=lambda r: (-r["score"], r["name"]))
+        broad = sorted(
+            (
+                {
+                    "id": str(c),
+                    "name": capability_names.get(c, str(c)),
+                    "features": len(users[c] - skip),
+                }
+                for c in broad_ids
+            ),
+            key=lambda b: (-b["features"], b["name"]),
+        )
+
+        others: dict[uuid.UUID, tuple[set[uuid.UUID], set[uuid.UUID]]] = {}
+        for n in nodes:
+            pid = nodes[n].get("product_id")
+            if pid is None or pid == product or nodes[n].get("external", False):
+                continue
+            hit = caps.intersection(nodes[n].get("capability_ids", ()))
+            if hit:
+                entry = others.setdefault(pid, (set(), set()))
+                entry[0].update(hit)
+                entry[1].add(n)
+        elsewhere = sorted(
+            (
+                {
+                    "id": str(pid),
+                    "name": product_names.get(pid, str(pid)),
+                    "capabilities": sorted(capability_names.get(c, str(c)) for c in hit),
+                    "features": len(features),
+                }
+                for pid, (hit, features) in others.items()
+            ),
+            key=lambda e: (-len(e["capabilities"]), -e["features"], e["name"]),
+        )
+        return {
+            "feature": self._summary(feature_id),
+            "breaks": breaks,
+            "retest": retest,
+            "broad": broad,
+            "elsewhere": elsewhere,
+        }
+
     def ready_set(self) -> list[dict[str, Any]]:
         """The work frontier: our pending features whose precedence
         dependencies are all done. External features are never our work."""

@@ -23,9 +23,10 @@ desktop importer does the same). So:
 - links the code leaves ambiguous go in `capability_guesses`, which the loader
   does add.
 
-`$API` below means `${METIS_API_URL:-http://localhost:8000}`. If the API has
-auth on, set `METIS_API_TOKEN` (and add `-H "Authorization: Bearer
-$METIS_API_TOKEN"` to each `curl`).
+The commands below read the API at `METIS_API_URL` (default
+`http://localhost:8000`). If the API has auth on, set `METIS_API_TOKEN`; the
+script sends it, and you add `-H "Authorization: Bearer $METIS_API_TOKEN"` to
+each `curl`.
 
 ## Steps
 
@@ -49,7 +50,7 @@ $METIS_API_TOKEN"` to each `curl`).
 2. **Read the capability inventory.**
 
    ```sh
-   curl -s "$API/api/capabilities/inventory" | python3 -c 'import json,sys; [print(c["name"], "|", (c["description"] or "")[:140]) for c in json.load(sys.stdin)]'
+   curl -s "${METIS_API_URL:-http://localhost:8000}/api/capabilities/inventory" | python3 -c 'import json,sys; [print(c["name"], "|", (c["description"] or "")[:140]) for c in json.load(sys.stdin)]'
    ```
 
 3. **Trace each feature in the code.** Find where a user reaches it (route,

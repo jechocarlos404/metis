@@ -19,8 +19,9 @@ product itself, so every feature-to-capability link is inferred. Metis stores
 such links as guesses, shows them to editors only, and counts none of them
 until a person confirms each one on the desktop.
 
-`$API` below means `${METIS_API_URL:-http://localhost:8000}`. If the API has
-auth on, add `-H "Authorization: Bearer $METIS_API_TOKEN"` to each `curl`.
+The commands below read the API at `METIS_API_URL` (default
+`http://localhost:8000`). If the API has auth on, add
+`-H "Authorization: Bearer $METIS_API_TOKEN"` to each `curl`.
 
 ## Steps
 
@@ -32,7 +33,7 @@ auth on, add `-H "Authorization: Bearer $METIS_API_TOKEN"` to each `curl`.
 2. **Check whether metis already has it.**
 
    ```sh
-   curl -s "$API/api/products" | python3 -c 'import json,sys; [print(p["id"], p["name"], "external" if p["external"] else "ours") for p in json.load(sys.stdin)]'
+   curl -s "${METIS_API_URL:-http://localhost:8000}/api/products" | python3 -c 'import json,sys; [print(p["id"], p["name"], "external" if p["external"] else "ours") for p in json.load(sys.stdin)]'
    ```
 
    - Same product, `external`: reuse its exact `name`. Then list its features
@@ -40,7 +41,7 @@ auth on, add `-H "Authorization: Bearer $METIS_API_TOKEN"` to each `curl`.
      the loader creates a duplicate:
 
      ```sh
-     curl -s "$API/api/features" | python3 -c 'import json,sys; [print(f["name"]) for f in json.load(sys.stdin) if f["product_id"]=="<product id>"]'
+     curl -s "${METIS_API_URL:-http://localhost:8000}/api/features" | python3 -c 'import json,sys; [print(f["name"]) for f in json.load(sys.stdin) if f["product_id"]=="<product id>"]'
      ```
 
    - Same product but `ours`: stop. It is the owner's own product, so its
@@ -51,7 +52,7 @@ auth on, add `-H "Authorization: Bearer $METIS_API_TOKEN"` to each `curl`.
 3. **Read the capability inventory.**
 
    ```sh
-   curl -s "$API/api/capabilities/inventory" | python3 -c 'import json,sys; [print(c["name"], "|", (c["description"] or "")[:140]) for c in json.load(sys.stdin)]'
+   curl -s "${METIS_API_URL:-http://localhost:8000}/api/capabilities/inventory" | python3 -c 'import json,sys; [print(c["name"], "|", (c["description"] or "")[:140]) for c in json.load(sys.stdin)]'
    ```
 
    Use this REST list, not the MCP `capability_inventory` tool's slugs: you

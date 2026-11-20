@@ -5,10 +5,11 @@ Stdlib only, no dependencies. Idempotent and add-only: existing entities are
 matched (goals by type+title; capabilities and products by name; features by
 (product, name); technologies by slug; edges by src+dst+kind; motivations,
 product technologies and satisfactions by pair) and reused rather than
-duplicated, so re-running the same file is safe. Nothing is deleted. Two
-updates: a reused feature gains the file's confirmed capability links it lacks
-(never loses one; unknown_capabilities follows the file when stated), and an
-existing guess takes the file's confidence and basis.
+duplicated, so re-running the same file is safe. No entity or confirmed link
+is deleted. Two updates: a reused feature gains the file's confirmed capability
+links it lacks (never loses one; unknown_capabilities follows the file when
+stated, and the guess on each newly linked pair goes away), and an existing
+guess takes the file's confidence and basis.
 
 Usage:
     python3 seed_instance.py metis-seed.json [--base-url http://localhost:8000] [--dry-run]
@@ -552,7 +553,7 @@ class Loader:
         if missing:
             payload["capability_ids"] = have + missing
         flag = f.get("unknown_capabilities")
-        if flag is not None and flag != current.get("unknown_capabilities"):
+        if flag is not None and flag != (current.get("unknown_capabilities") is True):
             payload["unknown_capabilities"] = flag
         if not payload:
             return set(have)

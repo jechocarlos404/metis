@@ -272,11 +272,12 @@ satisfies. A technology is shared across products, like a capability.
   (goal_type, title); capabilities and products by name; features by
   (product, name); technologies by slug; edges by (src, dst, kind); motivations,
   product technologies and satisfactions by pair) and reuses them instead of
-  duplicating. It never deletes anything and updates only two things: an
-  existing feature gains the file's confirmed links it lacks (below), and a
-  guess that already exists for the same (capability, feature) or (capability,
-  technology) pair takes the file's `confidence` and `basis`. Re-running the
-  same file is safe.
+  duplicating. It never deletes an entity or a confirmed link, and updates only
+  two things: an existing feature gains the file's confirmed links it lacks and
+  takes its stated `unknown_capabilities` (below), and a guess that already
+  exists for the same (capability, feature) or (capability, technology) pair
+  takes the file's `confidence` and `basis`. The only row that goes away is a
+  guess the file confirms. Re-running the same file is safe.
 - After a load that writes (not a dry run), the loader records that every product
   in the file was just seeded; metis shows that time as how fresh the product's
   map is. This is bookkeeping, not a change to the product.
@@ -290,8 +291,8 @@ satisfies. A technology is shared across products, like a capability.
   added, and a link the file leaves out is never removed. When the file states
   `unknown_capabilities`, the feature takes that value (a repo's own export is
   the authority on its own features); when the file leaves it out, the feature
-  keeps its own. Its name, description, status and everything else stay as they
-  are. Its `capability_guesses` are still loaded, so a product's next export can
+  keeps its own; so a file that states `true` reopens a flag someone cleared.
+  Its name, description, status and everything else stay as they are. Its `capability_guesses` are still loaded, so a product's next export can
   add guesses to features metis already has.
 - Confirming a link retires its guess: when a feature gains a confirmed link,
   metis deletes any guess about that same (feature, capability) pair.

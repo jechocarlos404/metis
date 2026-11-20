@@ -184,7 +184,8 @@ TOOLS = [
     Tool(
         name="products",
         description=(
-            "List products, ours and external, with id, slug and name. The "
+            "List products, ours and external, with id, slug, name and "
+            "seeded_at (when its seed file was last imported, ISO, or never). The "
             "inventory's navigation tool — the other tools take an id or slug "
             "it returns, so agents never guess."
         ),

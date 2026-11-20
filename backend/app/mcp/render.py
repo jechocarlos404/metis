@@ -265,7 +265,17 @@ def products(rows: list[dict]) -> str:
     external = sum(1 for r in rows if r["external"])
     lines = [f"{len(rows)} product(s): {len(rows) - external} ours, {external} external.", ""]
     lines += _table(
-        [[r["slug"], "external" if r["external"] else "ours", r["name"], r["id"]] for r in rows]
+        [
+            [
+                r["slug"],
+                "external" if r["external"] else "ours",
+                # seeded_at: when its seed file was last imported (ISO), or never.
+                r.get("seeded_at") or "never",
+                r["name"],
+                r["id"],
+            ]
+            for r in rows
+        ]
     )
     if not rows:
         lines.append("No products recorded yet.")

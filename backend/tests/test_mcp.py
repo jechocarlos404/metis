@@ -5,6 +5,8 @@ server — and they are exactly where the surfaces would drift apart, because
 this is the only place the shared rows get turned into something else.
 """
 
+from datetime import datetime, timezone
+
 import pytest
 import pytest_asyncio
 from fastapi import HTTPException
@@ -360,7 +362,11 @@ async def _world(app, db):
         physics = await cap("Physics model", CapabilityMaturity.alpha)
         weather = await cap("Weather forecast")
         await cap("Route planner")
-        climb = Product(name="Can I Climb", slug="can-i-climb")
+        climb = Product(
+            name="Can I Climb",
+            slug="can-i-climb",
+            seeded_at=datetime(2026, 11, 1, 12, 0, tzinfo=timezone.utc),
+        )
         rival = Product(name="Rival", slug="rival", external=True)
         goal = Goal(goal_type=GoalType.product, title="Riders trust the estimate")
         s.add_all([climb, rival, goal])
@@ -416,6 +422,8 @@ async def test_products_lists_ours_and_external(api):
     _conventions(text)
     assert text.startswith("2 product(s): 1 ours, 1 external.")
     assert str(w["rival"].id) in text and "external" in text
+    rows = {line.split()[0]: line.split()[2] for line in text.splitlines()[2:4]}
+    assert rows == {"can-i-climb": "2026-11-01T12:00:00Z", "rival": "never"}
 
 
 async def test_inventory_is_most_reused_first_and_filters_in_order(api):

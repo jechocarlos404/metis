@@ -66,6 +66,9 @@ export default function GoalsIsland({ canWrite = true }) {
   const unparented = productGoals.filter((g) => !orgIds.has(g.parent_goal_id));
   // A product goal needs an org goal as its parent whenever one exists.
   const needsParent = draft.goal_type === "product" && orgs.length > 0 && !draft.parent_goal_id;
+  // A product goal is for its org goal's product (the goals API's product_id).
+  const draftParent = draft.goal_type === "product" ? orgs.find((o) => o.id === draft.parent_goal_id) : null;
+  const draftOwner = draftParent ? productById[draftParent.product_id] : null;
 
   // An org goal's own links, the count the Network panel shows, then the
   // distinct capabilities across it and its product goals when that is more.
@@ -351,6 +354,17 @@ export default function GoalsIsland({ canWrite = true }) {
                 ...orgs.map((o) => ({ value: o.id, label: `${o.display_id} · ${o.title}` })),
               ]}
             />
+          )}
+          {/* A goal has no product field: it is a product's when that product has it, or the
+              org goal above it, as its goal (the goals API's product_id). Say so where goals are made. */}
+          {(dialog?.mode === "new" || (dialog?.goal && !dialog.goal.product_id)) && (
+            <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", marginTop: -6 }}>
+              {draftOwner
+                ? `For ${draftOwner.name}, like ${draftParent.display_id}.`
+                : <>Not for a product yet. {draft.goal_type === "org"
+                  ? "To say which product it's for, choose it as that product's goal"
+                  : "It takes its org goal's product, or choose it as a product's goal"} under <a href="/products">Products</a> → Edit.</>}
+            </div>
           )}
           <Input
             label="Title"

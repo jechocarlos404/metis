@@ -5,12 +5,14 @@ server — and they are exactly where the surfaces would drift apart, because
 this is the only place the shared rows get turned into something else.
 """
 
+import json
 from datetime import datetime, timezone
 
 import pytest
 import pytest_asyncio
 from fastapi import HTTPException
 from httpx import ASGITransport, AsyncClient
+from pydantic import AnyUrl
 
 from app.auth import Principal, authorize
 from app.config import Settings, get_settings
@@ -21,6 +23,7 @@ from app.mcp.client import MetisClient
 from app.mcp.server import PROMPTS, RESOURCE_TEMPLATES, RESOURCES, TOOLS, _hard_stop
 from app.models import CapabilityMaturity, Goal, GoalType, Product, TechKind, WorkStatus
 from app.models.enums import Surface
+from app.models.stack import TechStack
 from app.schemas.capability import CapabilityCreate
 from app.schemas.envelope import Question
 from app.schemas.feature import EdgeCreate, FeatureCreate
@@ -487,6 +490,19 @@ async def test_products_lists_ours_and_external(api):
     assert str(w["rival"].id) in text and "external" in text
     rows = {line.split()[0]: line.split()[2] for line in text.splitlines()[2:4]}
     assert rows == {"can-i-climb": "2026-11-01T12:00:00Z", "rival": "never"}
+
+
+async def test_a_products_stacks_resource_holds_only_its_own_stacks(api):
+    app, db = api
+    w = await _world(app, db)
+    async with db() as s:
+        s.add_all([TechStack(name="Climb stack", product_id=w["climb"].id),
+                   TechStack(name="Rival stack", product_id=w["rival"].id)])
+        await s.commit()
+    climb = json.loads(await server.read_resource(AnyUrl("metis://stacks/can-i-climb")))
+    assert [v["stack"]["name"] for v in climb["stacks"]] == ["Climb stack"]
+    with pytest.raises(ValueError, match="No product 'nobody'"):
+        await server.read_resource(AnyUrl("metis://stacks/nobody"))
 
 
 def row(text, slug):

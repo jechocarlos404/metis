@@ -771,11 +771,11 @@ async def read_resource(uri: AnyUrl) -> str:
         return json.dumps(await client.get(f"/api/tech/{slug}"), indent=2)
     if raw.startswith("metis://stacks/"):
         product = _safe_slug(raw.removeprefix("metis://stacks/"))
-        stacks = await client.get("/api/stacks")
-        views = []
-        for stack in stacks:
-            if stack.get("product_id"):
-                views.append(await client.get(f"/api/stacks/{stack['id']}"))
+        found = await _product(product)
+        if found is None:
+            raise ValueError(f"No product {product!r} in metis. Open: /products")
+        stacks = await client.get("/api/stacks", {"product_id": found["id"]})
+        views = [await client.get(f"/api/stacks/{stack['id']}") for stack in stacks]
         return json.dumps(
             {"product": product, "stacks": views}, indent=2, default=str
         )

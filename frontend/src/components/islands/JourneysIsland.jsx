@@ -52,7 +52,7 @@ export default function JourneysIsland({ canWrite }) {
   const [editing, setEditing] = React.useState(null); // { base, draft } or null
   const [inventory, setInventory] = React.useState([]);
   const [error, setError] = React.useState(null);
-  const [notice, setNotice] = React.useState(null); // what the last delete did, said in place
+  const [notice, setNotice] = React.useState(null); // what the last save or delete did, said in place
   const listHeading = React.useRef(null);
 
   useParamRestore("id", (v) => v && setSelected(v));
@@ -140,6 +140,7 @@ export default function JourneysIsland({ canWrite }) {
     setEditing(null);
     await loadList(); // reloads the analysis too
     if (saved.id !== selected) select(saved.id);
+    setNotice(`${draft.id ? "Saved" : "Created"} ${saved.name}.`); // after select(), which clears it
   }
 
   async function remove(id) {

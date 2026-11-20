@@ -5,9 +5,6 @@
 // edge-trim math (forceGraphEngine.js) always agree with what's drawn.
 export const NODE_W = 148;
 export const NODE_H = 56;
-// Collision radius: the card's half-diagonal, so two cards can never overlap
-// regardless of the angle they approach from.
-export const NODE_COLLIDE_R = 76;
 
 // Keyed by the feature's `layer` facet.
 const LAYER_ACCENT = {
@@ -139,15 +136,34 @@ export function buildGoalNetwork(goals, capsByGoal) {
   const loose = goals.filter((g) => g.goal_type !== "org" && !orgIds.has(g.parent_goal_id));
   if (loose.length) clusters.push({ center: null, members: loose });
 
-  const ringR = (n) => Math.max(150, (n * (NODE_W + 24)) / (2 * Math.PI));
-  const cell = 2 * Math.max(0, ...clusters.map((c) => ringR(c.members.length))) + NODE_W + 120;
-  const cols = Math.max(1, Math.ceil(Math.sqrt(clusters.length)));
+  const ringR = (n) => Math.max(110, (n * (NODE_W + 24)) / (2 * Math.PI));
+  const radius = (c) => (c.center || c.members.length > 1 ? ringR(c.members.length) : 0);
+  // Each cluster gets a square of its own size, packed into rows about as
+  // wide as a screen (16:9). One cell size for all left small clusters
+  // floating in space, so the whole network fit too small to read.
+  const side = (c) => 2 * radius(c) + NODE_W + 60;
+  const area = clusters.reduce((sum, c) => sum + side(c) ** 2, 0);
+  const rowWidth = Math.max(...clusters.map(side), Math.sqrt(area * 1.8));
+  const origin = new Map();
+  let x = 0;
+  let y = 0;
+  let rowH = 0;
+  for (const c of clusters) {
+    const d = side(c);
+    if (x > 0 && x + d > rowWidth) {
+      x = 0;
+      y += rowH;
+      rowH = 0;
+    }
+    origin.set(c, { x: x + d / 2, y: y + d / 2 });
+    x += d;
+    rowH = Math.max(rowH, d);
+  }
   const anchor = new Map();
-  clusters.forEach((c, i) => {
-    const cx = (i % cols) * cell;
-    const cy = Math.floor(i / cols) * cell;
+  clusters.forEach((c) => {
+    const { x: cx, y: cy } = origin.get(c);
     if (c.center) anchor.set(c.center.id, { x: cx, y: cy });
-    const r = c.center || c.members.length > 1 ? ringR(c.members.length) : 0;
+    const r = radius(c);
     c.members.forEach((g, j) => {
       const a = (2 * Math.PI * j) / c.members.length - Math.PI / 2;
       anchor.set(g.id, { x: cx + r * Math.cos(a), y: cy + r * Math.sin(a) });

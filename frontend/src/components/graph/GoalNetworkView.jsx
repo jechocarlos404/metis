@@ -1,7 +1,7 @@
 import React from "react";
 import { StatusBadge } from "../../ds";
 import { createForceGraph } from "./forceGraphEngine.js";
-import { buildGoalNetwork, buildAdjacency, NODE_W, NODE_H, NODE_COLLIDE_R } from "./graph-data.js";
+import { buildGoalNetwork, buildAdjacency, NODE_W, NODE_H } from "./graph-data.js";
 import { CardLabel, GraphToolbar } from "./FeatureGraphView.jsx";
 import { count } from "../../lib/words.js";
 
@@ -12,8 +12,8 @@ const STATUS_DOT = { pending: "var(--text-secondary)", in_progress: "var(--warn-
 // Part-of lines hold a cluster together. Shares lines barely pull: with any
 // real strength, 77 of them drag every cluster into one tangle.
 const linkDistance = (e) => (e.kind === "PART_OF" ? 170 : 320);
-const linkStrength = (e) => (e.kind === "PART_OF" ? 0.5 : 0.004);
-const sharesWidth = (w) => 0.8 + Math.min(w, 6) * 0.9;
+const linkStrength = (e) => (e.kind === "PART_OF" ? 0.05 : 0.002);
+const sharesWidth = (w) => 0.6 + Math.min(w, 6) * 0.5;
 
 /** Goals linked by the capabilities they share, with a side panel for the selected goal. */
 export function GoalNetworkView({ goals, capsByGoal, selectedId, onSelect }) {
@@ -38,7 +38,13 @@ export function GoalNetworkView({ goals, capsByGoal, selectedId, onSelect }) {
       svgEl: svgRef.current,
       viewportEl: viewportRef.current,
       nodeSize: { width: NODE_W, height: NODE_H },
-      nodeRadius: () => NODE_COLLIDE_R,
+      // The packed clusters lead (see buildGoalNetwork): strong anchors, faint
+      // repulsion, card-shaped collision, a quick settle.
+      collideRect: { width: NODE_W + 16, height: NODE_H + 16 },
+      chargeStrength: -20,
+      anchorStrengthX: 0.5,
+      anchorStrengthY: 0.5,
+      alphaDecay: 0.06,
       linkDistance,
       linkStrength,
       reducedMotion: window.matchMedia("(prefers-reduced-motion: reduce)").matches,
@@ -58,10 +64,14 @@ export function GoalNetworkView({ goals, capsByGoal, selectedId, onSelect }) {
     if (!hasFitRef.current && data.nodes.length) {
       hasFitRef.current = true;
       engineRef.current?.fitToView(0);
+      engineRef.current?.fitWhenSettled(); // the first fit sees unspread nodes
     }
   }, [data]);
 
-  const focusId = hoveredId ?? selectedId ?? null;
+  const wantFocus = hoveredId ?? selectedId ?? null;
+  // Fade the rest only when the focused card has relationships to show;
+  // fading everything around a loner just makes the graph hard to read.
+  const focusId = wantFocus != null && adjacency.get(wantFocus)?.size ? wantFocus : null;
   const focusNeighbors = focusId ? adjacency.get(focusId) : null;
   const ref = (map, id, register, unregister) => (el) => {
     if (!el) return;
@@ -88,7 +98,7 @@ export function GoalNetworkView({ goals, capsByGoal, selectedId, onSelect }) {
                     stroke={shares ? "var(--accent)" : "var(--ink-4)"}
                     strokeWidth={shares ? sharesWidth(e.weight) : 1.2}
                     strokeLinecap="round"
-                    opacity={dim ? 0.06 : shares ? 0.45 : 0.6}
+                    opacity={dim ? 0.06 : shares ? (focusId != null ? 0.7 : 0.22) : 0.6}
                     style={{ transition: "opacity var(--dur-med) var(--ease-out)" }}>
                     {shares && <title>{`Shares ${count(e.weight, "capability", "capabilities")}: ${e.capabilities.map((c) => c.name).join(", ")}`}</title>}
                   </line>

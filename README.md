@@ -336,9 +336,9 @@ tool list: [docs/mcp.md](docs/mcp.md). It calls the same **HTTP API** a browser
 does — not the services in-process — so a chat transcript and an API log line up, and
 the write boundary is inherited rather than re-implemented.
 
-Sixteen tools. Eight answer inventory questions: `products`, `capability_inventory`,
-`check_idea`, `product_score`, `capability`, `feature_why`, `journeys`, `ready_features`.
-The other eight: the six `question` keys, plus `tech_search` (navigation — everything else
+Seventeen tools. Nine answer inventory questions: `products`, `capability_inventory`,
+`check_idea`, `product_score`, `capability`, `feature_why`, `journeys`, `ready_features`,
+`recheck`. The other eight: the six `question` keys, plus `tech_search` (navigation — everything else
 takes a slug it returns) and `propose_binding` (a hand-off that persists nothing).
 Four resources: `metis://ontology/model`, `metis://policy/adoptions`, and the templated
 `metis://tech/{slug}` and `metis://stacks/{product}`. Three prompts.
@@ -392,8 +392,8 @@ Metis supports both **in-app** and **skill-driven** seed round-trips (seed file 
 
 ### Claude Code skills
 
-The metis Claude Code plugin (`plugin/`) ships three skills for seeding an
-instance from real codebases (using the same seed format and identity rules
+The metis Claude Code plugin (`plugin/`) ships eight skills (all listed in
+[plugin/README.md](plugin/README.md)); these three seed an instance from real codebases (using the same seed format and identity rules
 as the in-app flow):
 
 - `plugin/skills/metis-seed-instance` loads a `metis-seed.json` into the running
@@ -483,6 +483,6 @@ backend/
   app/ontology/    model.md — served to the UI, the API and MCP from one file
 frontend/          Astro app: pages, React islands, design system (ds/), API proxy
 docs/              ontology design record (divergence, mental model, graph spec)
-plugin/skills/     metis-export, metis-seed-instance, metis-unseed (Claude Code plugin)
+plugin/            Claude Code plugin: MCP wiring, hooks, eight skills (see its README)
 docker-compose.yml
 ```

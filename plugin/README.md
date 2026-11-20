@@ -28,6 +28,11 @@ desktop.
   - `metis-fill-gaps`: in one of your repos, read the code behind features
     whose capabilities are unknown, and hand you a seed file of guesses plus
     the links the code confirms, to add on the desktop.
+  - `metis-export`: analyze a repository and write a `metis-seed.json` of its
+    product, features, capabilities and goals.
+  - `metis-seed-instance`: load a seed file into a running metis over its
+    REST API (see "With auth on" in its SKILL.md for who may write).
+  - `metis-unseed`: remove what a seed file loaded.
 - **Hooks.** Each one is silent when metis is unreachable or the repo is not a
   known product:
   - *Session start:* a short brief on this repo's product. It gives the
@@ -179,5 +184,6 @@ plugin/
   hooks/hooks.json              SessionStart, UserPromptSubmit, Stop
   hooks/metis_hooks.py          all three hooks, Python stdlib only
   skills/                       metis-check-idea, metis-find-reuse, metis-what-next,
-                                metis-map-outside-product, metis-fill-gaps
+                                metis-map-outside-product, metis-fill-gaps,
+                                metis-export, metis-seed-instance, metis-unseed
 ```

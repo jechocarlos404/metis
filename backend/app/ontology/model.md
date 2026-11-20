@@ -215,8 +215,11 @@ compare a chat transcript against, and the write boundary is inherited rather th
 re-implemented. The server's token is issued to `metis-mcp`, the backend derives
 `Surface.mcp` from the signed `azp`, and any write comes back 403.
 
-Eight tools — the six `question` keys, plus `tech_search` (navigation: everything else
-takes a slug it returns) and `propose_binding` (a hand-off that persists nothing).
+Seventeen tools — the six `question` keys, plus `tech_search` (navigation: everything
+else takes a slug it returns) and `propose_binding` (a hand-off that persists nothing),
+and nine that answer inventory questions: `products`, `capability_inventory`,
+`check_idea`, `product_score`, `capability`, `feature_why`, `journeys`,
+`ready_features` and `recheck`.
 Four resources: `metis://ontology/model` and `metis://policy/adoptions` serve the same
 files as `GET /api/ontology/model` and `/api/ontology/adoptions`; `metis://tech/{slug}`
 and `metis://stacks/{product}` are templated. Three prompts.

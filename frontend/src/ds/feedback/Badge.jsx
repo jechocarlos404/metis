@@ -1,6 +1,6 @@
 import React from "react";
 
-const tones = {
+export const BADGE_TONES = {
   neutral: { bg: "var(--surface-inset)", fg: "var(--text-secondary)" },
   accent: { bg: "var(--accent-wash)", fg: "var(--text-accent)" },
   ok: { bg: "var(--ok-bg)", fg: "var(--ok-fg)" },
@@ -9,7 +9,7 @@ const tones = {
 };
 
 export function Badge({ tone = "neutral", children, style }) {
-  const t = tones[tone] || tones.neutral;
+  const t = BADGE_TONES[tone] || BADGE_TONES.neutral;
   return (
     <span style={{
       display: "inline-flex", alignItems: "center", gap: "4px",

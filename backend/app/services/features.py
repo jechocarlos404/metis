@@ -8,10 +8,18 @@ marked dirty and rebuilt lazily — never the other way around.
 import uuid
 
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Capability, EdgeKind, Feature, FeatureCapability, FeatureEdge, Product
+from app.models import (
+    Capability,
+    CapabilityGuess,
+    EdgeKind,
+    Feature,
+    FeatureCapability,
+    FeatureEdge,
+    Product,
+)
 from app.schemas.feature import EdgeCreate, FeatureCreate, FeatureUpdate
 
 
@@ -83,6 +91,14 @@ async def update_feature(
         feature.capability_links = [
             keep.get(cid) or FeatureCapability(capability_id=cid) for cid in ids
         ]
+        # A fact and a guess about the same link never coexist: confirming the
+        # link retires its guess in the same commit.
+        await session.execute(
+            delete(CapabilityGuess).where(
+                CapabilityGuess.feature_id == feature.id,
+                CapabilityGuess.capability_id.in_(ids),
+            )
+        )
     else:
         # Clearing the declaration on a feature with no links is the same orphan.
         await _resolve_links(session, feature.capability_ids, unknown)

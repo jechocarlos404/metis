@@ -272,10 +272,12 @@ satisfies. A technology is shared across products, like a capability.
   (goal_type, title); capabilities and products by name; features by
   (product, name); technologies by slug; edges by (src, dst, kind); motivations,
   product technologies and satisfactions by pair) and reuses them instead of
-  duplicating. It never deletes anything and updates only one thing: a guess
-  that already exists for the same (capability, feature) or (capability,
-  technology) pair takes the file's `confidence` and `basis`. Re-running the
-  same file is safe.
+  duplicating. It never deletes an entity or a confirmed link, and updates only
+  two things: an existing feature gains the file's confirmed links it lacks and
+  takes its stated `unknown_capabilities` (below), and a guess that already
+  exists for the same (capability, feature) or (capability, technology) pair
+  takes the file's `confidence` and `basis`. The only row that goes away is a
+  guess the file confirms. Re-running the same file is safe.
 - After a load that writes (not a dry run), the loader records that every product
   in the file was just seeded; metis shows that time as how fresh the product's
   map is. This is bookkeeping, not a change to the product.
@@ -284,9 +286,18 @@ satisfies. A technology is shared across products, like a capability.
   uses for the same ability (read `GET /api/capabilities/inventory` first) — that
   shared name is what links projects. Only features and products need names that
   stay distinct across projects.
-- An existing feature (matched by name) is reused as-is: its capability links and
-  product are not rewritten. Its `capability_guesses` are still loaded, so a
-  product's next export can add guesses to features metis already has.
+- An existing feature (matched by (product, name)) is reused, and its confirmed
+  links only grow: every `capability_refs` entry it does not realize yet is
+  added, and a link the file leaves out is never removed. When the file states
+  `unknown_capabilities`, the feature takes that value (a repo's own export is
+  the authority on its own features); when the file leaves it out, the feature
+  keeps its own; so a file that states `true` reopens a flag someone cleared.
+  Its name, description, status and everything else stay as they are. Its `capability_guesses` are still loaded, so a product's next export can
+  add guesses to features metis already has.
+- Confirming a link retires its guess: when a feature gains a confirmed link,
+  metis deletes any guess about that same (feature, capability) pair.
+- An existing capability is reused as-is: its description, maturity, facets and
+  `evidence_anchors` are not updated.
 - A guess is skipped when the instance already has that link confirmed (the
   feature already realizes the capability, or the technology already satisfies
   it). An existing technology keeps its name, kind and layer.

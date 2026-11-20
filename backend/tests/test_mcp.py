@@ -325,12 +325,15 @@ async def api(db, monkeypatch):
 async def _world(app, db):
     """One product of ours, one external, a goal, a dependency and a journey."""
     async with db() as s:
-        def cap(name, maturity=CapabilityMaturity.planned):
+        def cap(name, maturity=CapabilityMaturity.planned, anchors=()):
             return capability_service.create_capability(
-                s, CapabilityCreate(name=name, maturity=maturity)
+                s,
+                CapabilityCreate(name=name, maturity=maturity, evidence_anchors=list(anchors)),
             )
 
-        strava = await cap("Strava import", CapabilityMaturity.ga)
+        strava = await cap(
+            "Strava import", CapabilityMaturity.ga, ["app/strava/sync.py", "app/strava/oauth.py"]
+        )
         elevation = await cap("Elevation data", CapabilityMaturity.beta)
         physics = await cap("Physics model", CapabilityMaturity.alpha)
         weather = await cap("Weather forecast")
@@ -463,11 +466,14 @@ async def test_capability_says_who_why_and_how_far(api):
     assert "Our products: can-i-climb" in text
     assert "PG-" in text and "Riders trust the estimate" in text
     assert "Rival weather" not in text  # external features are not ours
+    assert "Evidence (2 path(s), as exported): app/strava/sync.py, app/strava/oauth.py" in text
 
     weather = await server._dispatch("capability", {"slug": "weather-forecast"})
     assert "Known only from external products" in weather
     assert "External products that have it: rival" in weather
     assert "No goal motivates it directly" in weather
+
+    assert "Evidence" not in weather  # no anchors recorded, no line
 
     missing = await server._dispatch("capability", {"slug": "strava"})
     assert missing.startswith("0 capabilities have slug 'strava'. Matching is exact.")

@@ -8,6 +8,12 @@ surface from that token, so every write over MCP comes back as `403
 human_action_required` with the screen that can make the change. Writes are a
 human action on the desktop.
 
+**From Claude Code, use the plugin.** [`plugin/`](../plugin/README.md) wires
+this server into any repo over SSE, adds skills that use it
+(`metis-check-idea`, `metis-find-reuse`, `metis-next-work`), and adds read-only
+hooks that brief each session on its product. The rest of this page is for
+other clients and for wiring it by hand.
+
 Tools return plain text, not JSON. Each answer leads with its numbers, keeps raw
 values (`in_progress`, `ga`, slugs, ids) verbatim, and ends with an
 `Open: <path>` line naming the desktop screen.
@@ -22,7 +28,7 @@ The inventory tools answer the portfolio questions:
 | `capability_inventory` | What we can already do, most reused first. Takes an optional `q` substring filter, applied in the server, and a `limit`. | `GET /api/capabilities/inventory` |
 | `check_idea` | How much of an idea we already have. Each need comes back `ours`, `external only`, or `no match` with near names listed as unconfirmed candidates. | `POST /api/capabilities/coverage` (a read) |
 | `product_score` | How much of a product, by id or slug, we could build: buildable, partly known, not described, missing a capability. It is a lower bound. | `GET /api/products/{id}/coverage` |
-| `capability` | One capability by slug: our features and products, external products listed apart, the goals that motivate it directly, and its rollup. | inventory, then `GET /api/capabilities/{id}/scope`, `/motivations`, `/rollup` |
+| `capability` | One capability by slug: our features and products, external products listed apart, the goals that motivate it directly, its rollup, and the evidence paths an export recorded. | inventory, then `GET /api/capabilities/{id}/scope`, `/motivations`, `/rollup` |
 | `feature_why` | Why a feature exists, from its capabilities up through their parents to the goals that motivate them. | `GET /api/features/{id}/why` |
 | `journeys` | Lists journeys. Given a journey id, it returns each step's verdict (`buildable`, `known_covered`, `missing`, `unknown`) and whether a user can do the step today. | `GET /api/journeys`, `GET /api/journeys/{id}/analysis` |
 | `ready_features` | Our pending features whose dependencies are all done. Optionally limited to one product. | `GET /api/graph/ready` |
@@ -144,19 +150,13 @@ The `mcp` service is built from the backend image and runs
 `http://backend:8000` and Keycloak at `http://keycloak:8080`. The SSE endpoint
 is `/sse`, and messages go to `/messages/`.
 
-The service only `expose`s port 8001, so other containers on the compose
-network can reach it but the host cannot. To use it from an agent on the host,
-publish the port on purpose with a `docker-compose.override.yml`. Compose merges
-that file automatically:
+Compose publishes port 8001 on `127.0.0.1` only, so agents on the same
+machine can reach it and nothing else can. Locally, `METIS_MCP_SSE_TOKEN`
+defaults to `dev-mcp-sse-token`, which is also the plugin's default. Set a real
+token before you bind the port to anything wider.
 
-```yaml
-services:
-  mcp:
-    ports:
-      - "127.0.0.1:8001:8001"
-```
-
-Then add it to Claude Code:
+The [plugin](../plugin/README.md) connects to it with no further setup. To add
+it to Claude Code by hand instead:
 
 ```sh
 claude mcp add --transport sse metis http://localhost:8001/sse \

@@ -1,0 +1,9 @@
+{
+  "name": "metis",
+  "displayName": "Metis",
+  "version": "0.1.0",
+  "description": "Use your metis capability inventory from any repo: a read-only MCP server, skills that check for reuse before you build, and hooks that brief each session on the product it is in.",
+  "author": { "name": "jechocarlos404", "url": "https://jechocarlos.dev" },
+  "license": "MIT",
+  "keywords": ["metis", "capabilities", "reuse", "mcp"]
+}

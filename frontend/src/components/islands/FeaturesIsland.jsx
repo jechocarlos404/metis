@@ -555,7 +555,7 @@ export default function FeaturesIsland({ canWrite = true }) {
         <div style={{ flex: 1, minWidth: 0, overflowY: "auto", padding: 20 }}>
           <div style={{ background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", overflow: "hidden" }}>
             {!compactRows && <div style={{ display: "grid", gridTemplateColumns: COLUMNS, columnGap: 12, padding: "8px 16px", borderBottom: "1px solid var(--border-hairline)", fontFamily: "var(--font-mono)", fontSize: "var(--text-2xs)", letterSpacing: "var(--tracking-caps)", textTransform: "uppercase", color: "var(--text-secondary)" }}>
-              <span>Feature</span><span>What it does</span><span>Product</span><span>Priority</span><span>Status</span>
+              <span>Feature</span><span>Built on</span><span>Product</span><span>Priority</span><span>Status</span>
             </div>}
             {directory.map((n, i) => {
               const capabilitiesTitle = (n.capability_ids ?? []).map((c) => capabilityById.get(c)?.name).join(", ");
@@ -648,22 +648,35 @@ export default function FeaturesIsland({ canWrite = true }) {
               <DeleteConfirm armed={confirmingDelete} onArm={() => setConfirmingDelete(true)} onCancel={() => setConfirmingDelete(false)} onConfirm={removeFeature} disabled={saving}
                 label="Delete" confirmLabel={"Delete feature"} style={{ marginRight: "auto" }} />
             )}
-            <Button size="sm" variant="secondary" onClick={() => setDialog(null)}>Cancel</Button>
-            <Button size="sm" variant="accent" disabled={saving || !canSave} onClick={save}>
-              {dialog?.mode === "new" ? "Create feature" : "Save"}
-            </Button>
+            {!confirmingDelete && !canSave && (
+              // Why Create is off, as New capability says it.
+              <span style={{ marginRight: "auto", alignSelf: "center", fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>
+                {!draft.name.trim() ? "Give it a name" : "Pick what it is built on, or tick that some are unknown,"} to {dialog?.mode === "new" ? "create" : "save"} it.
+              </span>
+            )}
+            {/* While a delete is armed, Keep is the one way back. */}
+            {!confirmingDelete && <>
+              <Button size="sm" variant="secondary" onClick={() => setDialog(null)}>Cancel</Button>
+              <Button size="sm" variant="accent" disabled={saving || !canSave} onClick={save}>
+                {dialog?.mode === "new" ? "Create feature" : "Save"}
+              </Button>
+            </>}
           </>
         }
       >
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
           {error && <div role="alert" style={{ fontSize: "var(--text-sm)", color: "var(--danger-fg)" }}>{error}</div>}
           <Input label="Name (what the user gets, verb phrase)" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="Export tickets to Notion" />
-          <Input label="Description" value={draft.description} onChange={(e) => setDraft({ ...draft, description: e.target.value })} />
+          <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            <span style={{ fontSize: "var(--text-xs)", fontWeight: "var(--weight-medium)", color: "var(--text-heading)" }}>Description</span>
+            <textarea rows={3} value={draft.description} onChange={(e) => setDraft({ ...draft, description: e.target.value })}
+              style={{ padding: "8px 10px", fontSize: "var(--text-sm)", fontFamily: "var(--font-body)", color: "var(--text-heading)", background: "var(--surface-card)", border: "1px solid var(--border-control)", borderRadius: "var(--radius-sm)", resize: "vertical" }} />
+          </label>
           <Select label="Product" value={draft.productId} onChange={(e) => setDraft({ ...draft, productId: e.target.value })}
             options={[{ value: "", label: "No product" }, ...productOptions(products)]} />
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            <span aria-hidden="true" style={{ fontSize: "var(--text-xs)", fontWeight: "var(--weight-medium)", color: "var(--text-heading)" }}>What it does</span>
-            <CapabilityPicker id="feature-capabilities" label="What it does" options={capabilityOptions} value={draftCapabilityNames}
+            <span aria-hidden="true" style={{ fontSize: "var(--text-xs)", fontWeight: "var(--weight-medium)", color: "var(--text-heading)" }}>Built on</span>
+            <CapabilityPicker id="feature-capabilities" label="Built on" options={capabilityOptions} value={draftCapabilityNames}
               onChange={setDraftCapabilityNames} allowNew={false} placeholder="Type a capability…" />
             <Checkbox label="Some capabilities are unknown. Link only the ones you can name."
               checked={draft.unknownCapabilities} onChange={(on) => setDraft({ ...draft, unknownCapabilities: on })} />
@@ -781,7 +794,7 @@ function FeaturePanel({ detail, canWrite, onEdit, onGuessConfirmed, onSelect, pr
       </div>
 
       <div style={SECTION}>
-        <div style={CAPS_HEADER}>What it does</div>
+        <div style={CAPS_HEADER}>Built on</div>
         {detail.capability_ids.map((cid) => {
           const c = capabilityById.get(cid);
           return c

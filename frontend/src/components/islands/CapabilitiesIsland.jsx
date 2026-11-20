@@ -273,7 +273,7 @@ export default function CapabilitiesIsland({ canWrite = true }) {
           <>
             {!draft.name.trim() && <span style={{ marginRight: "auto", alignSelf: "center", fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>Give it a name to create it.</span>}
             <Button size="sm" variant="secondary" onClick={() => setDialogOpen(false)}>Cancel</Button>
-            <Button size="sm" variant="accent" disabled={saving || !draft.name.trim()} onClick={create}>Create capability</Button>
+            <Button size="sm" variant="accent" disabled={saving || !draft.name.trim() || Boolean(near?.exact)} onClick={create}>Create capability</Button>
           </>
         }
       >

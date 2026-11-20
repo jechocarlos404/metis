@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.auth import TokenVerifier, enforce_rbac, require_admin
+from app.auth import TokenVerifier, enforce_rbac, require_admin, require_editor
 from app.config import get_settings
 from app.db import init_db, make_engine
 from app.llm.registry import ProviderRegistry
@@ -17,6 +17,7 @@ from app.routers import (
     goals,
     governance,
     graph,
+    guesses,
     health,
     journeys,
     products,
@@ -77,6 +78,8 @@ def create_app() -> FastAPI:
     app.include_router(strategies.router, dependencies=rbac)
     app.include_router(tech.router, dependencies=rbac)
     app.include_router(stacks.router, dependencies=rbac)
+    # Reads too are editor-only: guesses are for the people who confirm them.
+    app.include_router(guesses.router, dependencies=[*rbac, Depends(require_editor)])
     # The six questions, in the shared envelope. Registered after the CRUD
     # routers so their static paths win where the two overlap.
     app.include_router(questions.router, dependencies=rbac)

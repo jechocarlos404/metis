@@ -25,6 +25,7 @@ from app.models.governance import Concern, Constraint, ConstraintScope, StackCon
 from app.models.llm import AgentLLMConfig
 from app.models.product import Product, ProductBundle, ProductDecomposition
 from app.models.satisfaction import TechSatisfaction
+from app.models.guess import CapabilityGuess, Confidence
 from app.models.stack import ProductTechnology, StackSlot, TechStack
 from app.models.strategy import DeliveryStrategy
 from app.models.technology import TechEdge, Technology, TechVersion, Vendor
@@ -72,6 +73,8 @@ __all__ = [
     "TechKind",
     "TechLayer",
     "TechSatisfaction",
+    "CapabilityGuess",
+    "Confidence",
     "TechStack",
     "TechVersion",
     "Technology",

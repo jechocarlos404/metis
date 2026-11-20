@@ -118,6 +118,15 @@ async def enforce_rbac(
     return principal
 
 
+async def require_editor(principal: Principal = Depends(current_user)) -> Principal:
+    """Guesses are for the people who can confirm them: editors and admins.
+    Viewers and agents (the MCP service is a viewer) never see them, so a
+    guess cannot leak into an answer as if it were a fact."""
+    if not principal.has_any("editor", "admin"):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Requires editor or admin role")
+    return principal
+
+
 async def require_admin(principal: Principal = Depends(current_user)) -> Principal:
     if not principal.has_role("admin"):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Requires admin role")

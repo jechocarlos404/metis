@@ -469,15 +469,19 @@ export default function ChatIsland({ threadId: initialThreadId = null, canWrite 
                   )}
                   <div style={{ marginTop: 10 }}>Agents keep working if you leave this page. Anything they want to change waits for your approval.</div>
                 </>
-              ) : products?.length === 0 ? (
-                // A viewer can't add the first product, so no question has an answer yet.
-                "Nothing to ask about yet. Chat answers questions about products and their capabilities once an editor or admin adds the first product."
               ) : (
                 <>
-                  Chat answers questions about the inventory in plain words, such as:
-                  <ul style={{ margin: "8px 0 0", paddingLeft: 18 }}>
-                    {examples.map((q) => <li key={q}>{q}</li>)}
-                  </ul>
+                  {products?.length === 0 ? (
+                    // A viewer can't add the first product, so no question has an answer yet.
+                    "Nothing to ask about yet. Chat answers questions about products and their capabilities once an editor or admin adds the first product."
+                  ) : (
+                    <>
+                      Chat answers questions about the inventory in plain words, such as:
+                      <ul style={{ margin: "8px 0 0", paddingLeft: 18 }}>
+                        {examples.map((q) => <li key={q}>{q}</li>)}
+                      </ul>
+                    </>
+                  )}
                   <div style={{ marginTop: 10 }}>Anything the agents want to change waits for an editor or admin to approve it.</div>
                 </>
               )}

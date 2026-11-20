@@ -22,8 +22,10 @@ class NamedProposalRead(ProposalRead):
 
 
 class ThreadMessageRead(MessageRead):
-    #: Each step in `tool_calls` also carries `named_arguments`: its
-    #: `arguments` with every ID replaced by its row's name, for "What it did".
+    """A message as a thread lists it. Each step in `tool_calls` also carries
+    `named_arguments`: its `arguments` with every ID replaced by its row's
+    name, for "What it did"."""
+
     proposals: list[NamedProposalRead] = []
 
 

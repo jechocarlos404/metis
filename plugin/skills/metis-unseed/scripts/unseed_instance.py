@@ -3,9 +3,9 @@
 
 The inverse of seed_instance.py. Stdlib only — no dependencies. Entities are
 matched exactly the way the loader matches them (goals by type+title;
-capabilities and products by name, features by (product, name); technologies
-by slug; edges by src+dst+kind; motivations and satisfactions by pair) and
-deleted via the REST API.
+capabilities by slug; products by name, features by (product, name);
+technologies by slug; edges by src+dst+kind; motivations and satisfactions by
+pair) and deleted via the REST API.
 
 Entities entangled with material outside the seed are kept, with a warning:
 
@@ -23,8 +23,13 @@ to it, reported as notes) and its guesses. Deleting a product cascades its
 PRD, all work items (including tickets created after seeding) and its
 technology usage. Deleting a technology cascades its satisfactions and guesses.
 
+With auth on, pass a token (--token, or METIS_TOKEN / METIS_API_TOKEN). Any
+valid token can run --dry-run; a delete needs a person's desktop session, which
+no script can get, so remove the product in the app instead (Settings, Seed
+files).
+
 Usage:
-    python3 unseed_instance.py metis-seed.json [--base-url http://localhost:8000] [--dry-run]
+    python3 unseed_instance.py metis-seed.json [--base-url http://localhost:8000] [--dry-run] [--token TOKEN]
 
 Exit codes: 0 clean, 1 file/connection error, 2 finished but some entities
 were kept or failed (see warnings).
@@ -40,16 +45,42 @@ import urllib.parse
 import urllib.request
 
 
+IN_APP = (
+    "Deletes need a person's desktop session, which no script can get: remove "
+    "it in the app instead (Settings, Seed files: preview, then remove), or run "
+    "against an instance started with AUTH_ENABLED=false."
+)
+
+
+def refused(method, path, status, body, token):
+    """Exit with a plain message when the API refuses the caller. A 403 on a
+    read is left to the caller: the guesses list is editor-only, and a dry run
+    with a read-only token reads it as empty."""
+    if status == 401:
+        why = "the token was refused (expired? they last 5 minutes)" if token else "no token was sent"
+        sys.exit(
+            f"error: {method} {path} returned 401: the API has auth on and {why}. "
+            "Pass --token or set METIS_TOKEN; see the skill's SKILL.md, \"With auth on\"."
+        )
+    if status == 403 and method != "GET":
+        detail = body.get("detail") if isinstance(body, dict) else body
+        if isinstance(detail, dict) and detail.get("error") == "human_action_required":
+            sys.exit(f"error: {method} {path} returned 403: this token can read but not delete. {IN_APP}")
+        sys.exit(f"error: {method} {path} returned 403 ({detail}). {IN_APP}")
+
+
 class Api:
-    def __init__(self, base_url):
+    def __init__(self, base_url, token=None):
         self.base = base_url.rstrip("/")
+        self.token = token
 
     def request(self, method, path, payload=None):
         url = f"{self.base}{path}"
         data = json.dumps(payload).encode() if payload is not None else None
-        req = urllib.request.Request(
-            url, data=data, method=method, headers={"Content-Type": "application/json"}
-        )
+        headers = {"Content-Type": "application/json"}
+        if self.token:
+            headers["Authorization"] = f"Bearer {self.token}"
+        req = urllib.request.Request(url, data=data, method=method, headers=headers)
         try:
             with urllib.request.urlopen(req, timeout=30) as resp:
                 body = resp.read()
@@ -60,6 +91,7 @@ class Api:
                 body = json.loads(body)
             except ValueError:
                 pass
+            refused(method, path, e.code, body, self.token)
             return e.code, body
         except urllib.error.URLError as e:
             sys.exit(
@@ -91,6 +123,30 @@ def tech_slug(tech):
     return re.sub(r"[^a-z0-9]+", "-", str(tech.get("name", "")).strip().lower()).strip("-")
 
 
+def capability_resolver(instance):
+    """The loader's capability identity: the explicit slug, then the slug the
+    name derives, then that derived slug against each row's current name (a
+    rename keeps the old slug), preferring the row with exactly that name."""
+    def slugify(value):
+        return tech_slug({"name": value})
+
+    by_slug = {c["slug"]: c for c in instance}
+    by_name = {}
+    for c in instance:
+        by_name.setdefault(slugify(c["name"]), []).append(c)
+
+    def resolve(cap):
+        if cap.get("slug") is not None and cap["slug"] in by_slug:
+            return by_slug[cap["slug"]]
+        derived = slugify(cap.get("name", ""))
+        if derived in by_slug:
+            return by_slug[derived]
+        rows = by_name.get(derived) or []
+        return next((r for r in rows if r["name"] == cap.get("name")), rows[0] if rows else None)
+
+    return resolve
+
+
 class Unseeder:
     def __init__(self, api, doc, dry_run):
         self.api = api
@@ -120,9 +176,10 @@ class Unseeder:
             {(g["goal_type"], g["title"]): g for g in self.inst_goals},
             lambda g: g.get("title"),
         )
+        resolve_capability = capability_resolver(self.inst_caps)
         self.caps = self._match(
-            "capabilities", lambda c: c.get("name"),
-            {c["name"]: c for c in self.inst_caps},
+            "capabilities", lambda c: (resolve_capability(c) or {}).get("id"),
+            {c["id"]: c for c in self.inst_caps},
             lambda c: c.get("name"),
         )
         self.prods = self._match(
@@ -523,6 +580,13 @@ def main():
         action="store_true",
         help="resolve and list what would be deleted without deleting anything",
     )
+    ap.add_argument(
+        "--token",
+        default=os.environ.get("METIS_TOKEN") or os.environ.get("METIS_API_TOKEN"),
+        help="bearer token for an instance with auth on (default: $METIS_TOKEN, "
+        "else $METIS_API_TOKEN). Any valid token can --dry-run; deletes need a "
+        "desktop session, so with auth on remove it in the app instead",
+    )
     args = ap.parse_args()
 
     try:
@@ -543,7 +607,7 @@ def main():
             "product's real features. Remove a single link on the desktop instead."
         )
 
-    api = Api(args.base_url)
+    api = Api(args.base_url, args.token)
     status, _ = api.request("GET", "/api/health")
     if status != 200:
         sys.exit(f"error: {args.base_url}/api/health returned {status} — is the instance up?")

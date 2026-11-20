@@ -55,6 +55,26 @@ function techSlug(tech) {
   return String(tech.name ?? "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
 }
 
+/** The importer's capability identity: the explicit slug, then the slug the
+ * name derives, then that derived slug against each row's current name (a
+ * rename keeps the old slug), preferring the row with exactly that name. */
+function capabilityResolver(instance) {
+  const slugify = (value) => techSlug({ name: value });
+  const bySlug = new Map(instance.map((capability) => [capability.slug, capability]));
+  const byName = new Map();
+  for (const capability of instance) {
+    const key = slugify(capability.name);
+    byName.set(key, [...(byName.get(key) || []), capability]);
+  }
+  return (capability) => {
+    if (capability.slug != null && bySlug.has(capability.slug)) return bySlug.get(capability.slug);
+    const derived = slugify(capability.name);
+    if (bySlug.has(derived)) return bySlug.get(derived);
+    const rows = byName.get(derived) || [];
+    return rows.find((row) => row.name === capability.name) ?? rows[0];
+  };
+}
+
 class Unseeder {
   constructor(api, doc, dryRun) {
     this.api = api;
@@ -89,10 +109,11 @@ class Unseeder {
       (goal) => `${goal.goal_type}:${goal.title}`,
       new Map(this.instGoals.map((goal) => [`${goal.goal_type}:${goal.title}`, goal])),
     );
+    const resolveCapability = capabilityResolver(this.instCaps);
     this.caps = this.match(
       "capabilities",
-      (capability) => capability.name,
-      new Map(this.instCaps.map((capability) => [capability.name, capability])),
+      (capability) => resolveCapability(capability)?.id,
+      new Map(this.instCaps.map((capability) => [capability.id, capability])),
     );
     this.products = this.match(
       "products",

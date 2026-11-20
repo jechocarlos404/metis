@@ -218,6 +218,7 @@ export async function GET({ request, locals }) {
         ref: capRef.get(capability.id),
         parent_ref: includedCapabilityIds.has(capability.parent_id) ? capRef.get(capability.parent_id) : null,
         name: capability.name,
+        slug: capability.slug,
         description: capability.description,
         maturity: capability.maturity,
         facets: capability.facets,

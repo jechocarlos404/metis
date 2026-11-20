@@ -7,11 +7,15 @@ description: Remove a previously seeded project from the running metis instance 
 
 The inverse of `metis-seed-instance`: given a `metis-seed/v1` file, remove
 what it created from the running instance. Matching uses the loader's
-identity rules (goals by type+title; capabilities and products by name;
+identity rules (goals by type+title; capabilities by slug; products by name;
 features by product+name; technologies by slug; edges by src+dst+kind;
 motivations and satisfactions by pair), so the file doesn't need
 to be byte-identical to the one that was loaded. Names are identity: whatever
-in the instance bears a seed entity's name is what gets deleted.
+in the instance bears a seed entity's name is what gets deleted. For a
+capability, a name differing only in case or punctuation counts as the same
+name. A capability metis gave a `-2` slug is targeted correctly only by a file
+that carries its slug, as files exported from metis now do; an older export
+targets the row without the `-2` instead, so re-export first.
 
 Paths below such as `scripts/` are relative to this skill's own directory, the
 one holding this SKILL.md.
@@ -64,6 +68,17 @@ anything the seed shares with the rest of the instance:
 
 Seed entities that don't exist in the instance are counted `absent`, so
 re-running after a partial failure is safe.
+
+### With auth on
+
+An instance with `AUTH_ENABLED=false` needs no token. With auth on, only a
+person's browser session on the desktop may delete, and no script can get
+such a token (see the `metis-seed-instance` skill, "With auth on", for why and
+for how to get a read-only one). Any valid token runs `--dry-run`: pass
+`--token` or set `METIS_TOKEN` (`METIS_API_TOKEN` also works). For the real
+removal, send the user to Settings → Seed files → "Remove a seeded product" in
+the app: "Preview removal", then "Remove". The script stops with that advice on
+a 401 or 403.
 
 ## Verify
 

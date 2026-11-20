@@ -24,6 +24,29 @@ function techSlug(tech) {
   return typeof tech.name === "string" ? slugify(tech.name) : "";
 }
 
+/** A capability's identity, the same rule: "Keyword search" is "Keyword Search". */
+const capSlug = techSlug;
+
+/** Finds the instance capability a seed capability names. A slug match wins:
+ * the explicit slug, then the one its name derives. A rename keeps the old
+ * slug, so last the derived slug is matched against each row's current name,
+ * preferring the row with exactly that name. */
+function capabilityResolver(instance) {
+  const bySlug = new Map(instance.map((capability) => [capability.slug, capability]));
+  const byName = new Map();
+  for (const capability of instance) {
+    const key = slugify(capability.name);
+    byName.set(key, [...(byName.get(key) || []), capability]);
+  }
+  return (capability) => {
+    if (capability.slug != null && bySlug.has(capability.slug)) return bySlug.get(capability.slug);
+    const derived = slugify(capability.name);
+    if (bySlug.has(derived)) return bySlug.get(derived);
+    const rows = byName.get(derived) || [];
+    return rows.find((row) => row.name === capability.name) ?? rows[0];
+  };
+}
+
 const sorted = (set) => JSON.stringify([...set].sort());
 
 function checkGuess(errors, where, item) {
@@ -131,9 +154,18 @@ function validateSeed(doc) {
     checkStatus(errors, where, goal);
   }
 
+  const seenCapSlugs = new Set();
   for (const [i, capability] of (doc.capabilities || []).entries()) {
     const where = `capabilities[${i}] (${capability.ref})`;
     if (!capability.name) errors.push(`${where}: 'name' is required`);
+    const slug = capSlug(capability);
+    if (typeof slug !== "string" || !slug) {
+      errors.push(`${where}: slug must be a non-empty string (give one when the name yields none)`);
+    } else if (seenCapSlugs.has(slug)) {
+      errors.push(`${where}: duplicate capability slug ${JSON.stringify(slug)}`);
+    } else {
+      seenCapSlugs.add(slug);
+    }
     if (capability.maturity != null && !MATURITIES.has(capability.maturity)) {
       errors.push(`${where}: maturity must be one of ${JSON.stringify([...MATURITIES].sort())}`);
     }
@@ -507,25 +539,73 @@ class Loader {
   }
 
   async loadCapabilities() {
-    const existing = new Map(
-      (await this.api.get("/api/capabilities")).map((capability) => [capability.name, capability.id]),
-    );
+    const resolve = capabilityResolver(await this.api.get("/api/capabilities"));
+    const added = [];
     for (const capability of parentsFirst(this.doc.capabilities || [])) {
-      if (existing.has(capability.name)) {
-        this.capIds.set(capability.ref, existing.get(capability.name));
-        this.note("capabilities", "reused");
+      const found = resolve(capability);
+      if (found) {
+        this.reuseCapability(capability, found);
         continue;
       }
-      this.capIds.set(
-        capability.ref,
-        await this.create("capabilities", "/api/capabilities", {
-          parent_id: this.capIds.get(capability.parent_ref),
-          name: capability.name,
-          description: capability.description,
-          maturity: capability.maturity,
-          facets: capability.facets,
-          evidence_anchors: capability.evidence_anchors,
-        }, capability.name),
+      const payload = {
+        parent_id: this.capIds.get(capability.parent_ref),
+        slug: capability.slug,
+        name: capability.name,
+        description: capability.description,
+        maturity: capability.maturity,
+        facets: capability.facets,
+        evidence_anchors: capability.evidence_anchors,
+      };
+      if (this.dryRun) {
+        this.capIds.set(capability.ref, await this.create("capabilities", "/api/capabilities", payload, capability.name));
+        added.push(capability.name);
+        continue;
+      }
+      const { status, body } = await this.api.post("/api/capabilities", prune(payload));
+      if (status === 201) {
+        this.capIds.set(capability.ref, body.id);
+        this.note("capabilities", "created");
+        added.push(capability.name);
+      } else if (status === 409 && typeof body?.detail?.slug === "string") {
+        // Created since the list was read: the same slug is the same capability.
+        const row = (await this.api.get("/api/capabilities")).find((c) => c.slug === body.detail.slug);
+        if (!row) throw new Error(`POST /api/capabilities for ${capability.name} returned 409 for a slug no capability has: ${JSON.stringify(body)}`);
+        this.reuseCapability(capability, row);
+      } else {
+        throw new Error(`POST /api/capabilities for ${capability.name} returned ${status}: ${JSON.stringify(body)}`);
+      }
+    }
+    await this.listAddedCapabilities(added);
+  }
+
+  reuseCapability(capability, row) {
+    this.capIds.set(capability.ref, row.id);
+    this.note("capabilities", "reused");
+    if (row.name !== capability.name) {
+      this.notes.push(`capability ${JSON.stringify(capability.name)} is the existing ${JSON.stringify(row.name)} (slug ${row.slug}); reused as it is`);
+    }
+  }
+
+  /** Every capability the file adds, by name; in a dry run with the closest
+   * existing names, so a near-duplicate is caught before the import. */
+  async listAddedCapabilities(names) {
+    if (names.length === 0) return;
+    let nearest = new Map();
+    if (this.dryRun) {
+      const { status, body } = await this.api.post("/api/capabilities/coverage", {
+        features: [{ name: "seed file", capabilities: names }],
+      });
+      if (status === 200) {
+        nearest = new Map(
+          (body.features?.[0]?.capabilities || []).map((need) => [need.name, (need.candidates || []).map((c) => c.name)]),
+        );
+      }
+    }
+    for (const name of names) {
+      const near = nearest.get(name.trim()) || [];
+      this.notes.push(
+        `new capability ${JSON.stringify(name)}` +
+          (near.length > 0 ? `; nearest existing: ${near.map((n) => JSON.stringify(n)).join(", ")}` : ""),
       );
     }
   }
@@ -565,22 +645,37 @@ class Loader {
     }
   }
 
-  /** Additive on reuse: add the file's confirmed links the feature lacks,
-   * never remove one. `unknown_capabilities` follows the file when the file
-   * states it. Returns the feature's confirmed links afterwards. */
-  async linkReusedFeature(feature, current) {
+  /** A reused feature gains the file's confirmed links it lacks, never losing
+   * one. A product's own seed is the authority on its own features, so the
+   * `status`, `description` and `unknown_capabilities` the file states replace
+   * the feature's; a field the file leaves out is left alone. Each overwrite
+   * is listed by feature, in a dry run too, since it may undo a hand edit.
+   * Returns the feature's confirmed links afterwards. */
+  async updateReusedFeature(feature, current) {
     const have = [...(current.capability_ids || [])];
     const missing = [...new Set(featureCapabilityRefs(feature).map((ref) => this.capIds.get(ref)))]
       .filter((id) => !have.includes(id));
     const payload = {};
+    const changes = [];
     if (missing.length > 0) payload.capability_ids = [...have, ...missing];
+    if (feature.status != null && feature.status !== current.status) {
+      payload.status = feature.status;
+      changes.push(`status ${current.status} → ${feature.status}`);
+    }
+    if (feature.description != null && feature.description !== (current.description ?? null)) {
+      payload.description = feature.description;
+      changes.push("description changed");
+    }
     const flag = feature.unknown_capabilities;
     if (typeof flag === "boolean" && flag !== (current.unknown_capabilities === true)) {
       payload.unknown_capabilities = flag;
+      changes.push(`unknown_capabilities ${!flag} → ${flag}`);
     }
     if (Object.keys(payload).length === 0) return new Set(have);
+    const overwrites = changes.length > 0 ? `feature ${JSON.stringify(feature.name)}: ${changes.join("; ")}` : null;
     if (this.dryRun) {
       this.note("features", missing.length > 0 ? "would link" : "would update");
+      if (overwrites) this.notes.push(overwrites);
       return new Set([...have, ...missing]);
     }
     const { status, body } = await this.api.patch(`/api/features/${current.id}`, payload);
@@ -590,12 +685,13 @@ class Loader {
       return new Set(have);
     }
     this.note("features", missing.length > 0 ? "linked" : "updated");
+    if (overwrites) this.notes.push(overwrites);
     return new Set(body.capability_ids);
   }
 
   async loadFeatures() {
-    // Additive on reuse: an existing feature gains the file's confirmed links
-    // it lacks and never loses one; nothing else on it changes. Identity is
+    // On reuse, links only grow and the file's stated status, description and
+    // unknown_capabilities win (updateReusedFeature). Identity is
     // (product, name): another product's "Sign in" is a different feature.
     const instance = await this.api.get("/api/features");
     const existing = new Map(instance.map((feature) => [featureKey(feature.product_id, feature.name), feature]));
@@ -605,7 +701,7 @@ class Loader {
         const current = existing.get(key);
         this.featureIds.set(feature.ref, current.id);
         this.note("features", "reused");
-        this.featureCaps.set(feature.ref, await this.linkReusedFeature(feature, current));
+        this.featureCaps.set(feature.ref, await this.updateReusedFeature(feature, current));
         continue;
       }
       this.featureCaps.set(feature.ref, new Set(featureCapabilityRefs(feature).map((ref) => this.capIds.get(ref))));
@@ -1028,3 +1124,5 @@ export async function POST({ request, locals }) {
     });
   }
 }
+
+export { validateSeed, Loader };

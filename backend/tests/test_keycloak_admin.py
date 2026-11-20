@@ -212,3 +212,29 @@ async def test_unreachable_keycloak_reads_as_a_sentence():
     with pytest.raises(HTTPException) as exc:
         await _call(_raise(httpx.ConnectError("refused")), "list users")
     assert exc.value.detail == "metis couldn't reach Keycloak to list users."
+
+
+def test_repo_realm_refuses_short_passwords_and_its_own_accounts_pass():
+    """C27: the realm a fresh install imports sets a password policy, and
+    every account it seeds meets it, so the import can't trip over its own
+    users (Keycloak may check seeded plaintext passwords against the policy)."""
+    import pathlib
+    import re
+
+    realm_file = pathlib.Path(__file__).resolve().parents[2] / "keycloak/metis-realm.json"
+    realm = json.loads(realm_file.read_text())
+    policy = realm["passwordPolicy"]
+    terms = [t.strip() for t in policy.split(" and ")]
+    length = next(int(m.group(1)) for t in terms if (m := re.fullmatch(r"length\((\d+)\)", t)))
+    assert length >= 12
+    assert "notUsername" in terms
+    seeded = [
+        (u["username"], c["value"])
+        for u in realm["users"]
+        for c in u.get("credentials", [])
+        if c.get("type") == "password"
+    ]
+    assert len(seeded) == 3
+    for username, password in seeded:
+        assert len(password) >= length, username
+        assert password != username, username

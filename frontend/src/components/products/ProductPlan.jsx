@@ -13,6 +13,7 @@ export const hasPlan = (product, { prd, epics, tickets, strategy }) =>
 const panel = { background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", padding: 16, display: "flex", flexDirection: "column", gap: 10 };
 const muted = { fontSize: "var(--text-sm)", color: "var(--text-secondary)" };
 const mono = { fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-secondary)" };
+const UNFINISHED_NAMED = 5;
 
 // Every Chat turn is a paid AI run, so a planning button only asks first.
 function AskBeforeChat({ prompt, onCancel }) {
@@ -55,11 +56,19 @@ export function ProductPlan({ product, prd, epics, tickets, strategy, capabiliti
   );
 
   if (!hasPlan(product, { prd, epics, tickets, strategy })) {
-    const unfinished = (features ?? []).filter((f) => f.status !== "done").length;
+    const unfinished = (features ?? []).filter((f) => f.status !== "done").map((f) => f.name);
     return (
       <div style={{ ...panel, alignItems: "flex-start" }}>
         <div style={muted}>
-          {count(unfinished, "feature")} of {product.name} {unfinished === 1 ? "isn't" : "aren't"} done yet. A plan splits the work into a plan document, tickets sized for one coding session each, and a delivery timeline. The AI model drafts it in Chat.
+          {count(unfinished.length, "feature")} of {product.name} {unfinished.length === 1 ? "isn't" : "aren't"} done yet{unfinished.length ? ":" : ". "}
+          {/* A list, not a sentence: feature names carry their own commas and "and"s. A handful, then how many more. */}
+          {unfinished.length > 0 && (
+            <ul style={{ margin: "4px 0", paddingLeft: 18, color: "var(--text-body)" }}>
+              {unfinished.slice(0, UNFINISHED_NAMED).map((name, i) => <li key={i}>{name}</li>)}
+              {unfinished.length > UNFINISHED_NAMED && <li style={{ listStyle: "none", color: "var(--text-secondary)" }}>and {unfinished.length - UNFINISHED_NAMED} more</li>}
+            </ul>
+          )}
+          A plan splits the work into a plan document, tickets sized for one coding session each, and a delivery timeline. The AI model drafts it in Chat.
         </div>
         {asking ? confirm("decompose") : (
           <Button size="sm" variant="accent" style={{ gap: 6 }} onClick={() => ask("decompose")}><Icon name="sparkles" size={13} />Plan this product</Button>

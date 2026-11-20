@@ -156,12 +156,10 @@ class Unseeder {
       new Map(this.instTechs.map((tech) => [tech.slug, tech])),
     );
     // Usage of the seed's products, read now: deleting a product cascades its
-    // usage rows, and the technology guard runs after that.
+    // usage rows, which its line names, and the technology guard runs after.
     this.instUsage = new Map();
-    if (this.techs.size > 0) {
-      for (const product of this.products.values()) {
-        this.instUsage.set(product.id, await this.optional(`/api/stacks/usage?product_id=${product.id}`, "technology use"));
-      }
+    for (const product of this.products.values()) {
+      this.instUsage.set(product.id, await this.optional(`/api/stacks/usage?product_id=${product.id}`, "technology use"));
     }
     // (tech, capability) pairs the seed itself declares, confirmed or
     // guessed: removing those is undoing the seed, not foreign data.
@@ -540,11 +538,19 @@ class Unseeder {
         ]);
         continue;
       }
+      // What goes with it: its own rows, named so none goes unlisted.
       const byHand = this.instBundles.filter((bundle) => bundle.product_id === product.id).length;
+      const uses = (this.instUsage.get(product.id) || []).length;
+      const parts = [
+        "its plan document",
+        "tickets",
+        ...(uses > 0 ? [`its use of ${count(uses, "technology", "technologies")}`] : []),
+        ...(byHand > 0 ? [`${count(byHand, "capability", "capabilities")} added by hand`] : []),
+      ];
       await this.remove(
         "products",
         `/api/products/${product.id}`,
-        `product ${JSON.stringify(product.name)}, with its plan document${byHand > 0 ? `, tickets and ${count(byHand, "capability", "capabilities")} added by hand` : " and tickets"}`,
+        `product ${JSON.stringify(product.name)}, with ${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}`,
       );
     }
   }

@@ -222,7 +222,7 @@ class Unseeder:
         self.inst_usage = {
             p["id"]: self._optional(f"/api/stacks/usage?product_id={p['id']}", "technology use")
             for p in self.prods.values()
-        } if self.techs else {}
+        }
         # (tech id, capability id) pairs the seed itself declares, confirmed
         # or guessed: removing those is undoing the seed, not foreign data.
         self.declared = set()
@@ -588,12 +588,18 @@ class Unseeder:
                     [f"{foreign[prod['id']]} feature(s) outside the seed belong to it"],
                 )
                 continue
+            # What goes with it: its own rows, named so none goes unlisted.
             by_hand = sum(1 for b in self.inst_bundles if b["product_id"] == prod["id"])
+            uses = len(self.inst_usage.get(prod["id"], []))
+            parts = ["its PRD", "work items"]
+            if uses:
+                parts.append(f"{uses} technology usage row(s)")
+            if by_hand:
+                parts.append(f"{by_hand} hand-added capability link(s)")
             self.remove(
                 "products",
                 f"/api/products/{prod['id']}",
-                f"product {prod['name']!r} (cascades its PRD and work items"
-                + (f", and its {by_hand} hand-added capability link(s))" if by_hand else ")"),
+                f"product {prod['name']!r} (cascades {', '.join(parts[:-1])} and {parts[-1]})",
             )
 
     def remove_features(self):

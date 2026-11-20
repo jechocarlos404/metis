@@ -21,6 +21,7 @@ class FakeMetis {
     this.goals = [];
     this.motivations = [];
     this.bundles = [];
+    this.usage = [];
     this.guesses = [];
     // 403 plays an account that may not read guesses (a viewer, an MCP token).
     this.guessesStatus = 200;
@@ -100,7 +101,10 @@ class FakeMetis {
     if (route === "GET /api/tech") return [200, { rows: [], total: 0 }];
     if (route === "GET /api/motivations") return [200, this.motivations];
     if (route === "GET /api/product-bundles") return [200, this.bundles];
-    if (route === "GET /api/stacks/usage") return [200, []];
+    if (route === "GET /api/stacks/usage") {
+      const productId = new URLSearchParams(path.split("?")[1]).get("product_id");
+      return [200, this.usage.filter((u) => u.product_id === productId)];
+    }
     if (route === "GET /api/capabilities/map") {
       const node = (c) => ({ ...c, children: this.capabilities.filter((k) => k.parent_id === c.id).map(node) });
       return [200, this.capabilities.filter((c) => !c.parent_id).map(node)];
@@ -126,6 +130,7 @@ class FakeMetis {
       for (const f of this.features.filter((f) => f.product_id === m[1])) this.handle("DELETE", `/api/features/${f.id}`);
       this.products = this.products.filter((p) => p.id !== m[1]);
       this.bundles = this.bundles.filter((b) => b.product_id !== m[1]);
+      this.usage = this.usage.filter((u) => u.product_id !== m[1]);
       return [204, null];
     }
     if ((m = route.match(/^DELETE \/api\/features\/([^/]+)$/))) {
@@ -170,6 +175,7 @@ class FakeMetis {
       ...this.features.map((f) => `feature ${f.name}`),
       ...this.motivations.map((r) => `goal link ${r.goal_title} -> ${r.capability_name}`),
       ...this.bundles.map((b) => `bundle ${b.product_name} -> ${b.capability_name}`),
+      ...this.usage.map((u) => `usage ${u.product_id} -> ${u.tech_id}`),
       ...this.edges.map((e) => `edge ${e.src_id} -> ${e.dst_id}`),
       ...this.guesses.map((g) => `guess ${g.feature_id} -> ${g.capability_id}`),
     ]);
@@ -536,6 +542,7 @@ describe("removing a seeded product names every row it deletes or keeps", () => 
     ];
     metis.bundles.push({ id: "b1", product_id: prod.id, product_name: "Probe", capability_id: cap.id, capability_name: cap.name });
     metis.guesses.push({ id: "q1", feature_id: "feat-second", capability_id: shared.id, confidence: "low" });
+    metis.usage.push({ id: "u1", product_id: prod.id, tech_id: "tech-postgres" });
     const before = metis.snapshot();
     const preview = await unseed(probeSeed());
     const { body } = await unseed(probeSeed(), { dryRun: false });
@@ -552,6 +559,7 @@ describe("removing a seeded product names every row it deletes or keeps", () => 
       "goal link Probe org goal -> Probe Cap",
       `guess feat-second -> ${shared.id}`,
       "product Probe",
+      `usage ${prod.id} -> tech-postgres`,
     ]);
     assert.deepEqual(body.notes.filter((n) => n.startsWith("deleted ")), [
       'deleted goal link "Probe org goal" → "Probe Cap"',
@@ -560,7 +568,7 @@ describe("removing a seeded product names every row it deletes or keeps", () => 
       'deleted link "Other feature" needs "Probe feature" (feature "Other feature" is outside the seed; the link goes with the deleted one)',
       'deleted feature "Probe feature"',
       'deleted feature "Second feature", with its 1 guess',
-      'deleted product "Probe", with its plan document, tickets and 1 capability added by hand',
+      'deleted product "Probe", with its plan document, tickets, its use of 1 technology and 1 capability added by hand',
       'deleted capability "Probe Cap"',
       'deleted goal "Probe org goal"',
     ]);
@@ -648,6 +656,7 @@ describe("exporting a product carries its whole goal tree", () => {
     assert.deepEqual(doc.goals.map((g) => g.title).sort(), ["Help teams", "Know who can do it", "Plan work"]);
     assert.equal(doc.motivations.length, 3);
     assert.deepEqual(doc.capabilities.map((c) => c.name).sort(), ["Chat Assistant", "Team Directory"]);
+    assert.deepEqual(validateSeed(doc), []);
   });
 
   test("removing with that export names every goal link it deletes", async () => {

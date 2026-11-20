@@ -62,7 +62,8 @@ export default function ProductsIsland({ canWrite = true }) {
     const [list, goalList] = await Promise.all([api("/products"), api("/goals")]);
     setProducts(list);
     setGoals(goalList);
-    setProductId((current) => current && list.some((p) => p.id === current) ? current : list[0]?.id ?? null);
+    // With nothing chosen, open on the picker's first product.
+    setProductId((current) => current && list.some((p) => p.id === current) ? current : productOptions(list)[0]?.value ?? null);
   }, []);
 
   const loadDetail = React.useCallback(async (id) => {
@@ -276,25 +277,22 @@ export default function ProductsIsland({ canWrite = true }) {
       <PageHeader
         title="Products"
         meta={products?.length ? count(products.length, "product") : undefined}
-        actions={
-          <>
-            {products?.length > 1 && (
-              <Select aria-label="Product" value={productId ?? ""} onChange={(e) => selectProduct(e.target.value)} style={{ width: 240 }}
-                options={productOptions(products)} />
-            )}
-            {canWrite && products?.length > 0 && (
-              <Button size="sm" variant="accent" style={{ gap: 6 }} onClick={openNewProduct}>
-                <Icon name="plus" size={13} />New product
-              </Button>
-            )}
-          </>
-        }
+        actions={canWrite && products?.length > 0 && (
+          <Button size="sm" variant="accent" style={{ gap: 6 }} onClick={openNewProduct}>
+            <Icon name="plus" size={13} />New product
+          </Button>
+        )}
       />
       <div style={{ flex: 1, overflowY: "auto", padding: 24 }}>
         {products == null ? (
           <div role="status" style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>Loading products…</div>
         ) : product ? (
           <div style={{ maxWidth: 860, display: "flex", flexDirection: "column", gap: 16 }}>
+            {/* In the page, not the header: the header doesn't wrap, and at phone width the picker shrank to an empty box. */}
+            {products.length > 1 && (
+              <Select aria-label="Product" value={productId ?? ""} onChange={(e) => selectProduct(e.target.value)} style={{ width: 320, maxWidth: "100%" }}
+                options={productOptions(products)} />
+            )}
             <Card>
               <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                 <h2 style={{ margin: 0, fontSize: "var(--text-lg)", fontWeight: "var(--weight-semibold)", color: "var(--text-heading)" }}>{product.name}</h2>

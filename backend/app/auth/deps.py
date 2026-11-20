@@ -77,15 +77,60 @@ async def current_user(
     return await run_in_threadpool(_verifier(request, settings).verify, token)
 
 
+#: Each write path → the desktop screen where a person makes that change. First
+#: match wins, so a specific path sits above its collection. An id the screen
+#: can open travels along — only when it is shaped like one, since the path is
+#: the caller's. A capability's page is addressed by slug, and this decision
+#: is pure (no lookup), so a capability id opens the list.
+_ID = r"(?P<id>[A-Za-z0-9-]+)"
+_SCREENS = tuple(
+    (re.compile(pattern), screen)
+    for pattern, screen in (
+        (rf"/api/stacks/slots/{_ID}/bind", "/stacks?slot={id}"),
+        (r"/api/stacks(/.*)?", "/stacks"),
+        (r"/api/(constraints|concerns)(/.*)?", "/stacks"),
+        # The seed importer stamps this; seed files are loaded in Settings.
+        (r"/api/products/[^/]+/seeded", "/settings#seed-files"),
+        (rf"/api/products/{_ID}(/.*)?", "/products?product={id}"),
+        (r"/api/(products|decompositions|tickets)(/.*)?", "/products"),
+        (r"/api/features/edges(/.*)?", "/features"),
+        (rf"/api/features/{_ID}", "/features?feature={id}"),
+        (r"/api/(features|graph)(/.*)?", "/features"),
+        (rf"/api/goals/{_ID}", "/goals?goal={id}"),
+        (r"/api/goals", "/goals"),
+        (r"/api/capabilities(/.*)?", "/capabilities"),
+        (rf"/api/journeys/{_ID}", "/journeys?id={id}"),
+        (r"/api/journeys", "/journeys"),
+        # Guesses arrive in seed files and are confirmed where they show.
+        (r"/api/guesses", "/settings#seed-files"),
+        (r"/api/guesses/.*", "/features"),
+        (r"/api/tech/(vendors|edges|satisfactions|encounters|versions)(/.*)?", "/tech"),
+        (r"/api/tech/(?P<id>[a-z0-9-]+)(/.*)?", "/tech/{id}"),
+        (r"/api/tech", "/tech"),
+        (rf"/api/chat/threads/{_ID}(/.*)?", "/chat/{id}"),
+        (r"/api/chat(/.*)?", "/chat"),
+        (r"/api/users(/.*)?", "/users"),
+        (r"/api/admin/llm(/.*)?", "/admin"),
+        (r"/api/admin/data(/.*)?", "/data"),
+    )
+)
+
+
+def _screen(path: str) -> str:
+    for pattern, screen in _SCREENS:
+        if match := pattern.fullmatch(path):
+            return screen.format(**match.groupdict())
+    return "/home"
+
+
 def human_action(path: str) -> tuple[str, str]:
     """What was refused, and the screen that can do it. A refusal naming no
     next step is where an agent gives up silently."""
     if path.endswith("/bind"):
-        slot = path.removeprefix("/api/stacks/slots/").removesuffix("/bind")
-        return "Binding a slot is a human action.", f"/stacks?slot={slot}"
+        return "Binding a slot is a human action.", _screen(path)
     return (
         "This is a human action — every write names a person and takes a rationale.",
-        path.removeprefix("/api") or "/",
+        _screen(path),
     )
 
 

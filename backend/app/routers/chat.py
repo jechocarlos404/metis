@@ -1,4 +1,5 @@
 import uuid
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select
@@ -11,6 +12,21 @@ from app.models import ChatMessage, ChatThread
 from app.schemas.chat import MessageRead, MessageSend, ProposalRead, ThreadCreate, ThreadRead
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
+
+
+class NamedProposalRead(ProposalRead):
+    #: `arguments` with every reference named the way a person knows it (goal
+    #: code and title, capability, feature, product), for the approval card.
+    #: `arguments` stay what approval runs.
+    named_arguments: dict[str, Any] | None = None
+
+
+class ThreadMessageRead(MessageRead):
+    """A message as a thread lists it. Each step in `tool_calls` also carries
+    `named_arguments`: its `arguments` with every ID replaced by its row's
+    name, for "What it did"."""
+
+    proposals: list[NamedProposalRead] = []
 
 
 @router.get("/status")
@@ -45,7 +61,7 @@ async def get_thread(thread_id: uuid.UUID, session: AsyncSession = Depends(get_d
     return thread
 
 
-@router.get("/threads/{thread_id}/messages", response_model=list[MessageRead])
+@router.get("/threads/{thread_id}/messages", response_model=list[ThreadMessageRead])
 async def list_messages(thread_id: uuid.UUID, session: AsyncSession = Depends(get_db)):
     thread = await session.get(
         ChatThread,
@@ -54,7 +70,11 @@ async def list_messages(thread_id: uuid.UUID, session: AsyncSession = Depends(ge
     )
     if thread is None:
         raise HTTPException(404, "Thread not found")
-    return thread.messages
+    messages = [ThreadMessageRead.model_validate(m) for m in thread.messages]
+    for m in messages:
+        await proposal_service.name_proposals(session, m.proposals)
+        m.tool_calls = await proposal_service.name_steps(session, m.tool_calls)
+    return messages
 
 
 @router.delete("/threads/{thread_id}", status_code=204)

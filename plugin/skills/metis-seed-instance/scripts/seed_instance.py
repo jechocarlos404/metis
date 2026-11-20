@@ -1,25 +1,33 @@
 #!/usr/bin/env python3
 """Seed a running metis instance from a metis-seed JSON file (format v1).
 
-Stdlib only, no dependencies. Idempotent and add-only: existing entities are
-matched (goals by type+title; capabilities and products by name; features by
+Stdlib only, no dependencies. Idempotent: existing entities are matched (goals
+by type+title; capabilities by slug; products by name; features by
 (product, name); technologies by slug; edges by src+dst+kind; motivations,
 product technologies and satisfactions by pair) and reused rather than
 duplicated, so re-running the same file is safe. No entity or confirmed link
 is deleted. Two updates: a reused feature gains the file's confirmed capability
-links it lacks (never loses one; unknown_capabilities follows the file when
-stated, and the guess on each newly linked pair goes away), and an existing
-guess takes the file's confidence and basis.
+links it lacks (never loses one, and the guess on each newly linked pair goes
+away) and takes the status, description and unknown_capabilities the file
+states, each overwrite listed; and an existing guess takes the file's
+confidence and basis.
+
+With auth on, pass a token (--token, or METIS_TOKEN / METIS_API_TOKEN). Any
+valid token can run --dry-run; a write needs a person signed in to the app as
+an editor or admin, and this script signs no one in, so load the file in the
+app instead (Settings, Seed files).
 
 Usage:
-    python3 seed_instance.py metis-seed.json [--base-url http://localhost:8000] [--dry-run]
+    python3 seed_instance.py metis-seed.json [--base-url http://localhost:8000] [--dry-run] [--token TOKEN]
 """
 
 import argparse
 import json
+import os
 import re
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 
 # ---------------------------------------------------------------------------
@@ -48,6 +56,10 @@ def tech_slug(tech):
     if tech.get("slug") is not None:
         return tech["slug"]
     return slugify(tech["name"]) if isinstance(tech.get("name"), str) else ""
+
+
+# A capability's identity, the same rule: "Keyword search" is "Keyword Search".
+cap_slug = tech_slug
 
 
 def _check_guess(errors, where, item):
@@ -146,10 +158,19 @@ def validate(doc):
         _check_priority(errors, where, g)
         _check_status(errors, where, g)
 
+    seen_cap_slugs = set()
     for i, c in enumerate(doc.get("capabilities") or []):
         where = f"capabilities[{i}] ({c.get('ref')})"
         if not c.get("name"):
             errors.append(f"{where}: 'name' is required")
+        slug = cap_slug(c)
+        if not isinstance(slug, str) or not slug:
+            errors.append(f"{where}: slug must be a non-empty string "
+                          "(give one when the name yields none)")
+        elif slug in seen_cap_slugs:
+            errors.append(f"{where}: duplicate capability slug {slug!r}")
+        else:
+            seen_cap_slugs.add(slug)
         if c.get("maturity") is not None and c["maturity"] not in MATURITIES:
             errors.append(f"{where}: maturity must be one of {sorted(MATURITIES)}")
         _check_facets(errors, where, c)
@@ -390,16 +411,96 @@ def parents_first(items):
             raise RuntimeError("unresolvable parent_ref ordering")
 
 
+def quoted(value):
+    """A name in a report line, quoted the way the in-app importer quotes it."""
+    return json.dumps(value, ensure_ascii=False)
+
+
+def text_change(before, after, limit=60):
+    """Two versions of a text, trimmed to show where they differ, the way the
+    in-app importer shows them: '"Plans." → "Plans in phases."'."""
+    a = " ".join(str(before or "").split())
+    b = " ".join(str(after or "").split())
+    same = 0
+    while same < len(a) and same < len(b) and a[same] == b[same]:
+        same += 1
+    start = a.rfind(" ", 0, same - 19) + 1 if same > 30 else 0
+
+    def cut(text):
+        if not text:
+            return "empty"
+        rest = text[start:]
+        if len(rest) > limit:
+            rest = rest[: limit - 1] + "…"
+        return quoted(("…" if start > 0 else "") + rest)
+
+    return f"{cut(a)} → {cut(b)}"
+
+
+def capability_resolver(instance):
+    """Find the instance capability a seed capability names. A slug match wins:
+    the explicit slug, then the one its name derives. A rename keeps the old
+    slug, so last the derived slug is matched against each row's current name,
+    preferring the row with exactly that name."""
+    by_slug = {c["slug"]: c for c in instance}
+    by_name = {}
+    for c in instance:
+        by_name.setdefault(slugify(c["name"]), []).append(c)
+
+    def resolve(cap):
+        if cap.get("slug") is not None and cap["slug"] in by_slug:
+            return by_slug[cap["slug"]]
+        derived = slugify(cap["name"])
+        if derived in by_slug:
+            return by_slug[derived]
+        rows = by_name.get(derived) or []
+        return next((r for r in rows if r["name"] == cap["name"]), rows[0] if rows else None)
+
+    return resolve
+
+
+IN_APP = (
+    "Writes need a person signed in to the app as an editor or admin, and this "
+    "script signs no one in. An editor or admin can load the file in the app "
+    "(Settings, Seed files: check, then import), or run this against an "
+    "instance started with AUTH_ENABLED=false."
+)
+
+
+def refused(method, path, status, body, token):
+    """Exit with a plain message when the API refuses the caller. A 403 on a
+    read is left to the caller: the guesses list is editor-only, and a dry run
+    with a read-only token reads it as empty."""
+    if status == 401:
+        why = "the token was refused (expired? they last 5 minutes)" if token else "no token was sent"
+        sys.exit(
+            f"error: {method} {path} returned 401: the API has auth on and {why}. "
+            "Pass --token or set METIS_TOKEN; see the skill's SKILL.md, \"With auth on\"."
+        )
+    if status == 403 and method != "GET":
+        detail = body.get("detail") if isinstance(body, dict) else body
+        if isinstance(detail, dict) and detail.get("error") == "human_action_required":
+            sys.exit(f"error: {method} {path} returned 403: this token can read but not write. {IN_APP}")
+        # The role refusal: a viewer can't write in the app either.
+        sys.exit(
+            f"error: {method} {path} returned 403 ({detail}): this account can't write, "
+            "from a script or in the app; an editor or admin can. Ask one to load the "
+            "file in the app (Settings, Seed files: check, then import)."
+        )
+
+
 class Api:
-    def __init__(self, base_url):
+    def __init__(self, base_url, token=None):
         self.base = base_url.rstrip("/")
+        self.token = token
 
     def request(self, method, path, payload=None):
         url = f"{self.base}{path}"
         data = json.dumps(payload).encode() if payload is not None else None
-        req = urllib.request.Request(
-            url, data=data, method=method, headers={"Content-Type": "application/json"}
-        )
+        headers = {"Content-Type": "application/json"}
+        if self.token:
+            headers["Authorization"] = f"Bearer {self.token}"
+        req = urllib.request.Request(url, data=data, method=method, headers=headers)
         try:
             with urllib.request.urlopen(req, timeout=30) as resp:
                 body = resp.read()
@@ -410,6 +511,7 @@ class Api:
                 body = json.loads(body)
             except ValueError:
                 pass
+            refused(method, path, e.code, body, self.token)
             return e.code, body
         except urllib.error.URLError as e:
             sys.exit(
@@ -491,24 +593,75 @@ class Loader:
             )
 
     def load_capabilities(self):
-        existing = {c["name"]: c["id"] for c in self.api.get("/api/capabilities")}
+        resolve = capability_resolver(self.api.get("/api/capabilities"))
+        added = []
         for c in parents_first(self.doc.get("capabilities") or []):
-            if c["name"] in existing:
-                self.cap_ids[c["ref"]] = existing[c["name"]]
-                self.note("capabilities", "reused")
+            found = resolve(c)
+            if found:
+                self.reuse_capability(c, found)
                 continue
-            self.cap_ids[c["ref"]] = self.create(
-                "capabilities",
-                "/api/capabilities",
-                {
-                    "parent_id": self.cap_ids.get(c.get("parent_ref")),
-                    "name": c["name"],
-                    "description": c.get("description"),
-                    "maturity": c.get("maturity"),
-                    "facets": c.get("facets"),
-                    "evidence_anchors": c.get("evidence_anchors"),
-                },
-                c["name"],
+            payload = {
+                "parent_id": self.cap_ids.get(c.get("parent_ref")),
+                "slug": c.get("slug"),
+                "name": c["name"],
+                "description": c.get("description"),
+                "maturity": c.get("maturity"),
+                "facets": c.get("facets"),
+                "evidence_anchors": c.get("evidence_anchors"),
+            }
+            if self.dry_run:
+                self.cap_ids[c["ref"]] = self.create("capabilities", "/api/capabilities", payload, c["name"])
+                added.append(c["name"])
+                continue
+            status, body = self.api.post("/api/capabilities", prune(payload))
+            # The clash names the row under `existing`; an older instance put
+            # it in `detail` itself.
+            existing = body.get("existing") or body.get("detail") if isinstance(body, dict) else None
+            if status == 201:
+                self.cap_ids[c["ref"]] = body["id"]
+                self.note("capabilities", "created")
+                added.append(c["name"])
+            elif status == 409 and isinstance(existing, dict) and isinstance(existing.get("slug"), str):
+                # Created since the list was read: the same slug is the same capability.
+                row = next(
+                    (r for r in self.api.get("/api/capabilities") if r["slug"] == existing["slug"]), None
+                )
+                if row is None:
+                    sys.exit(f"error: POST /api/capabilities for {c['name']!r} returned 409 "
+                             f"for a slug no capability has: {body}")
+                self.reuse_capability(c, row)
+            else:
+                sys.exit(f"error: POST /api/capabilities for {c['name']!r} returned {status}: {body}")
+        self.list_added_capabilities(added)
+
+    def reuse_capability(self, c, row):
+        self.cap_ids[c["ref"]] = row["id"]
+        self.note("capabilities", "reused")
+        if row["name"] != c["name"]:
+            self.notes.append(
+                f"capability {quoted(c['name'])} is the existing {quoted(row['name'])} "
+                f"(slug {row['slug']}); reused as it is"
+            )
+
+    def list_added_capabilities(self, names):
+        """Every capability the file adds, by name; in a dry run with the
+        closest existing names, so a near-duplicate is caught before loading."""
+        if not names:
+            return
+        nearest = {}
+        if self.dry_run:
+            status, body = self.api.post(
+                "/api/capabilities/coverage",
+                {"features": [{"name": "seed file", "capabilities": names}]},
+            )
+            if status == 200:
+                needs = (body.get("features") or [{}])[0].get("capabilities") or []
+                nearest = {n["name"]: [c["name"] for c in n.get("candidates") or []] for n in needs}
+        for name in names:
+            near = nearest.get(name.strip()) or []
+            self.notes.append(
+                f"new capability {quoted(name)}"
+                + (f"; nearest existing: {', '.join(quoted(n) for n in near)}" if near else "")
             )
 
     def load_motivations(self):
@@ -539,10 +692,13 @@ class Loader:
                         )
                     self.note("motivations", "created")
 
-    def link_reused_feature(self, f, current):
-        """Additive on reuse: add the file's confirmed links the feature lacks,
-        never remove one. `unknown_capabilities` follows the file when the
-        file states it. Returns the feature's confirmed links afterwards."""
+    def update_reused_feature(self, f, current):
+        """A reused feature gains the file's confirmed links it lacks, never
+        losing one. A product's own seed is the authority on its own features,
+        so the status, description and unknown_capabilities the file states
+        replace the feature's; a field the file leaves out is left alone. Each
+        overwrite is listed by feature, in a dry run too, since it may undo a
+        hand edit. Returns the feature's confirmed links afterwards."""
         have = list(current.get("capability_ids") or [])
         missing = [
             cid
@@ -550,15 +706,26 @@ class Loader:
             if cid not in have
         ]
         payload = {}
+        changes = []
         if missing:
             payload["capability_ids"] = have + missing
+        if f.get("status") is not None and f["status"] != current.get("status"):
+            payload["status"] = f["status"]
+            changes.append(f"status {current.get('status')} → {f['status']}")
+        if f.get("description") is not None and f["description"] != current.get("description"):
+            payload["description"] = f["description"]
+            changes.append(f"description {text_change(current.get('description'), f['description'])}")
         flag = f.get("unknown_capabilities")
         if flag is not None and flag != (current.get("unknown_capabilities") is True):
             payload["unknown_capabilities"] = flag
+            changes.append(f"unknown_capabilities {str(not flag).lower()} → {str(flag).lower()}")
         if not payload:
             return set(have)
+        overwrites = f"feature {quoted(f['name'])}: {'; '.join(changes)}" if changes else None
         if self.dry_run:
             self.note("features", "would link" if missing else "would update")
+            if overwrites:
+                self.notes.append(overwrites)
             return set(have + missing)
         status, body = self.api.patch(f"/api/features/{current['id']}", payload)
         if status != 200:
@@ -566,13 +733,15 @@ class Loader:
             self.note("features", "rejected")
             return set(have)
         self.note("features", "linked" if missing else "updated")
+        if overwrites:
+            self.notes.append(overwrites)
         return set(body["capability_ids"])
 
     def load_features(self):
-        # Additive on reuse: an existing feature gains the file's confirmed
-        # links it lacks and never loses one; nothing else on it changes.
-        # Identity is (product, name): features belong to their product, so
-        # another product's "Sign in" is a different feature, not a reuse.
+        # On reuse, links only grow and the file's stated status, description
+        # and unknown_capabilities win (update_reused_feature). Identity is
+        # (product, name): features belong to their product, so another
+        # product's "Sign in" is a different feature, not a reuse.
         instance = self.api.get("/api/features")
         existing = {(f.get("product_id"), f["name"]): f for f in instance}
         for f in self.doc.get("features") or []:
@@ -580,7 +749,7 @@ class Loader:
             if key in existing:
                 self.feat_ids[f["ref"]] = existing[key]["id"]
                 self.note("features", "reused")
-                self.feat_caps[f["ref"]] = self.link_reused_feature(f, existing[key])
+                self.feat_caps[f["ref"]] = self.update_reused_feature(f, existing[key])
                 continue
             self.feat_caps[f["ref"]] = {self.cap_ids[r] for r in feature_capability_refs(f)}
             self.feat_ids[f["ref"]] = self.create(
@@ -604,9 +773,15 @@ class Loader:
         """Guesses already in the instance, keyed by their (capability, feature
         or tech) pair. An instance without the guesses endpoint has none."""
         if self._guesses is None:
+            status, body = self.api.request("GET", "/api/guesses")
+            if status == 403:
+                self.notes.append(
+                    "this token cannot read guesses (editors and admins only), "
+                    "so guess counts assume none exist yet"
+                )
             self._guesses = {
                 (g["capability_id"], g.get("feature_id") or g.get("tech_id")): g
-                for g in self.api.get_optional("/api/guesses")
+                for g in (body if status == 200 else [])
             }
         return self._guesses
 
@@ -704,6 +879,22 @@ class Loader:
                         sys.exit(f"error: usage {t['ref']} by {prod_ref} returned {status}: {body}")
                     usage[pid].add(tid)
                     self.note("tech_usage", "created")
+
+        # Removing a product leaves a person's recorded use of a technology
+        # with no product, and an import never links one back: say so, so a
+        # re-import isn't read as a full restore.
+        for t in techs:
+            slug = tech_slug(t)
+            if slug not in existing or not t.get("products"):
+                continue
+            detail = self.api.get_optional(f"/api/tech/{urllib.parse.quote(slug, safe='')}")
+            people = [e["person"] for e in (detail.get("encounters") or []) if not e.get("product_id")] \
+                if isinstance(detail, dict) else []
+            if people:
+                self.notes.append(
+                    f"technology {t['name']!r} has {len(people)} recorded use(s) naming no product "
+                    f"({', '.join(people)}); an import never links a recorded use to a product"
+                )
 
         confirmed = {
             (s["tech_id"], s["capability_id"]) for s in self.api.get("/api/tech/satisfactions")
@@ -940,6 +1131,14 @@ def main():
         action="store_true",
         help="validate and diff against the instance without writing anything",
     )
+    ap.add_argument(
+        "--token",
+        default=os.environ.get("METIS_TOKEN") or os.environ.get("METIS_API_TOKEN"),
+        help="bearer token for an instance with auth on (default: $METIS_TOKEN, "
+        "else $METIS_API_TOKEN). Any valid token can --dry-run; writes need a "
+        "person signed in to the app as an editor or admin, so with auth on load "
+        "the file in the app instead",
+    )
     args = ap.parse_args()
 
     try:
@@ -955,7 +1154,7 @@ def main():
             print(f"  - {e}", file=sys.stderr)
         sys.exit(1)
 
-    api = Api(args.base_url)
+    api = Api(args.base_url, args.token)
     status, _ = api.request("GET", "/api/health")
     if status != 200:
         sys.exit(f"error: {args.base_url}/api/health returned {status} — is the instance up?")

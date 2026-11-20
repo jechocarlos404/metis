@@ -25,9 +25,10 @@ from typing import Literal
 
 from fastapi import HTTPException
 from sqlalchemy import delete as sa_delete
-from sqlalchemy import func, select
+from sqlalchemy import func, literal, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from app.models import (
     Capability,
@@ -51,6 +52,7 @@ from app.models import (
     Story,
     TechSatisfaction,
     TechStack,
+    Technology,
     Ticket,
 )
 from app.schemas.admin import (
@@ -111,7 +113,8 @@ CHILDREN: dict[type, tuple[ChildSpec, ...]] = {
     ),
     Product: (
         ChildSpec(ProductBundle, "product_id", "delete", "ontology"),
-        ChildSpec(Feature, "product_id", "detach", "ontology"),  # features outlive their product
+        # Features go with their product: detached, one would count as ours.
+        ChildSpec(Feature, "product_id", "delete", "ontology"),
         ChildSpec(ProductDecomposition, "product_id", "delete", "delivery"),
         ChildSpec(Epic, "product_id", "delete", "delivery"),
         ChildSpec(Ticket, "product_id", "delete", "delivery"),
@@ -208,6 +211,17 @@ NAME_COLUMN: dict[type, str] = {
     Feature: "name",
     Product: "name",
     Ticket: "title",
+}
+
+#: A link row reads as its two ends by name: (fk, end model) on each side,
+#: and the word between. A feature edge's word is its kind.
+LINK_ENDS: dict[type, tuple[tuple[str, type], str, tuple[str, type]]] = {
+    FeatureCapability: (("feature_id", Feature), "→", ("capability_id", Capability)),
+    FeatureEdge: (("src_id", Feature), "", ("dst_id", Feature)),
+    Motivation: (("goal_id", Goal), "→", ("capability_id", Capability)),
+    ProductBundle: (("product_id", Product), "⊃", ("capability_id", Capability)),
+    ProductTechnology: (("product_id", Product), "uses", ("tech_id", Technology)),
+    TechSatisfaction: (("tech_id", Technology), "satisfies", ("capability_id", Capability)),
 }
 
 
@@ -328,71 +342,92 @@ async def _orphaned_features(
 
 
 async def _label(session: AsyncSession, model: type, row_id: uuid.UUID) -> str:
+    return (await _names(session, model, {row_id})).get(row_id, str(row_id)[:8])
+
+
+def _n(n: int, one: str, many: str) -> str:
+    return f"{n} {one if n == 1 else many}"
+
+
+async def _names(session: AsyncSession, model: type, ids: set[uuid.UUID]) -> dict[uuid.UUID, str]:
+    """Each row's name: its own (NAME_COLUMN), or a link's two ends
+    (LINK_ENDS), read in one query per table. A guessed link names the
+    feature or technology it is about. Other rows have none."""
+    if not ids:
+        return {}
     column = NAME_COLUMN.get(model)
     if column is not None:
-        value = await session.scalar(select(getattr(model, column)).where(model.id == row_id))
-        return value or str(row_id)[:8]
-    if model is FeatureEdge:
-        edge = await session.get(FeatureEdge, row_id)
-        if edge is None:
-            return str(row_id)[:8]
-        names = dict(
-            (
-                await session.execute(
-                    select(Feature.id, Feature.name).where(
-                        Feature.id.in_([edge.src_id, edge.dst_id])
-                    )
-                )
-            ).all()
+        rows = await session.execute(select(model.id, getattr(model, column)).where(model.id.in_(ids)))
+        return {row_id: name or str(row_id)[:8] for row_id, name in rows}
+    if model is CapabilityGuess:
+        feature, tech, cap = aliased(Feature), aliased(Technology), aliased(Capability)
+        stmt = (
+            select(model.id, func.coalesce(feature.name, tech.name), literal("→ (guess)"), cap.name)
+            .outerjoin(feature, feature.id == model.feature_id)
+            .outerjoin(tech, tech.id == model.tech_id)
+            .outerjoin(cap, cap.id == model.capability_id)
         )
-        src = names.get(edge.src_id, "?")
-        dst = names.get(edge.dst_id, "?")
-        return f"{src} {edge.kind} {dst}"
-    if model is Motivation:
-        row = await session.get(Motivation, row_id)
-        if row is None:
-            return str(row_id)[:8]
-        goal = await session.scalar(select(Goal.title).where(Goal.id == row.goal_id))
-        cap = await session.scalar(
-            select(Capability.name).where(Capability.id == row.capability_id)
+    elif model in LINK_ENDS:
+        (left_fk, left_model), word, (right_fk, right_model) = LINK_ENDS[model]
+        left, right = aliased(left_model), aliased(right_model)
+        middle = model.kind if model is FeatureEdge else literal(word)
+        stmt = (
+            select(
+                model.id,
+                getattr(left, NAME_COLUMN.get(left_model, "name")),
+                middle,
+                getattr(right, NAME_COLUMN.get(right_model, "name")),
+            )
+            .outerjoin(left, left.id == getattr(model, left_fk))
+            .outerjoin(right, right.id == getattr(model, right_fk))
         )
-        return f"{goal or '?'} → {cap or '?'}"
-    if model is ProductBundle:
-        row = await session.get(ProductBundle, row_id)
-        if row is None:
-            return str(row_id)[:8]
-        product = await session.scalar(select(Product.name).where(Product.id == row.product_id))
-        cap = await session.scalar(
-            select(Capability.name).where(Capability.id == row.capability_id)
-        )
-        return f"{product or '?'} ⊃ {cap or '?'}"
-    return str(row_id)[:8]
+    else:
+        return {}
+    rows = await session.execute(stmt.where(model.id.in_(ids)))
+    return {
+        row_id: f"{a or '?'} {getattr(word, 'value', word)} {b or '?'}" for row_id, a, word, b in rows
+    }
 
 
 def _warnings(
-    refs: list[RowRef], to_delete: dict[type, set[uuid.UUID]]
+    refs: list[RowRef],
+    to_delete: dict[type, set[uuid.UUID]],
+    names: dict[type, dict[uuid.UUID, str]],
 ) -> list[str]:
     out: list[str] = []
-    seeded = {(ENTITY_MODELS[r.entity], r.id) for r in refs}
+    selected = {r.id for r in refs}
 
-    for model, noun in ((Capability, "capabilities"), (Goal, "goals")):
-        extra = len(to_delete.get(model, set())) - sum(1 for m, _ in seeded if m is model)
-        if extra > 0:
-            out.append(
-                f"{extra} descendant {noun} are included — deleting a parent would "
-                f"otherwise silently re-root its children to top level."
-            )
+    # The rows under a selected one, by name: nobody ticked them.
+    for model, one, many in ((Capability, "capability", "capabilities"), (Goal, "goal", "goals")):
+        extra = sorted(
+            (names.get(model, {}).get(i, str(i)[:8]) for i in to_delete.get(model, set()) - selected),
+            key=str.lower,
+        )
+        if extra:
+            out.append(f"Also deletes {_n(len(extra), one, many)} under a selected one: {', '.join(extra)}.")
 
     buy = sum(len(ids) for m, ids in to_delete.items() if LABELS[m][1] == "buy")
     if buy:
         out.append(
-            f"{buy} row(s) on the buy plane will be deleted — technology supply "
-            f"disappears from under any stack that relied on it."
+            f"Deletes {_n(buy, 'row', 'rows')} of technology data, so any stack "
+            f"that relied on it loses that supply."
         )
     return out
 
 
-async def preview(session: AsyncSession, refs: list[RowRef]) -> CascadePreview:
+class NamedCount(TableCount):
+    """A table's share of the closure. `names` lists every row by name for the
+    tables whose rows have one, a link by its two ends (`_names`); the rest
+    are only counted."""
+
+    names: list[str] = []
+
+
+class NamedPreview(CascadePreview):
+    total_deletes: list[NamedCount]
+
+
+async def preview(session: AsyncSession, refs: list[RowRef]) -> NamedPreview:
     to_delete, detach, missing = await compute_closure(session, refs)
     missing_ids = {r.id for r in missing}
 
@@ -416,13 +451,21 @@ async def preview(session: AsyncSession, refs: list[RowRef]) -> CascadePreview:
             )
         )
 
+    names = {m: await _names(session, m, ids) for m, ids in to_delete.items()}
+    by_table = {m.__tablename__: m for m in to_delete}
     totals = {m: len(ids) for m, ids in to_delete.items()}
-    return CascadePreview(
+    return NamedPreview(
         rows=rows,
-        total_deletes=_counts(totals),
+        total_deletes=[
+            NamedCount(
+                **t.model_dump(),
+                names=sorted(names[by_table[t.table]].values(), key=str.lower),
+            )
+            for t in _counts(totals)
+        ],
         total_detaches=_counts(detach),
         total_rows=sum(totals.values()),
-        warnings=_warnings(refs, to_delete),
+        warnings=_warnings(refs, to_delete, names),
     )
 
 

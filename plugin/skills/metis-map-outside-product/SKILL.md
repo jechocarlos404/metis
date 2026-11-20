@@ -83,6 +83,9 @@ The commands below read the API at `METIS_API_URL` (default
      - `basis`: one sentence that cites the URL it came from.
    - `description`: one sentence of what the user gets, from the pages.
 
+   For a feature metis already has, the loader replaces its `status` and
+   `description` with yours and lists each change in its dry run.
+
 6. **Write the capabilities.** Declare every capability a guess names.
    - Reuse an existing capability by its exact inventory name, character for
      character, whenever the meaning matches. There is no fuzzy matching in

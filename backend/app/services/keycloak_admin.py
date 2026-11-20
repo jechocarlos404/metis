@@ -16,6 +16,10 @@ from app.schemas.user import PasswordReset, UserCreate, UserUpdate
 MANAGED_ROLES = ("admin", "editor", "viewer")
 
 
+class KeycloakAdminError(Exception):
+    """A failure Keycloak itself didn't report, with a message for the admin."""
+
+
 def _shape(raw: dict, role: str | None) -> dict:
     return {
         "id": raw["id"],
@@ -71,26 +75,32 @@ class KeycloakAdmin:
         resp.raise_for_status()
         return resp
 
-    async def _role_rep(self, c, token, name: str) -> dict:
-        return (await self._api(c, token, "GET", f"/roles/{name}")).json()
-
     async def _user_role(self, c, token, uid: str) -> str | None:
         rows = (await self._api(c, token, "GET", f"/users/{uid}/role-mappings/realm")).json()
         names = {r["name"] for r in rows}
         return next((r for r in MANAGED_ROLES if r in names), None)
 
     async def _assign_role(self, c, token, uid: str, role: str) -> None:
-        await self._api(
-            c, token, "POST", f"/users/{uid}/role-mappings/realm",
-            json=[await self._role_rep(c, token, role)],
-        )
+        # Resolved from the roles this user could still get, not GET
+        # /roles/{name}: that one needs realm-management view-realm, and the
+        # service account has only manage-users, view-users and query-users.
+        available = (await self._api(
+            c, token, "GET", f"/users/{uid}/role-mappings/realm/available"
+        )).json()
+        rep = next((r for r in available if r["name"] == role), None)
+        if rep is None:
+            raise KeycloakAdminError(f"Keycloak's {self._realm} realm has no {role} role.")
+        await self._api(c, token, "POST", f"/users/{uid}/role-mappings/realm", json=[rep])
 
     async def _set_role(self, c, token, uid: str, role: str) -> None:
         current = (await self._api(c, token, "GET", f"/users/{uid}/role-mappings/realm")).json()
-        stale = [r for r in current if r["name"] in MANAGED_ROLES]
+        # Give the new role before taking the old ones away, so a failure
+        # leaves the user with the role they had, never with none.
+        if role not in {r["name"] for r in current}:
+            await self._assign_role(c, token, uid, role)
+        stale = [r for r in current if r["name"] in MANAGED_ROLES and r["name"] != role]
         if stale:
             await self._api(c, token, "DELETE", f"/users/{uid}/role-mappings/realm", json=stale)
-        await self._assign_role(c, token, uid, role)
 
     async def _shaped(self, c, token, uid: str) -> dict:
         raw = (await self._api(c, token, "GET", f"/users/{uid}")).json()
@@ -128,7 +138,19 @@ class KeycloakAdmin:
             }
             resp = await self._api(c, token, "POST", "/users", json=rep)
             uid = resp.headers["Location"].rstrip("/").rsplit("/", 1)[-1]
-            await self._assign_role(c, token, uid, data.role)
+            try:
+                await self._assign_role(c, token, uid, data.role)
+            except (httpx.HTTPError, KeycloakAdminError) as exc:
+                # All or nothing: an account without a role can sign in to
+                # nothing, and a retry would only hit "user exists".
+                try:
+                    await self._api(c, token, "DELETE", f"/users/{uid}")
+                except httpx.HTTPError:
+                    raise KeycloakAdminError(
+                        f"{data.username} was created in Keycloak but got no role, and metis "
+                        "couldn't remove it. Give it a role or delete it."
+                    ) from exc
+                raise
             return await self._shaped(c, token, uid)
 
     async def update_user(self, uid: str, data: UserUpdate) -> dict:

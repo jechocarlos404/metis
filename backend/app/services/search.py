@@ -6,7 +6,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import Feature
 
 
-async def search_features(session: AsyncSession, q: str, limit: int = 20) -> list[Feature]:
+async def search_features(session: AsyncSession, q: str, limit: int | None = 20) -> list[Feature]:
+    """Best matches first; limit=None returns every match."""
     q = q.strip()
     if not q:
         return []

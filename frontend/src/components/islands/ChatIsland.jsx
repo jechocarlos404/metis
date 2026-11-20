@@ -2,31 +2,25 @@ import React from "react";
 import { PageHeader } from "../shell/PageHeader.jsx";
 import { VizBlock } from "../chat/VizBlock.jsx";
 import { ProposalDraft } from "../chat/ProposalDraft.jsx";
+import { changeLabel, stepLabel, stepRows } from "../chat/proposal-words.js";
 import { Badge, Button, Icon, IconButton, Select, DeleteConfirm } from "../../ds";
 import { AGENT, PROPOSAL_STATUS, count } from "../../lib/words.js";
 import { Term } from "../shared/Term.jsx";
 import { api } from "../../lib/api.js";
 import { renderChatMarkdown } from "../../lib/chat-markdown.js";
 
-const stepLabel = (name) => name.replace(/_/g, " ");
 const STEP_STATUS = { started: "running…", finished: "done", failed: "failed", proposed: "proposed" };
 
-const agentLabel = (name) => AGENT[name] ?? (name ? stepLabel(name) : "Metis");
+const agentLabel = (name) => AGENT[name] ?? (name ? name.replace(/_/g, " ") : "Metis");
 
-const argValue = (v) => {
-  if (v == null) return "none";
-  if (typeof v !== "object") return String(v);
-  if (Array.isArray(v)) return v.every((x) => x == null || typeof x !== "object") ? v.join(", ") : count(v.length, "item");
-  return count(Object.keys(v).length, "field");
-};
-
-// A step's arguments as readable lines; the exact JSON stays one click away.
-function StepArgs({ args }) {
+// A step's arguments as readable lines, things by name as the approval card
+// names them; each raw value is the hover, the exact JSON one click away.
+function StepArgs({ args, named }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 2, color: "var(--text-secondary)" }}>
-      {Object.entries(args).map(([k, v]) => (
-        <div key={k} style={{ overflowWrap: "anywhere" }}>
-          {stepLabel(k)}: <span style={{ color: "var(--text-body)" }}>{argValue(v)}</span>
+      {stepRows(args, named).map((r) => (
+        <div key={r.key} style={{ overflowWrap: "anywhere" }}>
+          {r.label}: <span title={r.raw ?? undefined} style={{ color: "var(--text-body)" }}>{r.text}</span>
         </div>
       ))}
       <details>
@@ -38,15 +32,17 @@ function StepArgs({ args }) {
 }
 
 // What an agent did on the way to its reply: each tool it called, whether
-// that read or changed data, what it was given and what came back.
-function AgentSteps({ tools }) {
+// that read or changed data, what it was given and what came back. A
+// proposed change's outcome is the approval card's: the step keeps no status
+// of its own, which would go stale once someone decides.
+function AgentSteps({ tools, waiting = false }) {
   const proposed = tools.filter((t) => t.status === "proposed").length;
   const failed = tools.filter((t) => t.status === "failed").length;
   return (
     <details style={{ fontSize: "var(--text-xs)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-sm)", background: "var(--surface-card)" }}>
       <summary style={{ cursor: "pointer", padding: "6px 10px", color: "var(--text-secondary)" }}>
         What it did: {count(tools.length, "step", "steps")}
-        {proposed > 0 && <span style={{ color: "var(--warn-fg)", fontWeight: "var(--weight-medium)" }}> · proposed {count(proposed, "change", "changes")}</span>}
+        {proposed > 0 && <span style={waiting ? { color: "var(--warn-fg)", fontWeight: "var(--weight-medium)" } : undefined}> · proposed {count(proposed, "change", "changes")}</span>}
         {failed > 0 && <span style={{ color: "var(--danger-fg)" }}> · {failed} failed</span>}
       </summary>
       <ol style={{ margin: 0, padding: "0 10px 8px 30px", display: "flex", flexDirection: "column", gap: 6 }}>
@@ -59,8 +55,8 @@ function AgentSteps({ tools }) {
                 {STEP_STATUS[t.status] ?? t.status}
               </span>
             </span>
-            {t.arguments && Object.keys(t.arguments).length > 0 && <StepArgs args={t.arguments} />}
-            {t.summary && <div style={{ color: t.status === "failed" ? "var(--danger-fg)" : "var(--text-body)" }}>→ {t.summary}</div>}
+            {t.arguments && Object.keys(t.arguments).length > 0 && <StepArgs args={t.arguments} named={t.named_arguments} />}
+            {t.summary && t.status !== "proposed" && <div style={{ color: t.status === "failed" ? "var(--danger-fg)" : "var(--text-body)" }}>→ {t.summary}</div>}
           </li>
         ))}
       </ol>
@@ -77,7 +73,7 @@ function Dot() {
   return <span aria-hidden="true" style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--accent)", animation: "pulse 1s infinite" }} />;
 }
 
-function AgentMessage({ agent, text, viz, tools, status }) {
+function AgentMessage({ agent, text, viz, tools, status, waiting }) {
   const running = status === "running";
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8, minWidth: 0 }}>
@@ -89,7 +85,7 @@ function AgentMessage({ agent, text, viz, tools, status }) {
         {running && <Dot />}
         {running && !text && <span style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>working…</span>}
       </div>
-      {tools && tools.length > 0 && <AgentSteps tools={tools} />}
+      {tools && tools.length > 0 && <AgentSteps tools={tools} waiting={waiting} />}
       {text && (
         // renderChatMarkdown escapes raw HTML and unsafe links; see lib/chat-markdown.js.
         <div className="chat-md" style={{ fontSize: "var(--text-sm)", color: "var(--text-body)", lineHeight: "var(--leading-body)" }}
@@ -133,7 +129,7 @@ function Proposals({ message, canWrite, onDecided }) {
     <div style={{ border: "1px solid var(--border-default)", borderRadius: "var(--radius-md)", background: "var(--surface-card)", padding: 12, display: "flex", flexDirection: "column", gap: 8 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
         <span style={{ fontSize: "var(--text-sm)", fontWeight: "var(--weight-semibold)", color: "var(--text-heading)", flex: 1 }}>
-          {pending.length > 0 ? `${count(pending.length, "change", "changes")} waiting for approval` : "Proposed changes"}
+          {pending.length > 0 ? `${count(pending.length, "change", "changes")} waiting for you` : "Proposed changes"}
         </span>
         {canWrite && agentDone && pending.length > 1 && (
           <Button size="sm" variant="secondary" disabled={busy} onClick={() => decide(`/chat/messages/${message.id}/approve-all`)}>
@@ -147,7 +143,7 @@ function Proposals({ message, canWrite, onDecided }) {
         {list.map((p) => (
           <li key={p.id} style={{ fontSize: "var(--text-xs)", color: "var(--text-body)" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-              <span title={p.tool_name} style={{ fontWeight: "var(--weight-medium)", color: "var(--text-heading)" }}>{stepLabel(p.tool_name)}</span>
+              <span title={p.tool_name} style={{ fontWeight: "var(--weight-medium)", color: "var(--text-heading)" }}>{changeLabel(p.tool_name)}</span>
               <Badge tone={PROPOSAL_TONE[p.status] ?? "neutral"}><Term dict={PROPOSAL_STATUS} value={p.status} /></Badge>
               <span style={{ flex: 1 }} />
               {canWrite && agentDone && p === next && (
@@ -161,7 +157,7 @@ function Proposals({ message, canWrite, onDecided }) {
               )}
             </div>
             <div style={{ margin: "6px 0 2px", padding: 8, background: "var(--surface-inset)", borderRadius: "var(--radius-sm)" }}>
-              <ProposalDraft tool={p.tool_name} args={p.arguments} />
+              <ProposalDraft tool={p.tool_name} args={p.arguments} named={p.named_arguments} />
             </div>
             {p.result && <div style={{ color: p.status === "failed" ? "var(--danger-fg)" : "var(--text-body)" }}>→ {p.result}</div>}
           </li>
@@ -189,7 +185,7 @@ function SpecialistCard({ message, canWrite, onDecided }) {
       </summary>
       <div style={{ padding: "0 12px 12px", display: "flex", flexDirection: "column", gap: 8 }}>
         {message.task && <div style={{ fontSize: "var(--text-xs)", color: "var(--text-body)" }}>Task: {message.task}</div>}
-        {message.tool_calls?.length > 0 && <AgentSteps tools={message.tool_calls} />}
+        {message.tool_calls?.length > 0 && <AgentSteps tools={message.tool_calls} waiting={waiting > 0} />}
         {message.content && (
           <div className="chat-md" style={{ fontSize: "var(--text-sm)", color: "var(--text-body)", lineHeight: "var(--leading-body)" }}
             dangerouslySetInnerHTML={{ __html: renderChatMarkdown(message.content) }} />
@@ -228,7 +224,8 @@ function TurnBody({ run, children, canWrite, onDecided }) {
     const only = children[0];
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        <AgentMessage agent="orchestrator" text={only.content} viz={only.viz} tools={only.tool_calls} status={only.status} />
+        <AgentMessage agent="orchestrator" text={only.content} viz={only.viz} tools={only.tool_calls} status={only.status}
+          waiting={(only.proposals ?? []).some((p) => p.status === "pending")} />
         <Proposals message={only} canWrite={canWrite} onDecided={onDecided} />
       </div>
     );
@@ -256,8 +253,9 @@ export default function ChatIsland({ threadId: initialThreadId = null, canWrite 
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState(null);
   const [confirmingDelete, setConfirmingDelete] = React.useState(false);
+  const [composerFocus, setComposerFocus] = React.useState(false);
   const [available, setAvailable] = React.useState(null); // null until /chat/status answers
-  const [products, setProducts] = React.useState([]);
+  const [products, setProducts] = React.useState(null); // null until /products answers
   const scrollRef = React.useRef(null);
   const stickRef = React.useRef(true); // follow new content only while the reader is at the bottom
   const threadRef = React.useRef(threadId);
@@ -272,8 +270,8 @@ export default function ChatIsland({ threadId: initialThreadId = null, canWrite 
   // Starter questions built from what is in metis, so each one has an answer.
   const examples = React.useMemo(() => {
     const byName = (a, b) => a.name.localeCompare(b.name);
-    const ours = products.filter((p) => !p.external).sort(byName)[0];
-    const theirs = products.filter((p) => p.external).sort(byName)[0];
+    const ours = (products ?? []).filter((p) => !p.external).sort(byName)[0];
+    const theirs = (products ?? []).filter((p) => p.external).sort(byName)[0];
     return [
       ours && `What could we build next from what ${ours.name} already has?`,
       "Which capabilities are shared by the most products?",
@@ -401,34 +399,44 @@ export default function ChatIsland({ threadId: initialThreadId = null, canWrite 
 
   return (
     <>
-      <style>{`@keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: 0.3 } }`}</style>
+      <style>{`@keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: 0.3 } }
+.chat-thread-picker { width: 220px; }
+@media (max-width: 640px) {
+  .chat-thread-picker { width: 140px; }
+  .chat-label { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+}`}</style>
+      {/* The thread picker already says which thread this is, so the header
+          names one only when there is no picker. On a phone the buttons keep
+          their icons and accessible names but drop their labels, so they fit. */}
       <PageHeader
         title="Chat"
-        meta={activeThread ? `thread: ${activeThread.title}` : "new thread"}
+        meta={threads.length === 0 ? "new thread" : null}
         actions={
-          <>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", flexWrap: "wrap", gap: 8, minWidth: 0, flex: "0 1 auto" }}>
             {canWrite && threadId && (
               <Button size="sm" variant="secondary" onClick={() => switchThread(null)} style={{ gap: 6 }}>
-                <Icon name="plus" size={12} /> New thread
+                <Icon name="plus" size={12} /> <span className="chat-label">New thread</span>
               </Button>
             )}
             {threads.length > 0 && (
-              <Select
-                value={threadId ?? ""}
-                onChange={(e) => switchThread(e.target.value)}
-                aria-label="Thread"
-                style={{ width: 180 }}
-                options={[
-                  { value: "", label: canWrite ? "New thread" : "Pick a thread…" },
-                  ...threads.map((t) => ({ value: t.id, label: t.title })),
-                ]}
-              />
+              <div className="chat-thread-picker">
+                <Select
+                  value={threadId ?? ""}
+                  onChange={(e) => switchThread(e.target.value)}
+                  aria-label="Thread"
+                  title={activeThread?.title}
+                  options={[
+                    { value: "", label: canWrite ? "New thread" : "Pick a thread…" },
+                    ...threads.map((t) => ({ value: t.id, label: t.title })),
+                  ]}
+                />
+              </div>
             )}
             {canWrite && threadId && (
               <DeleteConfirm armed={confirmingDelete} onArm={() => setConfirmingDelete(true)} onCancel={() => setConfirmingDelete(false)} onConfirm={deleteThread} disabled={busy || running}
-                label="Delete thread" confirmLabel={"Delete thread"} />
+                label={<span className="chat-label">Delete thread</span>} confirmLabel={"Delete thread"} />
             )}
-          </>
+          </div>
         }
       />
       <div ref={scrollRef} aria-live="polite" aria-busy={running}
@@ -444,20 +452,42 @@ export default function ChatIsland({ threadId: initialThreadId = null, canWrite 
           )}
           {messages.length === 0 && (
             <div style={{ border: "1px dashed var(--border-default)", borderRadius: "var(--radius-md)", padding: 20, color: "var(--text-secondary)", fontSize: "var(--text-sm)", lineHeight: "var(--leading-body)" }}>
-              Ask about the inventory in plain words. For example:
-              {canWrite && available !== false ? (
-                <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 6, marginTop: 8 }}>
-                  {examples.map((q) => (
-                    <Button key={q} size="sm" variant="secondary" disabled={busy || running} onClick={() => send(q)}
-                      style={{ whiteSpace: "normal", height: "auto", minHeight: 28, padding: "4px 10px", textAlign: "left" }}>{q}</Button>
-                  ))}
-                </div>
+              {canWrite && products?.length === 0 ? (
+                // No product yet: every starter question would spend a paid turn to answer "nothing" (C36).
+                <>Nothing to ask about yet. Chat answers questions about products and their capabilities: add the first one from <a href="/home">Get started</a> on Home.</>
+              ) : canWrite ? (
+                <>
+                  Ask about the inventory in plain words. For example:
+                  {available !== false ? (
+                    <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 6, marginTop: 8 }}>
+                      {examples.map((q) => (
+                        <Button key={q} size="sm" variant="secondary" disabled={busy || running} onClick={() => send(q)}
+                          style={{ whiteSpace: "normal", height: "auto", minHeight: 28, padding: "4px 10px", textAlign: "left" }}>{q}</Button>
+                      ))}
+                    </div>
+                  ) : (
+                    <ul style={{ margin: "8px 0 0", paddingLeft: 18 }}>
+                      {examples.map((q) => <li key={q}>{q}</li>)}
+                    </ul>
+                  )}
+                  <div style={{ marginTop: 10 }}>Agents keep working if you leave this page. Anything they want to change waits for your approval.</div>
+                </>
               ) : (
-                <ul style={{ margin: "8px 0 0", paddingLeft: 18 }}>
-                  {examples.map((q) => <li key={q}>{q}</li>)}
-                </ul>
+                <>
+                  {products?.length === 0 ? (
+                    // A viewer can't add the first product, so no question has an answer yet.
+                    "Nothing to ask about yet. Chat answers questions about products and their capabilities once an editor or admin adds the first product."
+                  ) : (
+                    <>
+                      Chat answers questions about the inventory in plain words, such as:
+                      <ul style={{ margin: "8px 0 0", paddingLeft: 18 }}>
+                        {examples.map((q) => <li key={q}>{q}</li>)}
+                      </ul>
+                    </>
+                  )}
+                  <div style={{ marginTop: 10 }}>Anything the agents want to change waits for an editor or admin to approve it.</div>
+                </>
               )}
-              <div style={{ marginTop: 10 }}>Agents keep working if you leave this page. Anything they want to change waits for your approval.</div>
             </div>
           )}
           {messages.filter((m) => !m.parent_id).map((m) =>
@@ -487,12 +517,15 @@ export default function ChatIsland({ threadId: initialThreadId = null, canWrite 
                 Agents are still working on the last message. You can leave this page; they keep going.
               </div>
             )}
-            <div style={{ display: "flex", alignItems: "flex-end", gap: 8, background: "var(--surface-card)", border: "1px solid var(--border-default)", borderRadius: "var(--radius-lg)", padding: "10px 12px", boxShadow: "var(--shadow-card)" }}>
+            {/* The textarea draws no outline; the box around it shows focus, as ds Input does. */}
+            <div style={{ display: "flex", alignItems: "flex-end", gap: 8, background: "var(--surface-card)", border: `1px solid ${composerFocus ? "var(--border-focus)" : "var(--border-default)"}`, borderRadius: "var(--radius-lg)", padding: "10px 12px", boxShadow: composerFocus ? "var(--shadow-card), var(--ring-focus)" : "var(--shadow-card)", transition: "border-color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out)" }}>
               <textarea
                 rows={1}
                 value={draft}
                 aria-label="Message"
                 placeholder={available === false ? "Chat is unavailable until an AI model is connected" : "Ask about goals, capabilities or features…"}
+                onFocus={() => setComposerFocus(true)}
+                onBlur={() => setComposerFocus(false)}
                 onChange={(e) => setDraft(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !e.shiftKey) {

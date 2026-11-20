@@ -1,16 +1,18 @@
 import React from "react";
 import { PageHeader } from "../shell/PageHeader.jsx";
-import { Button, Dialog, Icon, IconButton, Input, PriorityBadge, Select, StatusBadge, Tabs, DeleteConfirm } from "../../ds";
+import { Button, Dialog, Icon, IconButton, Input, PriorityBadge, Select, StatusBadge, Tabs, Toast, DeleteConfirm } from "../../ds";
 import { api } from "../../lib/api.js";
 import { readParam, useParamRestore, writeParams } from "../../lib/url-state.js";
 import { GoalNetworkView } from "../graph/GoalNetworkView.jsx";
-import { PRIORITY_HINT, count, statusLabel } from "../../lib/words.js";
+import { DONE_WHEN, NEED, PRIORITY_HINT, andList, count, needKey, statusLabel } from "../../lib/words.js";
+import { capabilityCount, deleteEffects } from "../graph/goal-facts.js";
 
 const EMPTY_DRAFT = { goal_type: "product", parent_goal_id: "", title: "", description: "", success_criteria: "", priority: "3", status: "pending" };
 
 export default function GoalsIsland({ canWrite = true }) {
   const [goals, setGoals] = React.useState(null); // null until the first load finishes
-  const [productCounts, setProductCounts] = React.useState({});
+  const [products, setProducts] = React.useState([]);
+  const productById = React.useMemo(() => Object.fromEntries(products.map((p) => [p.id, p])), [products]);
   const [capsByGoal, setCapsByGoal] = React.useState({});
   const [highlight, setHighlight] = React.useState(null); // ?goal=<id>, scrolled to once loaded
   const [view, setView] = React.useState("list"); // ?view=network, read after mount (the server has no URL)
@@ -20,28 +22,28 @@ export default function GoalsIsland({ canWrite = true }) {
   const [saving, setSaving] = React.useState(false);
   const [confirmingDelete, setConfirmingDelete] = React.useState(false);
   const [error, setError] = React.useState(null);
+  const [notice, setNotice] = React.useState(null); // what the last write did
+  const [scrollTo, setScrollTo] = React.useState(null); // a goal to bring into view once rendered
 
   const load = React.useCallback(async () => {
-    const [goalList, products, motivations, capabilities] = await Promise.all([
+    const [goalList, productList, motivations, capabilities] = await Promise.all([
       api("/goals"),
       api("/products"),
       api("/motivations"),
-      api("/capabilities"),
+      api("/capabilities/inventory"),
     ]);
-    // Per goal, the capabilities it motivates, linked by slug.
-    const slugs = new Map(capabilities.map((c) => [c.id, c.slug]));
+    // Per goal, the capabilities it motivates, linked by slug, with whether we have each.
+    const byId = new Map(capabilities.map((c) => [c.id, c]));
     const caps = {};
     for (const m of motivations) {
-      (caps[m.goal_id] ??= []).push({ id: m.capability_id, name: m.capability_name, slug: slugs.get(m.capability_id) });
+      const c = byId.get(m.capability_id);
+      (caps[m.goal_id] ??= []).push({ id: m.capability_id, name: m.capability_name, slug: c?.slug, need: needKey(c) });
     }
     setCapsByGoal(caps);
     setGoals(goalList);
-    // Per goal, the products that serve it, so each goal links to its own product.
-    const byGoal = {};
-    for (const p of products) {
-      if (p.goal_id) (byGoal[p.goal_id] ??= []).push(p);
-    }
-    setProductCounts(byGoal);
+    // Each goal says which product it belongs to (the goals API's product_id);
+    // a delete also needs which products have a goal as theirs (goal_id).
+    setProducts(productList);
   }, []);
 
   React.useEffect(() => {
@@ -64,13 +66,10 @@ export default function GoalsIsland({ canWrite = true }) {
   const unparented = productGoals.filter((g) => !orgIds.has(g.parent_goal_id));
   // A product goal needs an org goal as its parent whenever one exists.
   const needsParent = draft.goal_type === "product" && orgs.length > 0 && !draft.parent_goal_id;
+  // A product goal is for its org goal's product (the goals API's product_id).
+  const draftParent = draft.goal_type === "product" ? orgs.find((o) => o.id === draft.parent_goal_id) : null;
+  const draftOwner = draftParent ? productById[draftParent.product_id] : null;
 
-  // An org goal across its product goals: distinct capabilities linked to any of them.
-  const orgCapabilityCount = (org) => {
-    const ids = new Set((capsByGoal[org.id] ?? []).map((c) => c.id));
-    for (const g of productGoals) if (g.parent_goal_id === org.id) for (const c of capsByGoal[g.id] ?? []) ids.add(c.id);
-    return ids.size;
-  };
 
   const openNew = () => {
     setDraft({ ...EMPTY_DRAFT, goal_type: orgs.length === 0 ? "org" : "product" });
@@ -99,8 +98,9 @@ export default function GoalsIsland({ canWrite = true }) {
     setSaving(true);
     setError(null);
     try {
+      let saved;
       if (dialog.mode === "new") {
-        await api("/goals", {
+        saved = await api("/goals", {
           method: "POST",
           body: {
             goal_type: draft.goal_type,
@@ -112,7 +112,7 @@ export default function GoalsIsland({ canWrite = true }) {
           },
         });
       } else {
-        await api(`/goals/${dialog.goal.id}`, {
+        saved = await api(`/goals/${dialog.goal.id}`, {
           method: "PATCH",
           body: {
             title: draft.title.trim(),
@@ -124,9 +124,13 @@ export default function GoalsIsland({ canWrite = true }) {
           },
         });
       }
+      const created = dialog.mode === "new";
       setDialog(null);
       setDraft(EMPTY_DRAFT);
       await load();
+      setNotice({ tone: "ok", title: `${created ? "Created" : "Saved"} ${saved.display_id}`, detail: saved.title });
+      setHighlight(saved.id);
+      setScrollTo(saved.id);
     } catch (e) {
       setError(String(e.message));
     } finally {
@@ -134,13 +138,27 @@ export default function GoalsIsland({ canWrite = true }) {
     }
   };
 
+  // Arming reloads, so the note names what the delete removes now, not at page load.
+  const armDelete = () => {
+    setConfirmingDelete(true);
+    load().catch((e) => setError(String(e.message)));
+  };
+
   const remove = async () => {
     setSaving(true);
     setError(null);
     try {
-      await api(`/goals/${dialog.goal.id}`, { method: "DELETE" });
+      const gone = dialog.goal;
+      const { capabilities, products: left, children } = deleteEffects(gone, goals, capsByGoal, products);
+      await api(`/goals/${gone.id}`, { method: "DELETE" });
       setDialog(null);
       await load();
+      const did = [
+        capabilities.length > 0 && `Unlinked ${andList(capabilities.map((c) => c.name))}.`,
+        left.length > 0 && `${andList(left.map((p) => p.name))} ${left.length === 1 ? "has" : "have"} no goal now.`,
+        children.length > 0 && `${andList(children.map((g) => g.display_id))} ${children.length === 1 ? "is" : "are"} no longer under an org goal.`,
+      ].filter(Boolean);
+      setNotice({ tone: "ok", title: `Deleted ${gone.display_id}`, detail: [gone.title, ...did].join(" ") });
     } catch (e) {
       setError(String(e.message));
       setConfirmingDelete(false);
@@ -162,11 +180,22 @@ export default function GoalsIsland({ canWrite = true }) {
     writeParams({ goal: id }, { push: true });
   };
 
+  React.useEffect(() => {
+    if (!scrollTo) return;
+    document.getElementById(`goal-${scrollTo}`)?.scrollIntoView({ block: "center", behavior: "smooth" });
+    setScrollTo(null);
+  }, [scrollTo, goals]);
+  React.useEffect(() => {
+    if (!notice) return undefined;
+    const t = setTimeout(() => setNotice(null), 6000);
+    return () => clearTimeout(t);
+  }, [notice]);
+
   const highlightStyle = (id) => (id === highlight ? { outline: "2px solid var(--accent)", outlineOffset: 2 } : null);
 
   const editButton = (goal) =>
     canWrite ? (
-      <IconButton size="sm" label="Edit goal"
+      <IconButton size="sm" label={`Edit ${goal.title}`}
         onClick={(e) => { e.preventDefault(); e.stopPropagation(); openEdit(goal); }}>
         <Icon name="pencil" size={13} />
       </IconButton>
@@ -215,18 +244,24 @@ export default function GoalsIsland({ canWrite = true }) {
           <div style={{ display: "flex", flexDirection: "column", gap: 28 }}>
             {orgs.map((org) => (
               <div key={org.id}>
-                <div id={`goal-${org.id}`} style={{ background: "var(--surface-inverse)", borderRadius: "var(--radius-lg)", padding: "20px 24px", display: "flex", alignItems: "center", gap: 16, ...highlightStyle(org.id) }}>
+                <div id={`goal-${org.id}`} style={{ background: "var(--surface-inverse)", borderRadius: "var(--radius-lg)", padding: "20px 24px", display: "flex", flexWrap: "wrap", alignItems: "center", gap: 16, ...highlightStyle(org.id) }}>
                   <Icon name="target" size={20} style={{ color: "var(--aegean-4)" }} />
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: "var(--tracking-caps)", textTransform: "uppercase", color: "var(--aegean-4)" }}>org goal · {org.display_id}</div>
+                  <div style={{ flex: "1 1 220px", minWidth: 0 }}>
+                    <div style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-2xs)", letterSpacing: "var(--tracking-caps)", textTransform: "uppercase", color: "var(--ink-3)" }}>org goal · {org.display_id}</div>
                     <div style={{ fontFamily: "var(--font-display)", fontSize: "var(--text-xl)", fontWeight: "var(--weight-semibold)", color: "var(--text-inverse)", letterSpacing: "var(--tracking-tight)" }}>{org.title}</div>
+                    {productById[org.product_id] && (
+                      <div style={{ fontSize: "var(--text-xs)", color: "var(--ink-3)", marginTop: 2 }}>
+                        For <a href={`/products?product=${org.product_id}`} style={{ color: "var(--aegean-4)", textDecoration: "underline" }}>{productById[org.product_id].name}</a>
+                      </div>
+                    )}
+                    {org.description && <div style={{ fontSize: "var(--text-sm)", color: "var(--ink-3)", marginTop: 4 }}>{org.description}</div>}
+                    {org.success_criteria && <div style={{ fontSize: "var(--text-xs)", color: "var(--ink-3)", marginTop: 2 }}>{DONE_WHEN}: {org.success_criteria}</div>}
+                    {/* The same count the Network panel shows (goal-facts.js). */}
+                    <div style={{ fontSize: "var(--text-xs)", color: "var(--ink-3)", marginTop: 4 }}>{capabilityCount(org, goals, capsByGoal).text}</div>
                   </div>
-                  <span style={{ fontSize: "var(--text-xs)", color: "var(--aegean-4)", whiteSpace: "nowrap" }}>
-                    {count(orgCapabilityCount(org), "capability", "capabilities")} linked
-                  </span>
                   <StatusBadge status={org.status} />
                   {canWrite && (
-                    <IconButton size="sm" label="Edit goal" style={{ color: "var(--aegean-4)" }}
+                    <IconButton size="sm" label={`Edit ${org.title}`} style={{ color: "var(--aegean-4)" }}
                       onClick={() => openEdit(org)}>
                       <Icon name="pencil" size={13} />
                     </IconButton>
@@ -234,7 +269,7 @@ export default function GoalsIsland({ canWrite = true }) {
                 </div>
                 <GoalList
                   goals={productGoals.filter((g) => g.parent_goal_id === org.id)}
-                  productCounts={productCounts}
+                  productById={productById}
                   capsByGoal={capsByGoal}
                   highlightStyle={highlightStyle}
                   editButton={editButton}
@@ -248,12 +283,18 @@ export default function GoalsIsland({ canWrite = true }) {
                 <div style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>
                   These product goals aren't under an org goal. Edit one to choose its parent.
                 </div>
-                <GoalList goals={unparented} productCounts={productCounts} capsByGoal={capsByGoal} highlightStyle={highlightStyle} editButton={editButton} canWrite={canWrite} />
+                <GoalList goals={unparented} productById={productById} capsByGoal={capsByGoal} highlightStyle={highlightStyle} editButton={editButton} canWrite={canWrite} />
               </div>
             )}
           </div>
         </div>
       </div>
+      )}
+
+      {notice && (
+        <div style={{ position: "fixed", right: 20, bottom: 20, zIndex: 200 }}>
+          <Toast {...notice} onDismiss={() => setNotice(null)} />
+        </div>
       )}
 
       <Dialog
@@ -263,16 +304,22 @@ export default function GoalsIsland({ canWrite = true }) {
         footer={
           <>
             {dialog?.mode === "edit" && (
-              <DeleteConfirm armed={confirmingDelete} onArm={() => setConfirmingDelete(true)} onCancel={() => setConfirmingDelete(false)} onConfirm={remove} disabled={saving}
+              <DeleteConfirm armed={confirmingDelete} onArm={armDelete} onCancel={() => setConfirmingDelete(false)} onConfirm={remove} disabled={saving}
                 label="Delete" confirmLabel={"Delete goal"} style={{ marginRight: "auto" }} />
             )}
-            <Button size="sm" variant="secondary" onClick={() => setDialog(null)}>Cancel</Button>
-            <Button size="sm" variant="accent" disabled={saving || !draft.title.trim() || needsParent} onClick={save}>
-              {dialog?.mode === "new" ? "Create goal" : "Save"}
-            </Button>
+            {/* While a delete is armed, Keep is the one way back: Cancel would do the same, and Save is another act. */}
+            {!confirmingDelete && <>
+              <Button size="sm" variant="secondary" onClick={() => setDialog(null)}>Cancel</Button>
+              <Button size="sm" variant="accent" disabled={saving || !draft.title.trim() || needsParent} onClick={save}>
+                {dialog?.mode === "new" ? "Create goal" : "Save"}
+              </Button>
+            </>}
           </>
         }
       >
+        {dialog?.mode === "edit" && confirmingDelete && (
+          <DeleteWhat goal={dialog.goal} effects={deleteEffects(dialog.goal, goals ?? [], capsByGoal, products)} />
+        )}
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
           {error && (
             <div role="alert" style={{ fontSize: "var(--text-sm)", color: "var(--danger-fg)" }}>{error}</div>
@@ -299,6 +346,17 @@ export default function GoalsIsland({ canWrite = true }) {
               ]}
             />
           )}
+          {/* A goal has no product field: it is a product's when that product has it, or the
+              org goal above it, as its goal (the goals API's product_id). Say so where goals are made. */}
+          {(dialog?.mode === "new" || (dialog?.goal && !dialog.goal.product_id)) && (
+            <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", marginTop: -6 }}>
+              {draftOwner
+                ? `For ${draftOwner.name}, like ${draftParent.display_id}.`
+                : <>Not for a product yet. {draft.goal_type === "org"
+                  ? "To say which product it's for, choose it as that product's goal"
+                  : "It takes its org goal's product, or choose it as a product's goal"} under <a href="/products">Products</a> → Edit.</>}
+            </div>
+          )}
           <Input
             label="Title"
             value={draft.title}
@@ -311,7 +369,7 @@ export default function GoalsIsland({ canWrite = true }) {
             onChange={(e) => setDraft({ ...draft, description: e.target.value })}
           />
           <Input
-            label="Success criteria"
+            label={DONE_WHEN}
             value={draft.success_criteria}
             onChange={(e) => setDraft({ ...draft, success_criteria: e.target.value })}
             placeholder="Jira, Linear, Notion round-trip by Q4"
@@ -338,23 +396,54 @@ export default function GoalsIsland({ canWrite = true }) {
   );
 }
 
-function GoalList({ goals, productCounts, capsByGoal, highlightStyle, editButton, emptyText, canWrite }) {
+// Shown while a delete is armed: every row the delete removes or changes, by name.
+function DeleteWhat({ goal, effects: { capabilities, products, children } }) {
+  const list = { margin: 0, paddingLeft: 18, maxHeight: 160, overflowY: "auto", display: "flex", flexDirection: "column", gap: 2 };
+  const nothing = capabilities.length === 0 && products.length === 0 && children.length === 0;
+  return (
+    <div role="note" style={{ marginBottom: 14, padding: 12, border: "1px solid var(--border-default)", borderRadius: "var(--radius-sm)", display: "flex", flexDirection: "column", gap: 8, fontSize: "var(--text-sm)", color: "var(--text-body)" }}>
+      {nothing && <div>No capability, product or goal is linked to {goal.display_id}, so the delete removes only the goal.</div>}
+      {capabilities.length > 0 && <>
+        <div>Deleting {goal.display_id} also removes its links to {count(capabilities.length, "capability", "capabilities")}:</div>
+        <ul style={list}>{capabilities.map((c) => <li key={c.id}>{c.name}</li>)}</ul>
+      </>}
+      {products.length > 0 && (
+        <div>{andList(products.map((p) => p.name))} {products.length === 1 ? "has" : "have"} it as {products.length === 1 ? "its" : "their"} goal, and will have none.</div>
+      )}
+      {children.length > 0 && <>
+        <div>{children.length === 1 ? "This product goal stays" : `These ${children.length} product goals stay`}, no longer under an org goal:</div>
+        <ul style={list}>{children.map((g) => <li key={g.id}>{g.display_id} {g.title}</li>)}</ul>
+      </>}
+      {!nothing && <div style={{ color: "var(--text-secondary)" }}>The capabilities, products and other goals stay.</div>}
+    </div>
+  );
+}
+
+function GoalList({ goals, productById, capsByGoal, highlightStyle, editButton, emptyText, canWrite }) {
   return (
     <>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "16px 0 10px", fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: "var(--tracking-caps)", textTransform: "uppercase", color: "var(--text-secondary)" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "16px 0 10px", fontFamily: "var(--font-mono)", fontSize: "var(--text-2xs)", letterSpacing: "var(--tracking-caps)", textTransform: "uppercase", color: "var(--text-secondary)" }}>
         <span style={{ width: 14, height: 1, background: "var(--ink-3)" }} />product goals · {goals.length}
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         {goals.map((g) => {
-          const served = productCounts[g.id] || [];
+          const owner = productById[g.product_id];
           const caps = capsByGoal[g.id] || [];
           return (
-            <div key={g.id} id={`goal-${g.id}`} style={{ display: "flex", alignItems: "center", gap: 14, background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", boxShadow: "var(--shadow-card)", padding: "14px 18px", ...highlightStyle(g.id) }}>
+            <div key={g.id} id={`goal-${g.id}`} style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 14, background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", boxShadow: "var(--shadow-card)", padding: "14px 18px", ...highlightStyle(g.id) }}>
               <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-secondary)", width: 46 }}>{g.display_id}</span>
-              <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ flex: "1 1 220px", minWidth: 0 }}>
                 <div style={{ fontSize: "var(--text-md)", fontWeight: "var(--weight-semibold)", color: "var(--text-heading)" }}>{g.title}</div>
+                {owner && (
+                  <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", marginTop: 2 }}>
+                    For <a href={`/products?product=${owner.id}`}>{owner.name}</a>
+                  </div>
+                )}
+                {g.description && (
+                  <div style={{ fontSize: "var(--text-sm)", color: "var(--text-body)", marginTop: 2 }}>{g.description}</div>
+                )}
                 {g.success_criteria && (
-                  <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", marginTop: 2 }}>Success: {g.success_criteria}</div>
+                  <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", marginTop: 2 }}>{DONE_WHEN}: {g.success_criteria}</div>
                 )}
                 <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", marginTop: 4, display: "flex", gap: 6, flexWrap: "wrap" }}>
                   {caps.length === 0 ? (
@@ -363,18 +452,21 @@ function GoalList({ goals, productCounts, capsByGoal, highlightStyle, editButton
                     <>
                       <span>{count(caps.length, "capability", "capabilities")}:</span>
                       {caps.map((c, i) => (
-                        <a key={c.id} href={`/capabilities/${c.slug}`}>{c.name}{i < caps.length - 1 ? "," : ""}</a>
+                        <a key={c.id} href={`/capabilities/${c.slug}`}>
+                          {c.name}
+                          {c.need !== "ours" && <span title={NEED[c.need].hint} style={{ color: "var(--text-secondary)" }}> ({NEED[c.need].label})</span>}
+                          {i < caps.length - 1 ? "," : ""}
+                        </a>
                       ))}
                     </>
                   )}
                 </div>
               </div>
-              {g.priority != null && <PriorityBadge priority={g.priority} rationale={PRIORITY_HINT} />}
-              {served.map((p) => (
-                <a key={p.id} href={`/products?product=${p.id}`} style={{ fontSize: "var(--text-xs)", whiteSpace: "nowrap" }}>{p.name}</a>
-              ))}
-              <StatusBadge status={g.status} />
-              {editButton(g)}
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginLeft: "auto" }}>
+                {g.priority != null && <PriorityBadge priority={g.priority} rationale={PRIORITY_HINT} />}
+                <StatusBadge status={g.status} />
+                {editButton(g)}
+              </div>
             </div>
           );
         })}

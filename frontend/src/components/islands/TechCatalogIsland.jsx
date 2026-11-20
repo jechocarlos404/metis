@@ -30,7 +30,11 @@ import { count } from "../../lib/words.js";
 const PAGE = 50;
 
 const COLUMNS = "minmax(180px,1.4fr) 96px 76px 110px minmax(200px,1.6fr) 96px";
+// Narrower than the full row (780px): name over what it is, used by over stance.
+const NARROW_COLUMNS = "minmax(0,1fr) auto";
 const EXPOSURE_COLUMNS = "minmax(180px,1.4fr) 90px minmax(190px,1fr) 96px 130px";
+// No stack exists, so no slot can require anything: the column goes.
+const EXPOSURE_COLUMNS_NO_STACKS = "minmax(180px,1.4fr) 90px minmax(190px,1fr) 96px";
 
 const ADOPTION_LABEL = { none: "no stance" };
 
@@ -90,7 +94,7 @@ function Skeleton({ columns, rows = 12 }) {
 
 const EMPTY = { margin: 16, padding: "var(--space-4)", border: "1px dashed var(--border-default)", borderRadius: "var(--radius-sm)", color: "var(--text-secondary)", fontSize: "var(--text-sm)" };
 
-export default function TechCatalogIsland({ initialView = "catalog", initialQuery = "", initialKind = "", initialLayer = "", initialAdoption = "" }) {
+export default function TechCatalogIsland({ initialView = "catalog", initialQuery = "", initialKind = "", initialLayer = "", initialAdoption = "", initialProduct = "", canWrite = false }) {
   const [view, setView] = React.useState(initialView);
   const [q, setQ] = React.useState(initialQuery);
   const [kind, setKind] = React.useState(initialKind);
@@ -99,10 +103,29 @@ export default function TechCatalogIsland({ initialView = "catalog", initialQuer
   const [offset, setOffset] = React.useState(0);
   const [page, setPage] = React.useState(null);
   const [exposure, setExposure] = React.useState(null);
-  const [techTotal, setTechTotal] = React.useState(null);
+  // A product slug (exposure's own `?product=`): its technologies only.
+  const [product, setProduct] = React.useState(initialProduct);
+  const [productName, setProductName] = React.useState(null);
+  // Every product again. The count in hand is the product's, so it goes in
+  // the same render: kept, a product with none would read "No technologies yet".
+  const everyProduct = () => {
+    setLifecycle(null);
+    setProduct("");
+  };
+  const [lifecycle, setLifecycle] = React.useState(null); // {technologies, unknown}
+  const [hasStacks, setHasStacks] = React.useState(false);
   const [windowDays, setWindowDays] = React.useState(180);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState(null);
+  // The catalog card's own width, measured after mount (server-rendered island).
+  const [cardEl, setCardEl] = React.useState(null);
+  const [narrow, setNarrow] = React.useState(false);
+  React.useEffect(() => {
+    if (!cardEl) return undefined;
+    const observer = new ResizeObserver(() => setNarrow(cardEl.offsetWidth < 780));
+    observer.observe(cardEl);
+    return () => observer.disconnect();
+  }, [cardEl]);
 
   // The active view and its filters live in the URL so a resolved screen is
   // linkable — the same address the API hands back in `href`.
@@ -114,8 +137,9 @@ export default function TechCatalogIsland({ initialView = "catalog", initialQuer
     set("kind", kind);
     set("layer", layer);
     set("adoption", adoption);
+    set("product", view === "exposure" ? product : "");
     window.history.replaceState(null, "", url);
-  }, [view, q, kind, layer, adoption]);
+  }, [view, q, kind, layer, adoption, product]);
 
   React.useEffect(() => {
     if (view !== "catalog") return;
@@ -128,7 +152,9 @@ export default function TechCatalogIsland({ initialView = "catalog", initialQuer
     if (adoption) params.set("adoption", adoption);
     const timer = setTimeout(() => {
       api(`/tech?${params}`)
-        .then((p) => live && setPage(p))
+        // Whether this answer was filtered, so a cleared filter can't read an
+        // empty filtered answer as "no technologies at all".
+        .then((p) => live && setPage({ ...p, filtered: Boolean(q || kind || layer || adoption) }))
         .catch((e) => live && setError(e.detail ?? e.message))
         .finally(() => live && setLoading(false));
     }, 200); // debounce, per the spec
@@ -142,32 +168,59 @@ export default function TechCatalogIsland({ initialView = "catalog", initialQuer
     if (view !== "exposure") return;
     let live = true;
     setLoading(true);
-    // The catalog size tells "nothing recorded" apart from "nothing at risk".
-    Promise.all([api(`/exposure?window_days=${windowDays}`), api("/tech?limit=1")])
-      .then(([e, t]) => {
-        if (!live) return;
-        setExposure(e);
-        setTechTotal(t.total);
+    // "Nothing at risk" only means something for technologies with an
+    // end-of-life date or a maintainer count; the rest can never show up here.
+    const only = product ? `product=${encodeURIComponent(product)}` : "";
+    (product ? api("/products").then((ps) => ps.find((x) => x.slug === product)?.name) : Promise.resolve(null))
+      .then((name) => {
+        // A link to a product since removed: every product, as Features does.
+        if (product && !name) return live && everyProduct();
+        return Promise.all([
+          api(`/exposure?window_days=${windowDays}${only && `&${only}`}`),
+          api(`/tech/lifecycle${only && `?${only}`}`),
+          api("/tech/presence"),
+        ]).then(([e, l, p]) => {
+          if (!live) return;
+          setExposure(e);
+          setLifecycle(l);
+          setHasStacks(p.stacks === true);
+          setProductName(name);
+        });
       })
       .catch((e) => live && setError(e.detail ?? e.message))
       .finally(() => live && setLoading(false));
     return () => {
       live = false;
     };
-  }, [view, windowDays]);
+  }, [view, windowDays, product]);
 
   const total = page?.total ?? 0;
   const rows = page?.rows ?? [];
   const facets = page?.facet_counts ?? {};
   const exposed = exposure?.answer.length ?? 0;
+  const techTotal = lifecycle?.technologies ?? null;
+  const unknown = lifecycle?.unknown ?? 0;
+  const judged = (techTotal ?? 0) - unknown;
+  // Nothing to filter or sort: say so, without the filters and table around
+  // it. Judged from an unfiltered answer, never from the filters on screen.
+  const noTech = view === "catalog" ? page != null && total === 0 && !page.filtered : techTotal === 0 && !product;
+  const noneUsed = view === "exposure" && product && techTotal === 0; // the product records none
+  const noTechWords = canWrite
+    ? <>No technologies yet. They come in with a product's seed file, imported from <a href="/settings">Settings → Seed files</a>.</>
+    : "No technologies yet. They appear once an editor imports a product's seed file that lists them.";
+  const exposureColumns = hasStacks ? EXPOSURE_COLUMNS : EXPOSURE_COLUMNS_NO_STACKS;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0, overflowY: "auto" }}>
       <PageHeader
-        title="Tech"
+        title="Technology"
         meta={
           view === "exposure"
-            ? `${exposed} at risk · ${formatAsOf(exposure?.as_of)}`
+            ? lifecycle == null ? "loading" : [
+                noneUsed ? "no technology recorded" : exposed === 0 && techTotal > 0 && judged === 0 ? "no lifecycle data" : `${exposed} at risk`,
+                unknown > 0 && !(exposed === 0 && judged === 0) && `${unknown} without lifecycle data`,
+                formatAsOf(exposure?.as_of),
+              ].filter(Boolean).join(" · ")
             : loading ? "loading" : count(total, "technology", "technologies")
         }
       />
@@ -181,7 +234,11 @@ export default function TechCatalogIsland({ initialView = "catalog", initialQuer
         </div>
       )}
 
-      {view === "catalog" ? (
+      {noTech ? (
+        <div style={{ padding: "var(--space-5)" }}>
+          <div style={{ ...EMPTY, margin: 0 }}>{noTechWords}</div>
+        </div>
+      ) : view === "catalog" ? (
         <div style={{ padding: "var(--space-5)", display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
           <Input
             placeholder="Search by name"
@@ -199,43 +256,60 @@ export default function TechCatalogIsland({ initialView = "catalog", initialQuer
             </div>
           </details>
 
-          <div style={{ ...CARD, overflow: "hidden" }}>
+          <div ref={setCardEl} style={{ ...CARD, overflow: "hidden" }}>
             <div style={SCROLL_X}>
-              <div style={{ minWidth: 780 }}>
-                <div style={{ display: "grid", gridTemplateColumns: COLUMNS, gap: 12, padding: "8px 16px", background: "var(--surface-inset)", borderBottom: "1px solid var(--border-hairline)", ...MICRO }}>
-                  <span>Name</span><span>kind</span><span>layer</span><span>stance</span><span>satisfies</span><span>used by</span>
+              <div style={{ minWidth: narrow ? 0 : 780 }}>
+                <div style={{ display: "grid", gridTemplateColumns: narrow ? NARROW_COLUMNS : COLUMNS, gap: 12, padding: "8px 16px", background: "var(--surface-inset)", borderBottom: "1px solid var(--border-hairline)", ...MICRO }}>
+                  {narrow
+                    ? <><span>Name</span><span>used by</span></>
+                    : <><span>Name</span><span>kind</span><span>layer</span><span>stance</span><span>satisfies</span><span>used by</span></>}
                 </div>
                 {loading ? (
-                  <Skeleton columns={COLUMNS} />
+                  <Skeleton columns={narrow ? NARROW_COLUMNS : COLUMNS} />
                 ) : rows.length === 0 ? (
-                  <div style={EMPTY}>
-                    {q || kind || layer || adoption
-                      ? "No technology matches these filters."
-                      : "No technologies recorded yet. They appear here once they're added through the metis API."}
-                  </div>
+                  <div style={EMPTY}>No technology matches these filters.</div>
                 ) : (
-                  rows.map((r) => (
+                  rows.map((r) => {
+                    const name = <span title={r.slug} style={{ fontSize: "var(--text-sm)", color: "var(--text-heading)", overflow: "hidden", textOverflow: "ellipsis" }}>{r.name}</span>;
+                    const stance = r.adoption
+                      ? <Badge tone={STANCE_TONE[r.adoption]}><span title={r.adoption}>{r.adoption}</span></Badge>
+                      : <span style={{ ...MONO, color: "var(--text-secondary)" }}>—</span>;
+                    const satisfies = r.satisfies.join(", ") || "—";
+                    const usedBy = <span style={MONO}>{count(r.used_by, "product")}</span>;
+                    return (
                     <a
                       key={r.id}
                       href={`/tech/${r.slug}`}
-                      style={{ display: "grid", gridTemplateColumns: COLUMNS, gap: 12, padding: "10px 16px", borderBottom: "1px solid var(--border-hairline)", textDecoration: "none", alignItems: "center" }}
+                      style={{ display: "grid", gridTemplateColumns: narrow ? NARROW_COLUMNS : COLUMNS, gap: 12, padding: "10px 16px", borderBottom: "1px solid var(--border-hairline)", textDecoration: "none", alignItems: "center" }}
                     >
-                      <span title={r.slug} style={{ fontSize: "var(--text-sm)", color: "var(--text-heading)", overflow: "hidden", textOverflow: "ellipsis" }}>{r.name}</span>
-                      <span style={MONO}>{r.kind}</span>
-                      <span style={MONO}>{r.layer ?? "—"}</span>
-                      <span>
-                        {r.adoption ? (
-                          <Badge tone={STANCE_TONE[r.adoption]}><span title={r.adoption}>{r.adoption}</span></Badge>
-                        ) : (
-                          <span style={{ ...MONO, color: "var(--text-secondary)" }}>—</span>
-                        )}
-                      </span>
-                      <span style={{ ...MONO, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {r.satisfies.join(", ") || "—"}
-                      </span>
-                      <span style={MONO}>{count(r.used_by, "product")}</span>
+                      {narrow ? (
+                        <>
+                          <span style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
+                            {name}
+                            <span style={{ ...MONO, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={satisfies}>
+                              {[r.kind, r.layer, r.satisfies.length ? satisfies : null].filter(Boolean).join(" · ")}
+                            </span>
+                          </span>
+                          <span style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
+                            {usedBy}
+                            {r.adoption && stance}
+                          </span>
+                        </>
+                      ) : (
+                        <>
+                          {name}
+                          <span style={MONO}>{r.kind}</span>
+                          <span style={MONO}>{r.layer ?? "—"}</span>
+                          <span>{stance}</span>
+                          <span title={satisfies} style={{ ...MONO, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {satisfies}
+                          </span>
+                          {usedBy}
+                        </>
+                      )}
                     </a>
-                  ))
+                    );
+                  })
                 )}
               </div>
             </div>
@@ -275,33 +349,43 @@ export default function TechCatalogIsland({ initialView = "catalog", initialQuer
 
           <p style={{ margin: 0, fontSize: "var(--text-sm)", color: "var(--text-secondary)", maxWidth: "72ch", textWrap: "pretty" }}>
             Technologies that reach end of life in this window, are marked
-            deprecated or banned, or have one maintainer. Those that the most required slots use come first.
+            deprecated or banned, or have one maintainer. {hasStacks ? "Those that the most required slots use come first." : "Those that the most products use come first."}
           </p>
+          {product && (
+            <p style={{ margin: 0, fontSize: "var(--text-sm)", color: "var(--text-body)" }}>
+              Only the technologies {productName ?? product} uses; the counts beside each are across every product.{" "}
+              <a href="/tech?view=exposure" onClick={(e) => { e.preventDefault(); everyProduct(); }}>Show every product</a>
+            </p>
+          )}
 
           <div style={{ ...CARD, overflow: "hidden" }}>
             <div style={SCROLL_X}>
               <div style={{ minWidth: 680 }}>
-                <div style={{ display: "grid", gridTemplateColumns: EXPOSURE_COLUMNS, gap: 12, padding: "8px 16px", background: "var(--surface-inset)", borderBottom: "1px solid var(--border-hairline)", ...MICRO }}>
-                  <span>technology</span><span>version</span><span>why</span><span>products</span><span>required slots</span>
+                <div style={{ display: "grid", gridTemplateColumns: exposureColumns, gap: 12, padding: "8px 16px", background: "var(--surface-inset)", borderBottom: "1px solid var(--border-hairline)", ...MICRO }}>
+                  <span>technology</span><span>version</span><span>why</span><span>products</span>{hasStacks && <span>required slots</span>}
                 </div>
                 {loading ? (
-                  <Skeleton columns={EXPOSURE_COLUMNS} rows={6} />
+                  <Skeleton columns={exposureColumns} rows={6} />
                 ) : exposed === 0 ? (
                   <div style={EMPTY}>
-                    {techTotal === 0
-                      ? "No technologies recorded, so nothing to check."
-                      : `Nothing expires or loses support within ${windowDays} days.`}
+                    {noneUsed
+                        ? `No technology is recorded as used by ${productName ?? product}, so this can't say whether anything it runs on is at risk.`
+                        : judged === 0
+                        ? `No end-of-life dates or maintainer counts are recorded for ${techTotal === 1 ? "this technology" : `these ${techTotal} technologies`}, so this can't tell whether any is at risk.`
+                        : `Nothing expires or loses support within ${windowDays} days among the ${count(judged, "technology", "technologies")} with an end-of-life date or maintainer count.${unknown > 0 ? ` The other ${unknown} have neither recorded.` : ""}`}
                   </div>
                 ) : (
                   exposure.answer.map((r) => (
-                    <a key={r.tech} href={`/tech/${r.tech}`} style={{ display: "grid", gridTemplateColumns: EXPOSURE_COLUMNS, gap: 12, padding: "10px 16px", borderBottom: "1px solid var(--border-hairline)", textDecoration: "none", alignItems: "center" }}>
+                    <a key={r.tech} href={`/tech/${r.tech}`} style={{ display: "grid", gridTemplateColumns: exposureColumns, gap: 12, padding: "10px 16px", borderBottom: "1px solid var(--border-hairline)", textDecoration: "none", alignItems: "center" }}>
                       <span style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-sm)", color: "var(--text-heading)" }}>{r.tech}</span>
                       <span style={MONO}>{r.version ?? "—"}</span>
                       <span title={r.reason} data-raw={r.reason} style={{ fontSize: "var(--text-xs)", color: "var(--text-body)" }}>{reasonWords(r.reason)}</span>
                       <span style={MONO}>{r.products}</span>
-                      <span style={{ ...MONO, color: r.required_slots > 0 ? "var(--danger-fg)" : "var(--text-secondary)" }}>
-                        {r.required_slots}
-                      </span>
+                      {hasStacks && (
+                        <span style={{ ...MONO, color: r.required_slots > 0 ? "var(--danger-fg)" : "var(--text-secondary)" }}>
+                          {r.required_slots}
+                        </span>
+                      )}
                     </a>
                   ))
                 )}

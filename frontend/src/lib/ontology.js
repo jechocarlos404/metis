@@ -64,7 +64,7 @@ export const MICRO = {
   fontSize: "var(--text-2xs)",
   letterSpacing: "var(--tracking-caps)",
   textTransform: "uppercase",
-  color: "var(--text-disabled)",
+  color: "var(--text-secondary)",
 };
 
 /** Machine values rendered in place: ids, slugs, statuses, enum values. */

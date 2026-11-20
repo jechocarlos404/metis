@@ -25,6 +25,7 @@ from app.schemas.work import TicketCreate, TicketUpdate
 from app.services import capabilities as capability_service
 from app.services import decomposition as decomposition_service
 from app.services import features as feature_service
+from app.services import goals as goal_service
 from app.services import search as search_service
 from app.services import strategies as strategy_service
 from app.services import tickets as ticket_service
@@ -63,9 +64,20 @@ async def _resolve(session, model, ref: str, prefix: str, name_column=None):
         if obj is not None:
             return obj
     if name_column is not None:
-        obj = await session.scalar(select(model).where(name_column.ilike(f"%{ref}%")).limit(1))
-        if obj is not None:
-            return obj
+        # The exact name first, then a name only one row contains. Several
+        # rows containing it is refused with their names, never picked: an
+        # answer about "Tagomoto Website" is not an answer about "Tagomoto".
+        exact = (await session.scalars(select(model).where(func.lower(name_column) == ref.lower()))).all()
+        if len(exact) == 1:
+            return exact[0]
+        near = (await session.scalars(
+            select(model).where(name_column.ilike(f"%{ref}%")).order_by(name_column).limit(6)
+        )).all()
+        if len(near) == 1:
+            return near[0]
+        if near:
+            names = ", ".join(f"`{getattr(o, name_column.key)}`" for o in near[:5])
+            raise ToolError(f"`{ref}` fits several {model.__tablename__}: {names}. Use the exact name.")
     raise ToolError(f"Could not resolve `{ref}` to a known {model.__tablename__[:-1]}")
 
 
@@ -160,10 +172,17 @@ def _dump(payload: Any) -> str:
 
 async def list_goals(ctx: ToolContext) -> ToolResult:
     goals = (await ctx.session.scalars(select(Goal).order_by(Goal.seq))).all()
+    code = {g.id: ("OG" if g.goal_type == "org" else "PG") + f"-{g.seq:02d}" for g in goals}
+    owner = await goal_service.owners(ctx.session)
+    names = dict((await ctx.session.execute(select(Product.id, Product.name))).all())
     return ToolResult(_dump([
         {
             "id": str(g.id),
-            "display_id": ("OG" if g.goal_type == "org" else "PG") + f"-{g.seq:02d}",
+            "display_id": code[g.id],
+            # The goal it sits under, so a reply never has to guess the tree.
+            "parent": code.get(g.parent_goal_id),
+            # The product it is for, the same answer every goal card shows.
+            "product": names.get(owner.get(g.id)),
             "goal_type": str(g.goal_type),
             "title": g.title,
             "success_criteria": g.success_criteria,
@@ -176,6 +195,10 @@ async def list_goals(ctx: ToolContext) -> ToolResult:
 
 async def list_products(ctx: ToolContext) -> ToolResult:
     products = (await ctx.session.scalars(select(Product).order_by(Product.seq))).all()
+    goal_codes = {
+        gid: ("OG" if gtype == "org" else "PG") + f"-{seq:02d}"
+        for gid, gtype, seq in (await ctx.session.execute(select(Goal.id, Goal.goal_type, Goal.seq))).all()
+    }
     return ToolResult(_dump([
         {
             "id": str(p.id),
@@ -185,6 +208,7 @@ async def list_products(ctx: ToolContext) -> ToolResult:
             "status": str(p.status),
             "version": p.version,
             "external": p.external,
+            "goal": goal_codes.get(p.goal_id),
         }
         for p in products
     ]))
@@ -220,10 +244,90 @@ async def product_coverage(ctx: ToolContext, features: list[dict]) -> ToolResult
     return ToolResult(report.model_dump_json())
 
 
+#: The product page's verdict words (frontend/src/lib/words.js VERDICT), in
+#: its group order. test_agents pins them to words.js.
+VERDICT = {
+    "buildable": ("buildable", "every capability it needs is ours"),
+    "partly": ("partly known", "everything named so far is ours, but the list is incomplete"),
+    "missing": ("missing", "needs a capability we don't have"),
+    "not_described": ("not described", "nobody has named the capabilities it needs yet"),
+}
+
+
+def _count(n: int, one: str, many: str | None = None) -> str:
+    return f"{n} {one if n == 1 else (many or one + 's')}"
+
+
+def score_text(score) -> str:
+    """A product's score as the product page says it: the four groups, the
+    capabilities we don't have ranked as the API ranks them, and the closest
+    of our products. Text, not JSON, so the model quotes the page's words
+    and numbers instead of paraphrasing or recomputing them."""
+    name = score.product.name
+    groups = {key: getattr(score, key) for key in VERDICT}
+    lines = [
+        f"{name}: {_count(score.total_features, 'feature')} — "
+        + ", ".join(f"{len(groups[k])} {label}" for k, (label, _) in VERDICT.items()) + "."
+    ]
+    report = score.report
+    if report is None:
+        lines.append(f"No capability links known for {name} yet.")
+        return "\n".join(lines)
+    lines.append(
+        f"We have {report.existing} of the {report.needed} capabilities needed · "
+        f"{report.mature} proven (beta or stable)"
+    )
+    if not score.buildable and score.partly:
+        lines.append(
+            "Nothing counts as buildable yet: its features still have capabilities nobody has "
+            "named."
+        )
+    lacking = {
+        f.name: [n.match.name if n.match else n.name for n in f.capabilities if not (n.match and n.match.ours)]
+        for f in report.features
+    }
+    named = {f.name: [n.match.name if n.match else n.name for n in f.capabilities] for f in report.features}
+    for key, (label, hint) in VERDICT.items():
+        names = groups[key]
+        if not names:
+            continue
+        lines += ["", f"{len(names)} {label} — {hint}."]
+        if key == "missing" and score.missing_incomplete:
+            some = f"All {len(names)}" if len(score.missing_incomplete) == len(names) else (
+                f"{len(score.missing_incomplete)} of these")
+            lines.append(f"{some} also have capabilities nobody has named yet, so adding what's named may not be enough.")
+        for n in names:
+            if key == "missing":
+                lines.append(f"- {n} (we don't have: {', '.join(lacking.get(n, []))})")
+            elif key in ("buildable", "partly"):
+                lines.append(f"- {n} (named: {', '.join(named.get(n, []))})")
+            else:
+                lines.append(f"- {n}")
+    gaps = score.missing_capabilities
+    if gaps:
+        lines += ["", f"{_count(len(gaps), 'capability', 'capabilities')} we don't have, most useful first:"]
+        for i, g in enumerate(gaps, 1):
+            covers = f" · the only gap in {g.only_gap} of them" if g.only_gap else ""
+            where = f"also in {', '.join(p.name for p in g.elsewhere)}" if g.elsewhere else "in no other product"
+            lines.append(f"{i}. {g.name} · needed by {_count(g.features, 'feature')}{covers} · {where}")
+    if score.closest_products:
+        lines += ["", "Closest of our products:"]
+        lines += [
+            f"- {c.product.name} has {c.capabilities} of the {report.needed} capabilities {name}'s features name"
+            for c in score.closest_products
+        ]
+    lines += [
+        "",
+        "\"The only gap\" is not \"buildable\": a feature whose capability list is incomplete "
+        "never counts as buildable, so adding its only gap makes it partly known at best.",
+    ]
+    return "\n".join(lines)
+
+
 async def existing_product_coverage(ctx: ToolContext, product: str) -> ToolResult:
     product_obj = await _resolve(ctx.session, Product, product, "PRD", Product.name)
     score = await capability_service.product_coverage(ctx.session, product_obj.id)
-    return ToolResult(score.model_dump_json())
+    return ToolResult(score_text(score))
 
 
 async def list_capabilities(ctx: ToolContext) -> ToolResult:
@@ -368,6 +472,16 @@ async def create_capability(
         )
         capability = await capability_service.create_capability(ctx.session, data)
     except HTTPException as e:
+        # Same name, different case: reuse the one that exists, so later
+        # proposals in the reply that name it still apply.
+        if e.status_code == 409 and isinstance(e.detail, dict):
+            existing = await ctx.session.scalar(
+                select(Capability).where(Capability.slug == e.detail["slug"])
+            )
+            return ToolResult(_dump({
+                **_capability_dict(existing),
+                "note": f"{e.detail['message']}; reused it, nothing was created",
+            }))
         raise ToolError(str(e.detail)) from None
     except ValueError as e:
         raise ToolError(str(e)) from None
@@ -384,6 +498,8 @@ async def update_capability(ctx: ToolContext, capability: str, **fields) -> Tool
         data = CapabilityUpdate(**{k: v for k, v in fields.items() if v not in (None, "")})
         updated = await capability_service.update_capability(ctx.session, capability_obj.id, data)
     except HTTPException as e:
+        if e.status_code == 409 and isinstance(e.detail, dict):
+            raise ToolError(f"{e.detail['message']} (`{e.detail['slug']}`): pick another name") from None
         raise ToolError(str(e.detail)) from None
     except ValueError as e:
         raise ToolError(str(e)) from None
@@ -515,8 +631,16 @@ async def capability_rollup(ctx: ToolContext, capability: str) -> ToolResult:
 
 async def why_feature(ctx: ToolContext, feature: str) -> ToolResult:
     feature_obj = await _resolve(ctx.session, Feature, feature, "FTR", Feature.name)
-    chain = await capability_service.why(ctx.session, feature_obj)
-    return ToolResult(_dump(chain.model_dump(mode="json")))
+    chain = (await capability_service.why(ctx.session, feature_obj)).model_dump(mode="json")
+    # Whose each goal is (services/goals.py), so a shared capability's goals
+    # don't read as this feature's reason.
+    owners = await goal_service.owners(ctx.session)
+    for step in chain["chain"]:
+        if step["kind"] == "goal":
+            owner = owners.get(uuid.UUID(step["id"]))
+            step["product_id"] = str(owner) if owner else None
+    chain["product_id"] = str(feature_obj.product_id) if feature_obj.product_id else None
+    return ToolResult(_dump(chain))
 
 
 async def mvp_cut(ctx: ToolContext, targets: list[str]) -> ToolResult:
@@ -663,8 +787,8 @@ _MVP_CUT_TOOL = _tool(
 SHARED_TOOLS = [
     _tool("capability_inventory", "Everything we can already do: every capability with its maturity, the products whose features realize it, and its feature count — most-reused first. Start here for 'what could we build next'.", {}, [], capability_inventory),
     _tool("product_coverage", "How much of a product idea already exists. features = [{name, capabilities: [capability names]}]. Names match exactly (by slug) — read capability_inventory first and reuse its names; unresolved needs come back with near-name candidates, never a guessed match.", {"features": {"type": "array", "items": {"type": "object", "properties": {"name": _STR, "capabilities": {"type": "array", "items": _STR, "minItems": 1}}, "required": ["name", "capabilities"]}, "minItems": 1}}, ["features"], product_coverage),
-    _tool("existing_product_coverage", "How much of an existing product (typically an external one) we could build from what we already have: which of its features are fully covered by our capabilities, which declare unknown capabilities (never counted — the score is a lower bound), and the missing capabilities.", {"product": _STR}, ["product"], existing_product_coverage),
-    _tool("list_goals", "List all org and product goals with IDs, criteria, priority, status.", {}, [], list_goals),
+    _tool("existing_product_coverage", "How much of an existing product (typically an external one) we could build from what we already have, as the product page says it: its features in four groups that sum to the total — buildable, partly known, missing, not described — then the capabilities we don't have, most useful first, and the closest of our products. Quote its groups, counts, rankings and words; never recompute or re-rank them.", {"product": _STR}, ["product"], existing_product_coverage),
+    _tool("list_goals", "List all org and product goals with IDs, the goal each sits under (parent), the product each is for (product, null when none), criteria, priority, status.", {}, [], list_goals),
     _tool("list_products", "List all products (Specs) with IDs, names, status, version.", {}, [], list_products),
     _tool("list_capabilities", "List the capability map (slow plane): IDs, names, parent, maturity, evidence anchors.", {}, [], list_capabilities),
     _tool("list_features", "List all features in the library with IDs, realized capability, facets, status, priority.", {}, [], list_features),
@@ -689,7 +813,7 @@ AGENT_TOOLS: dict[str, list[tuple[ToolDef, Any]]] = {
     "graph_agent": SHARED_TOOLS + [
         _tool("impact_query", "For a feature: which features transitively depend on it (dependents = blast radius) and what it depends on (dependencies).", {"feature": _STR}, ["feature"], impact_query),
         _tool("capability_rollup", "Derived progress for a capability: pending/in_progress/done counts over every feature realizing it or its sub-capabilities.", {"capability": _STR}, ["capability"], capability_rollup),
-        _tool("why_feature", "Provenance chain for a feature: REALIZES -> capability -> PART_OF* -> MOTIVATES -> goals up to org intent.", {"feature": _STR}, ["feature"], why_feature),
+        _tool("why_feature", "Provenance chain for a feature: REALIZES -> capability -> PART_OF* -> MOTIVATES -> goals up to org intent. Each goal's product_id is the product it belongs to (null: none); only goals whose product_id is the feature's product_id are its reason, the rest share a capability with it.", {"feature": _STR}, ["feature"], why_feature),
         _tool("topo_order", "All features ordered dependencies-first (safe build order). Fails if the graph has a cycle.", {}, [], topo_order),
         _tool("ready_set", "The work frontier: pending features whose precedence dependencies are all done.", {}, [], ready_set),
         _tool("find_cycles", "List dependency cycles in the feature graph.", {}, [], find_cycles),

@@ -5,6 +5,119 @@
 // edge-trim math (forceGraphEngine.js) always agree with what's drawn.
 export const NODE_W = 148;
 export const NODE_H = 56;
+// A goal card is taller: goal names run long, and four lines keep 44 of the
+// 48 real ones whole where two lines kept 4.
+export const GOAL_H = 72;
+export const GOAL_LINES = 4;
+
+// Card names are LABEL_PX graph units tall. Zoomed out past READABLE_SCALE
+// they would draw under 11px, so the engine hides them instead (.graph-far)
+// and the canvas caption names the card you point at, focus or select.
+export const LABEL_PX = 11.5;
+export const READABLE_SCALE = Math.ceil((11 / LABEL_PX) * 100) / 100;
+
+// The px a view keeps clear on each side of the canvas for the controls drawn
+// over it (the key, the zoom buttons): {top, right, bottom, left}. A plain
+// number is the left side alone.
+function frame(inset, w, h) {
+  const { top = 0, right = 0, bottom = 0, left = 0 } = typeof inset === "number" ? { left: inset } : inset ?? {};
+  return { top, left, w: Math.max(1, w - left - right), h: Math.max(1, h - top - bottom) };
+}
+
+/**
+ * The view that shows every node: `bounds` {x0, y0, x1, y1} in graph units
+ * framed in a `w` x `h` px canvas, the `inset` kept clear (see frame()).
+ * Never limited by a zoom floor, so nothing is cut off. Returns {k, x, y}.
+ */
+export function fitTransform(bounds, w, h, inset = 0, maxK = 2.5) {
+  const f = frame(inset, w, h);
+  const k = Math.min(maxK, f.w / Math.max(1, bounds.x1 - bounds.x0), f.h / Math.max(1, bounds.y1 - bounds.y0));
+  return centreTransform(bounds, k, w, h, inset);
+}
+
+/** `box` centred in the frame at scale `k`. */
+export function centreTransform(box, k, w, h, inset = 0) {
+  const f = frame(inset, w, h);
+  return {
+    k,
+    x: f.left + f.w / 2 - ((box.x0 + box.x1) / 2) * k,
+    y: f.top + f.h / 2 - ((box.y0 + box.y1) / 2) * k,
+  };
+}
+
+/**
+ * The view a graph opens on. Everything, when names are readable that way.
+ * Otherwise, with a `focus` box to `centre` (the selected goal, or the hubs a
+ * grouped graph is grouped by), that box centred, as large as fits between
+ * the readable scale and 1. Otherwise names at full size (scale 1) from the
+ * drawing's top-left corner, so its first column is not cut off, and a
+ * `focus` box (the selected card) out of that view brought in, as
+ * revealTransform() does.
+ */
+export function openTransform(bounds, w, h, inset = 0, maxK = 2.5, focus = null, centre = false) {
+  const fit = fitTransform(bounds, w, h, inset, maxK);
+  if (fit.k >= READABLE_SCALE) return fit;
+  if (focus && centre) return centreTransform(focus, Math.max(READABLE_SCALE, fitTransform(focus, w, h, inset, 1).k), w, h, inset);
+  const f = frame(inset, w, h);
+  const t = { k: 1, x: f.left - bounds.x0, y: f.top - bounds.y0 };
+  return (focus && revealTransform(t, focus, w, h, inset)) || t;
+}
+
+const join = (a, b) => ({ x0: Math.min(a.x0, b.x0), y0: Math.min(a.y0, b.y0), x1: Math.max(a.x1, b.x1), y1: Math.max(a.y1, b.y1) });
+
+/**
+ * The view for a goal picked outside the canvas (C39): its `box` and the
+ * boxes of the goals it lights (`near`) all in view, so its lines are.
+ * Centred on it (A10) when they fit around it at a readable scale;
+ * otherwise all of them fitted, readable where they can be. Never closer
+ * than `maxK`.
+ */
+export function pickTransform(box, near, w, h, inset = 0, maxK = 1) {
+  const all = near.reduce(join, box);
+  const cx = (box.x0 + box.x1) / 2;
+  const cy = (box.y0 + box.y1) / 2;
+  const hw = Math.max(cx - all.x0, all.x1 - cx);
+  const hh = Math.max(cy - all.y0, all.y1 - cy);
+  const around = fitTransform({ x0: cx - hw, y0: cy - hh, x1: cx + hw, y1: cy + hh }, w, h, inset, maxK);
+  return around.k >= READABLE_SCALE ? around : fitTransform(all, w, h, inset, maxK);
+}
+
+/**
+ * The box around the first of `boxes` and each later one that still shows
+ * with it at a readable scale: a grouped graph's hubs, biggest group first,
+ * so a narrow screen opens on its biggest groups whole rather than on the
+ * middle of all of them, cutting each (B35).
+ */
+export function readableUnion(boxes, w, h, inset = 0) {
+  if (!boxes.length) return null;
+  let box = boxes[0];
+  for (const b of boxes.slice(1)) {
+    const next = join(box, b);
+    if (fitTransform(next, w, h, inset, 1).k >= READABLE_SCALE) box = next;
+  }
+  return box;
+}
+
+/**
+ * Brings `box` into view when it is not wholly in it: across, it becomes the
+ * first column (the cards left of it go wholly out of view, not half); down,
+ * it is centred. Null when it is already in view.
+ */
+export function revealTransform(t, box, w, h, inset = 0) {
+  const f = frame(inset, w, h);
+  const sx0 = box.x0 * t.k + t.x;
+  const sx1 = box.x1 * t.k + t.x;
+  const sy0 = box.y0 * t.k + t.y;
+  const sy1 = box.y1 * t.k + t.y;
+  const inX = sx0 >= f.left && sx1 <= f.left + f.w;
+  const inY = sy0 >= f.top && sy1 <= f.top + f.h;
+  if (inX && inY) return null;
+  return {
+    k: t.k,
+    x: inX ? t.x : f.left - box.x0 * t.k,
+    y: inY ? t.y : f.top + f.h / 2 - ((box.y0 + box.y1) / 2) * t.k,
+  };
+}
 
 // Keyed by the feature's `layer` facet.
 const LAYER_ACCENT = {
@@ -226,7 +339,7 @@ export function goalRoot(goalParent, id) {
 // Hub views (Group by capability or goal) draw a small pill per hub and a
 // line from each feature to each of its hubs.
 export const HUB_W = NODE_W;
-export const HUB_H = 40;
+export const HUB_H = NODE_H; // the name's two lines and its feature count (B41)
 const CELL_W = NODE_W + 16; // the engine's collision box, so anchors already clear it
 const CELL_H = NODE_H + 16;
 const UNIT_W = CELL_W / 2; // blocks sit on a grid of half cells
@@ -260,14 +373,13 @@ export function capabilityHubs(features, capabilityById) {
 
 /**
  * Hubs for Group by goal: feature -> its capabilities -> the goals they
- * motivate. Only goals under `ownRoot` (the product goal's top goal) count,
- * the same rule as the feature panel's Why: another product's goal reaches a
- * feature through a shared capability, which is reuse, not motivation. With
- * no `ownRoot` every goal counts.
+ * motivate. Only goals the product owns count (`product_id` from /api/goals,
+ * the one ownership rule), the same rule as the feature panel's Why: another
+ * product's goal reaches a feature through a shared capability, which is
+ * reuse, not motivation. With no `ownProductId` every goal counts.
  */
-export function goalHubs(features, motivations, goals, ownRoot) {
+export function goalHubs(features, motivations, goals, ownProductId) {
   const goalById = new Map(goals.map((g) => [g.id, g]));
-  const goalParent = new Map(goals.map((g) => [g.id, g.parent_goal_id]));
   const goalsByCap = new Map();
   for (const m of motivations) {
     if (!goalsByCap.has(m.capability_id)) goalsByCap.set(m.capability_id, new Set());
@@ -280,7 +392,7 @@ export function goalHubs(features, motivations, goals, ownRoot) {
     for (const cid of f.capability_ids ?? []) {
       for (const gid of goalsByCap.get(cid) ?? []) {
         const g = goalById.get(gid);
-        if (!g || (ownRoot && goalRoot(goalParent, gid) !== ownRoot)) continue;
+        if (!g || (ownProductId && g.product_id !== ownProductId)) continue;
         const id = `goal:${gid}`;
         ids.add(id);
         const org = g.goal_type === "org";
@@ -289,12 +401,15 @@ export function goalHubs(features, motivations, goals, ownRoot) {
     }
     byFeature.set(f.id, [...ids]);
   }
+  // A feature here may belong to a product that has goals: its capabilities
+  // just link to none of them. Say that, never "no goal" (B34).
+  const none = ownProductId ? "Linked to none of this product's goals" : "Linked to no goal";
   return {
     hubs: [...hubs.values()],
     byFeature,
-    empty: { id: "goal:none", name: "No goal of this product yet", tone: "empty" },
+    empty: { id: "goal:none", name: none, tone: "empty" },
     legend: {
-      shapes: [["org", "Org goal"], ["product", "Product goal"], ["empty", "No goal of this product yet"]],
+      shapes: [["org", "Org goal"], ["product", "Product goal"], ["empty", none]],
       line: "Its capabilities serve this goal",
     },
   };

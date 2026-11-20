@@ -28,6 +28,12 @@ const md = new Marked({
   },
 });
 
+// A code like OG-60 or SPEC-001 never breaks at its hyphen (A47). Only text
+// between tags changes, so attributes and link targets stay as they were.
+const CODE = /\b([A-Z]{2,5}-\d{2,})\b/g;
+const keepCodesWhole = (html) =>
+  html.split(/(<[^>]*>)/).map((part) => part.startsWith("<") ? part : part.replace(CODE, '<span style="white-space:nowrap">$1</span>')).join("");
+
 export function renderChatMarkdown(text) {
-  return md.parse(text ?? "");
+  return keepCodesWhole(md.parse(text ?? ""));
 }

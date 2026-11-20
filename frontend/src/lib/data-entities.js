@@ -11,7 +11,8 @@
  * slugs stay unique) applies here too. Only listing and cascade delete are new.
  */
 
-import { EDGE, MATURITY, plain, statusLabel } from "./words.js";
+import { STATUS_TONE } from "../ds";
+import { DONE_WHEN, EDGE, MATURITY, plain, statusLabel } from "./words.js";
 
 // Plain words on screen; each column's `raw` keeps the stored value one hover away.
 const MATURITIES = ["planned", "alpha", "beta", "ga", "deprecated", "retired"]
@@ -21,7 +22,6 @@ const GOAL_TYPES = ["org", "product"];
 const EDGE_KINDS = ["DEPENDS_ON", "BLOCKS", "RELATES_TO"].map((v) => ({ value: v, label: plain(EDGE, v) }));
 const BUDGETS = ["S", "M", "L"];
 
-const STATUS_TONE = { pending: "neutral", in_progress: "accent", done: "ok" };
 const MATURITY_TONE = {
   planned: "neutral", alpha: "warn", beta: "warn",
   ga: "ok", deprecated: "danger", retired: "danger",
@@ -55,7 +55,7 @@ const GOALS = {
     { key: "parent_goal_id", label: "Parent goal", type: "select",
       optionsFrom: "goals", optionLabel: (g) => g.title, nullable: true },
     { key: "description", label: "Description", type: "textarea" },
-    { key: "success_criteria", label: "Success criteria", type: "textarea" },
+    { key: "success_criteria", label: DONE_WHEN, type: "textarea" },
     { key: "status", label: "Status", type: "select", options: WORK_STATUSES },
     { key: "priority", label: "Priority", type: "number" },
   ],
@@ -195,8 +195,9 @@ const FEATURES = {
 
 const FEATURE_EDGES = {
   key: "feature_edges",
-  label: "Feature edges",
-  singular: "edge",
+  label: "Links between features",
+  singular: "link between features",
+  table: "feature_edges",
   listPath: "/features/edges",
   // EdgeRead carries only {id, src_id, dst_id, kind} — without the features
   // list every row would read as two uuids.
@@ -225,8 +226,9 @@ const FEATURE_EDGES = {
 
 const MOTIVATIONS = {
   key: "motivations",
-  label: "Motivations",
-  singular: "motivation",
+  label: "Goal links",
+  singular: "goal link",
+  table: "motivations",
   listPath: "/motivations",
   editable: false, // the row IS its two ids; editing it means replacing it
   title: (r) => `${r.goal_title} → ${r.capability_name}`,
@@ -303,8 +305,9 @@ const PRODUCTS = {
 
 const PRODUCT_BUNDLES = {
   key: "product_bundles", // underscored key, hyphenated URL — different namespaces
-  label: "Product bundles",
-  singular: "bundle",
+  label: "Capabilities added by hand",
+  singular: "capability added by hand",
+  table: "product_bundles",
   listPath: "/product-bundles",
   editable: false,
   title: (r) => `${r.product_name} includes ${r.capability_name}`,
@@ -384,6 +387,18 @@ export const ENTITIES = [
   GOALS, CAPABILITIES, FEATURES, FEATURE_EDGES,
   MOTIVATIONS, PRODUCTS, PRODUCT_BUNDLES, TICKETS,
 ];
+
+/** The import summary's words (SeedFiles.jsx) for the link tables the
+ *  cascade preview counts, as [one, many]; the table name stays on hover.
+ *  Tables not listed keep the API's label. */
+export const TABLE_WORDS = {
+  motivations: ["goal link", "goal links"],
+  feature_capabilities: ["capability link", "capability links"],
+  feature_edges: ["link between features", "links between features"],
+  product_bundles: ["capability added by hand", "capabilities added by hand"],
+  product_technologies: ["technology in use", "technologies in use"],
+  tech_satisfactions: ["technology link", "technology links"],
+};
 
 /** Lists loaded once and refreshed after every mutation, for FK labels and selects. */
 export const REF_SOURCES = {

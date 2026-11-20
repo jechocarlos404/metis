@@ -7,7 +7,8 @@ description: Analyze the current repository (or product docs, or conversation co
 
 Metis (at `~/dev/jechocarlos404/metis`) is a **capability inventory shared across
 products**: every product's user-facing features, mapped to the capabilities built
-to implement them. Because capabilities are shared by exact name, the inventory
+to implement them. Because capabilities are shared by name (case and punctuation
+aside), the inventory
 shows which abilities are reused across projects and how much of a new product idea
 already exists. Its ticket pipeline
 (`Goal → Spec → Capability map + Feature graph → PRD → Tickets`) is secondary.
@@ -116,16 +117,19 @@ format and ontology spec. The rules that shape everything you extract:
 10. **Hand off.** Show the user a compact summary (counts per collection, guesses
    by confidence, the capability map as a bullet tree marking which capabilities
    were reused from the inventory and which are new) and tell them how to load it:
-   in metis, on the Products page choose "Import a seed file", or use the
-   `metis-seed-instance` skill (dry-run first).
+   in metis, open Settings → Seed files, paste the file, press "Check file" and
+   then "Import", or use the `metis-seed-instance` skill (dry-run first).
 
 ## Judgment calls
 
 - **Names are identity in metis** — the loader matches existing entities by name
-  and reuses them. For capabilities that is the point: a shared name is what links
+  and reuses them (a capability by slug, so case and punctuation don't split
+  one). For capabilities that is the point: a shared name is what links
   projects. Features and products should keep names distinct to their project;
-  keep all names stable across re-exports so re-loading updates nothing and
-  duplicates nothing.
+  keep all names stable across re-exports so re-loading duplicates nothing.
+  This export is the authority on this product's features: on re-load, each
+  existing feature takes the file's `status` and `description`, and the dry run
+  lists every value that changes.
 - **Don't inventory the code.** A capability map is the product's anatomy, not
   its directory listing; utilities, configs, and test scaffolding are not
   capabilities.

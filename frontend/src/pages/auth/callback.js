@@ -10,6 +10,10 @@ import {
   writeSession,
 } from "../../lib/session.js";
 
+// Same rule as login.js: a path on this site, never `//host`, `/\host` or a
+// control character a browser would strip into one.
+const LOCAL_PATH = /^\/(?![/\\])[^\x00-\x1f\x7f]*$/;
+
 // A small page instead of bare text: says what happened and offers the way back in.
 function failure(status, message) {
   const esc = (v) => String(v).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
@@ -37,7 +41,7 @@ export async function GET({ url, cookies, redirect }) {
     return failure(502, `The sign-in server didn't accept the request (${err.message}).`);
   }
 
-  const returnTo = typeof saved.returnTo === "string" && saved.returnTo.startsWith("/")
+  const returnTo = typeof saved.returnTo === "string" && LOCAL_PATH.test(saved.returnTo)
     ? saved.returnTo
     : "/";
   return redirect(returnTo, 302);

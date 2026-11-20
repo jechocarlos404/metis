@@ -1,16 +1,37 @@
 import React from "react";
 import { Button, Icon, StatusBadge, TicketCard } from "../../ds";
 import { count } from "../../lib/words.js";
+import { openChatWithPrompt } from "../../lib/chat-launch.js";
 import { pressable } from "../../lib/pressable.js";
 
 export const SIZE_HINT = "S: one file · M: 2 to 4 files · L: must be split";
 
+// A written spec (body) counts, so a draft spec can be approved before planning.
+export const hasPlan = (product, { prd, epics, tickets, strategy }) =>
+  Boolean(product.status === "approved" || product.body || prd || epics.length > 0 || tickets.length > 0 || strategy);
+
 const panel = { background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", padding: 16, display: "flex", flexDirection: "column", gap: 10 };
 const muted = { fontSize: "var(--text-sm)", color: "var(--text-secondary)" };
 const mono = { fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-secondary)" };
-const sparkle = (label, onClick) => (
-  <Button size="sm" variant="secondary" style={{ gap: 6 }} onClick={onClick}><Icon name="sparkles" size={13} />{label}</Button>
-);
+const UNFINISHED_NAMED = 5;
+
+// Every Chat turn is a paid AI run, so a planning button only asks first.
+function AskBeforeChat({ prompt, onCancel }) {
+  const cancelRef = React.useRef(null);
+  React.useEffect(() => { cancelRef.current?.focus(); }, []);
+  return (
+    <div role="group" aria-label="Confirm Chat run" style={{ border: "1px solid var(--border-default)", borderRadius: "var(--radius-sm)", padding: 12, display: "flex", flexDirection: "column", gap: 8, alignSelf: "stretch" }}>
+      <div style={{ fontSize: "var(--text-sm)", color: "var(--text-body)" }}>
+        This opens Chat and sends the message below to the AI model straight away. Each Chat turn costs money. Nothing is saved until you approve what it proposes.
+      </div>
+      <div style={{ fontSize: "var(--text-sm)", color: "var(--text-heading)", borderLeft: "2px solid var(--border-default)", paddingLeft: 10, overflowWrap: "anywhere" }}>{prompt}</div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <Button ref={cancelRef} size="sm" variant="secondary" onClick={onCancel}>Cancel</Button>
+        <Button size="sm" variant="accent" style={{ gap: 6 }} onClick={() => openChatWithPrompt(prompt)}><Icon name="sparkles" size={13} />Send to Chat</Button>
+      </div>
+    </div>
+  );
+}
 
 function SectionHead({ title, meta, children }) {
   return (
@@ -24,18 +45,35 @@ function SectionHead({ title, meta, children }) {
 }
 
 // Delivery planning for a product we build: spec, plan document (PRD),
-// tickets and strategy. Shown only once one of them exists.
+// tickets and strategy. The Products page shows it once one of them exists,
+// or to a writer while some features aren't done.
 export function ProductPlan({ product, prd, epics, tickets, strategy, capabilities, features, canWrite, actions }) {
-  // A written spec (body) counts, so a draft spec can be approved before planning.
-  const hasPlan = product.status === "approved" || product.body || prd || epics.length > 0 || tickets.length > 0 || strategy;
-  if (!hasPlan) {
-    return canWrite ? (
+  const [asking, setAsking] = React.useState(null); // null | {key, prompt}: the Chat run awaiting a yes
+  const ask = (key) => setAsking({ key, prompt: actions.prompts[key]() });
+  const confirm = (...keys) => asking && keys.includes(asking.key) && <AskBeforeChat prompt={asking.prompt} onCancel={() => setAsking(null)} />;
+  const sparkle = (label, key) => (
+    <Button size="sm" variant="secondary" style={{ gap: 6 }} onClick={() => ask(key)}><Icon name="sparkles" size={13} />{label}</Button>
+  );
+
+  if (!hasPlan(product, { prd, epics, tickets, strategy })) {
+    const unfinished = (features ?? []).filter((f) => f.status !== "done").map((f) => f.name);
+    return (
       <div style={{ ...panel, alignItems: "flex-start" }}>
-        <div style={muted}>A plan breaks this product into a plan document, tickets sized for one coding session each, and a delivery timeline, drafted in Chat.</div>
-        <Button size="sm" variant="accent" style={{ gap: 6 }} onClick={actions.decompose}><Icon name="sparkles" size={13} />Plan this product</Button>
+        <div style={muted}>
+          {count(unfinished.length, "feature")} of {product.name} {unfinished.length === 1 ? "isn't" : "aren't"} done yet{unfinished.length ? ":" : ". "}
+          {/* A list, not a sentence: feature names carry their own commas and "and"s. A handful, then how many more. */}
+          {unfinished.length > 0 && (
+            <ul style={{ margin: "4px 0", paddingLeft: 18, color: "var(--text-body)" }}>
+              {unfinished.slice(0, UNFINISHED_NAMED).map((name, i) => <li key={i}>{name}</li>)}
+              {unfinished.length > UNFINISHED_NAMED && <li style={{ listStyle: "none", color: "var(--text-secondary)" }}>and {unfinished.length - UNFINISHED_NAMED} more</li>}
+            </ul>
+          )}
+          A plan splits the work into a plan document, tickets sized for one coding session each, and a delivery timeline. The AI model drafts it in Chat.
+        </div>
+        {asking ? confirm("decompose") : (
+          <Button size="sm" variant="accent" style={{ gap: 6 }} onClick={() => ask("decompose")}><Icon name="sparkles" size={13} />Plan this product</Button>
+        )}
       </div>
-    ) : (
-      <div style={muted}>No plan yet. An editor can create one.</div>
     );
   }
 
@@ -59,10 +97,11 @@ export function ProductPlan({ product, prd, epics, tickets, strategy, capabiliti
       <section style={panel}>
         <SectionHead title="Plan document (PRD)"
           meta={prd && <><StatusBadge status={prd.status} /><span style={mono}>{prd.display_id} v{prd.version} · {prd.created_by}</span></>}>
-          {canWrite && sparkle(epics.length === 0 ? "Draft plan document" : "Regenerate", actions.decompose)}
-          {canWrite && prd?.status === "draft" && sparkle("Refresh draft", actions.refreshPrd)}
+          {canWrite && sparkle(epics.length === 0 ? "Draft plan document" : "Regenerate", "decompose")}
+          {canWrite && prd?.status === "draft" && sparkle("Refresh draft", "refreshPrd")}
           {canWrite && prd?.status === "draft" && <Button size="sm" onClick={actions.approvePrd}>Approve</Button>}
         </SectionHead>
+        {confirm("decompose", "refreshPrd")}
         {prd?.status === "draft" && (
           <div style={{ fontSize: "var(--text-xs)", color: "var(--text-accent)" }}>
             {canWrite ? "Draft until approved. L tickets must be split first." : "Draft, awaiting approval."}
@@ -118,8 +157,9 @@ export function ProductPlan({ product, prd, epics, tickets, strategy, capabiliti
       <section style={panel}>
         <SectionHead title="Delivery strategy"
           meta={strategy && <span style={mono}>Timeline · v{strategy.version} · {strategy.created_by}</span>}>
-          {canWrite && sparkle(strategy ? "Regenerate" : "Create strategy", actions.strategy)}
+          {canWrite && sparkle(strategy ? "Regenerate" : "Create strategy", "strategy")}
         </SectionHead>
+        {confirm("strategy")}
         {!strategy && <div style={muted}>No delivery strategy yet.</div>}
         {phases.length > 0 && (
           <div style={{ display: "flex", flexDirection: "column", gap: 8, maxWidth: 640 }}>

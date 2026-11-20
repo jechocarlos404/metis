@@ -1,7 +1,11 @@
 // A product's picture as one self-contained, read-only HTML file, for someone
 // without a metis login. Built only from what the profile already loaded, and
 // only from named fields: no ids, no links, no guesses, no repo paths.
-import { MATURITY, VERDICT, count, coverageHeadline, plain, scoreGroups, slugify, statusLabel } from "../../lib/words.js";
+import {
+  CLOSEST_TITLE, DONE_WHEN, NEED, NOTHING_TO_SCORE, VERDICT, andList, closestGroups, closestNote, count, gapNote, gapsTitle,
+  incompleteNote, scoreGroups, scoreHeadline, slugify, statusLabel,
+} from "../../lib/words.js";
+import { productGoalTrees } from "../graph/goal-facts.js";
 
 const ENTITIES = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
 export const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (c) => ENTITIES[c]);
@@ -16,6 +20,7 @@ body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.55 -appl
 main { max-width: 760px; margin: 0 auto; padding: 32px 16px 48px; }
 h1 { font-size: 26px; line-height: 1.25; margin: 0; }
 h2 { font-size: 17px; margin: 32px 0 10px; }
+h3 { font-size: 15px; margin: 18px 0 4px; }
 p { margin: 6px 0; }
 ul { margin: 6px 0; padding-left: 20px; }
 .meta { color: var(--muted); font-size: 13px; margin-top: 6px; }
@@ -55,31 +60,57 @@ function groupFeatures(features, capabilities) {
   return { grouped, unnamed };
 }
 
+// The goal trees the product's Goals tab draws (productGoalTrees()): each
+// head goal, then the goals under it (A43).
 function goalSection(product, goals) {
-  const goal = goals.find((g) => g.id === product.goal_id);
-  if (!goal) return "";
-  const parent = goals.find((g) => g.id === goal.parent_goal_id);
-  return `<h2>Goal</h2>
-<div class="card">
+  const trees = productGoalTrees(product, goals);
+  if (trees.length === 0) return "";
+  const total = trees.reduce((n, t) => n + 1 + t.children.length, 0);
+  const cards = trees.map(({ goal, children }) => {
+    const parent = goals.find((g) => g.id === goal.parent_goal_id);
+    return `<div class="card">
   <h3>${esc(goal.title)} <span class="tag">${esc(statusLabel(goal.status))}</span></h3>
   ${goal.description ? `<p>${esc(goal.description)}</p>` : ""}
-  ${goal.success_criteria ? `<p class="muted">Done when: ${esc(goal.success_criteria)}</p>` : ""}
+  ${goal.success_criteria ? `<p class="muted">${esc(DONE_WHEN)}: ${esc(goal.success_criteria)}</p>` : ""}
   ${parent ? `<p class="muted">Part of: ${esc(parent.title)}</p>` : ""}
+  ${children.map(({ goal: g, depth }) => `<div class="row"${depth > 1 ? ` style="padding-left: ${(depth - 1) * 16}px"` : ""}><span class="name">${esc(g.title)}</span><span class="status">${esc(statusLabel(g.status))}</span></div>`).join("")}
 </div>`;
+  });
+  return `<h2>${total > 1 ? "Goals" : "Goal"}</h2>
+${cards.join("\n")}`;
 }
 
+// The product page's score, in its words (lib/words.js) and order. Only
+// someone else's product is scored: ours would score themselves.
 function scoreSection(product, score) {
-  const title = product.external ? `How much of ${product.name} we could build` : "Coverage";
-  if (!score) return `<h2>${esc(title)}</h2><p class="muted">Not scored in this snapshot.</p>`;
-  const rows = scoreGroups(score)
-    .map((g) => `<li><span class="num">${g.names.length}</span> ${esc(VERDICT[g.key].label)}: <span class="muted">${esc(VERDICT[g.key].hint)}</span></li>`)
+  if (!product.external) return "";
+  const title = `<h2>How much of ${esc(product.name)} we could build</h2>`;
+  if (!score) return `${title}<p class="muted">Not scored in this snapshot.</p>`;
+  const headline = scoreHeadline(score);
+  // Each group names its features, as the page does, with how many of each
+  // one's capabilities are ours.
+  const ofOurs = new Map((score.report?.features ?? []).map((f) => [f.name, `${f.existing} of ${f.total} ours`]));
+  const groups = scoreGroups(score)
+    .filter((g) => g.names.length > 0)
+    .map((g) => {
+      const note = g.key === "missing" ? incompleteNote(score) : null;
+      const names = g.names.map((n) => `<li>${esc(n)}${ofOurs.has(n) ? ` <span class="muted">· ${esc(ofOurs.get(n))}</span>` : ""}</li>`).join("");
+      return `<li><span class="num">${g.names.length}</span> ${esc(VERDICT[g.key].label)}: <span class="muted">${esc(VERDICT[g.key].hint)}</span>${note ? `<br><span class="muted">${esc(note)}</span>` : ""}<ul>${names}</ul></li>`;
+    })
     .join("");
+  const gaps = score.missing_capabilities;
+  const closest = closestGroups(score.closest_products);
   const report = score.report;
-  return `<h2>${esc(title)}</h2>
-<p class="muted">"Ours" means a product in this portfolio.</p>
-${report ? `<p>${esc(coverageHeadline(report))}</p>` : `<p class="muted">No capability links known for this product yet.</p>`}
-<p>${esc(count(score.total_features, "feature"))}:</p>
-<ul>${rows}</ul>
+  return `${title}
+<p class="muted">"Ours": ${esc(NEED.ours.hint)}.</p>
+${headline ? `<p>${esc(headline)}</p>` : ""}
+<p>${esc(score.product.name)}: ${esc(count(score.total_features, "feature"))}</p>
+<ul>${groups}</ul>
+${report ? "" : `<p class="muted">${esc(NOTHING_TO_SCORE)}</p>`}
+${gaps.length > 0 ? `<h3>${esc(gapsTitle(gaps))}</h3>
+<ul>${gaps.map((g) => `<li>${esc(g.name)} <span class="muted">· ${esc(gapNote(g))}</span></li>`).join("")}</ul>` : ""}
+${closest.length > 0 ? `<h3>${esc(CLOSEST_TITLE)}</h3>
+<ul>${closest.map((g) => `<li>${esc(andList(g.products.map((p) => p.name)))} <span class="muted">${esc(closestNote(g, score))}</span></li>`).join("")}</ul>` : ""}
 ${report && report.missing.length > 0 ? `<p>To build: ${esc(report.missing.join(", "))}</p>` : ""}`;
 }
 
@@ -93,7 +124,7 @@ function doesSection(product, features, grouped, unnamed) {
   if (features.length === 0) return `<h2>What it does</h2><p class="muted">No features recorded yet.</p>`;
   const showStatus = !product.external;
   const cards = grouped.map(({ cap, list }) => `<div class="card">
-  <h3>${esc(cap.name)} <span class="tag">${esc(plain(MATURITY, cap.maturity))}</span></h3>
+  <h3>${esc(cap.name)}</h3>
   ${featureRows(list, showStatus)}
 </div>`);
   if (unnamed.length > 0) {

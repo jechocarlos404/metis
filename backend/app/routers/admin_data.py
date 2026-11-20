@@ -15,7 +15,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db import get_db
 from app.models import Capability, Goal, Motivation, Product, ProductBundle, Ticket
 from app.schemas.admin import (
-    CascadePreview,
     CascadeRequest,
     CascadeResult,
     MotivationRow,
@@ -77,7 +76,7 @@ async def list_all_tickets(
     return list((await session.scalars(stmt)).all())
 
 
-@cascade_router.post("/cascade-preview", response_model=CascadePreview)
+@cascade_router.post("/cascade-preview", response_model=admin_cascade.NamedPreview)
 async def cascade_preview(data: CascadeRequest, session: AsyncSession = Depends(get_db)):
     return await admin_cascade.preview(session, data.rows)
 

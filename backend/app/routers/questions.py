@@ -205,14 +205,10 @@ async def tech_exposure(
     a nightly job fails the build when required_slots is non-zero inside the
     window, so treat a change to this shape as breaking."""
     findings = await tech_service.exposure(session, window_days=window_days)
+    using = None
     if product is not None:
         target = await by_slug(session, Product, product, "Product")
-        using = {
-            usage.tech_id
-            for usage in await stack_service.list_product_technologies(
-                session, target.id
-            )
-        }
+        using = await stack_service.tech_ids_used_by(session, target.id)
         findings = [f for f in findings if f.tech_id in using]
 
     rows = [
@@ -226,12 +222,36 @@ async def tech_exposure(
         for f in findings
         for reason in [_exposure_reason(f)]
     ]
+    # A short list is no all-clear for what exposure cannot date or count.
+    # Filtered to a product, that is the product's own technologies, and one
+    # that records none has nothing to judge.
+    lifecycle = await tech_service.lifecycle(session, using)
+    unresolved = []
+    if using is not None and not using:
+        unresolved = [
+            Unresolved(
+                subject=product,
+                reason="no technology is recorded as used by this product, so this "
+                "says nothing about what it runs on",
+            )
+        ]
+    elif lifecycle["unknown"]:
+        unresolved = [
+            Unresolved(
+                subject=product or "estate",
+                reason=f"{lifecycle['unknown']} of {lifecycle['technologies']} "
+                f"technologies {'it uses ' if product else ''}have no lifecycle data "
+                "(no end-of-life date, no maintainer count), so only a stance can flag them",
+            )
+        ]
     return envelope(
         Question.tech_exposure,
-        SubjectKind.estate,
+        SubjectKind.product if product else SubjectKind.estate,
         product or "estate",
         rows,
-        f"/tech?view=exposure&window_days={window_days}",
+        f"/tech?view=exposure&window_days={window_days}"
+        + (f"&product={product}" if product else ""),
+        unresolved,
     )
 
 
@@ -262,12 +282,25 @@ async def stack_redundancy(slug: str, session: AsyncSession = Depends(get_db)):
         }
         for r in findings
     ]
+    # Redundancy compares what the product records using; with nothing
+    # recorded, an empty answer is no finding, and says so.
+    unresolved = []
+    if not await stack_service.list_product_technologies(session, product.id):
+        unresolved = [
+            Unresolved(
+                subject=slug,
+                reason="no technology is recorded as used by this product, so nothing can "
+                "answer one of its capabilities twice. A seed file's technologies, or the "
+                "API, record one.",
+            )
+        ]
     return envelope(
         Question.stack_redundancy,
         SubjectKind.product,
         slug,
         rows,
         f"/stacks?product={slug}",
+        unresolved,
     )
 
 
@@ -452,6 +485,8 @@ def _inventory_block(entries) -> str:
             "name": _clean(e.name, 120),
             "ours": e.ours,
             "maturity": str(e.maturity) if e.ours else None,
+            # Our products working on it, at any status: can be above 0 while
+            # `ours` is false (nothing of ours finished yet).
             "our_products": len(e.products),
             "part_of": _clean(by_id[e.parent_id].name, 120) if e.parent_id in by_id else None,
             "description": _clean(e.description, 140) or None,

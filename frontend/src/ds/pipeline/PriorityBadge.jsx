@@ -12,7 +12,8 @@ export function PriorityBadge({ priority = 3, rationale, style }) {
         {[1, 2, 3, 4, 5].map((i) => (
           <span key={i} style={{
             width: "4px", height: "10px", borderRadius: "1px",
-            background: i <= 6 - p ? "var(--priority-" + p + ")" : "var(--ink-2)",
+            // Empty bars use the control border: 3:1 on white and on a selected row (B31).
+            background: i <= 6 - p ? "var(--priority-" + p + ")" : "var(--border-control)",
           }} />
         ))}
       </span>

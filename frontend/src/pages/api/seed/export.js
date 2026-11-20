@@ -120,17 +120,15 @@ export async function GET({ request, locals }) {
     const goalById = new Map(goals.map((goal) => [goal.id, goal]));
     const capabilityList = flattenCapabilities(capabilityTree);
 
-    const productGoalIds = product.goal_id ? collectGoalChain(goalById, product.goal_id) : new Set();
-    const motivationLists = await Promise.all(
-      capabilityList.map(async (capability) => ({
-        capability_id: capability.id,
-        goals: await api(`/api/capabilities/${capability.id}/motivations`),
-      })),
-    );
-
-    const allMotivations = motivationLists.flatMap(({ capability_id, goals: linkedGoals }) =>
-      linkedGoals.map((goal) => ({ capability_id, goal_id: goal.id })),
-    );
+    // The product's own goals (the goals API's product_id: its goal tree, with
+    // sub-goals and sibling goals, so removing the product later names every
+    // goal link it has), and the chain above its goal so parent_ref resolves.
+    const ownGoalIds = new Set(goals.filter((goal) => goal.product_id === product.id).map((goal) => goal.id));
+    const productGoalIds = new Set([
+      ...ownGoalIds,
+      ...(product.goal_id ? collectGoalChain(goalById, product.goal_id) : []),
+    ]);
+    const allMotivations = await api("/api/motivations");
     const includedFeatures = features.filter((feature) => feature.product_id === productId);
     const includedFeatureIds = new Set(includedFeatures.map((feature) => feature.id));
     // A feature's guesses, minus any its confirmed links already cover.
@@ -144,6 +142,9 @@ export async function GET({ request, locals }) {
       ...includedFeatures.flatMap((feature) => feature.capability_ids || []),
       ...[...guessesOf.values()].flat().map((guess) => guess.capability_id),
       ...bundles.map((capability) => capability.id),
+      // Every goal link of the product's own goals, even to a capability no
+      // feature realizes yet. Shared goals above them bring no capabilities.
+      ...allMotivations.filter((motivation) => ownGoalIds.has(motivation.goal_id)).map((motivation) => motivation.capability_id),
     ]);
     const includedCapabilities = capabilityList.filter((capability) => includedCapabilityIds.has(capability.id));
     const includedEdges = edges.filter(
@@ -179,7 +180,13 @@ export async function GET({ request, locals }) {
         (g) => g.tech_id === tech.id && includedCapabilityIds.has(g.capability_id) && !confirmedIds.has(g.capability_id),
       );
       const satisfies = [
-        ...confirmed.map((s) => ({ capability_ref: capRef.get(s.capability_id), fit: s.fit })),
+        // A confirmed link's note travels as its basis, which the importers
+        // store as the note again.
+        ...confirmed.map((s) => ({
+          capability_ref: capRef.get(s.capability_id),
+          fit: s.fit,
+          ...(s.notes ? { basis: s.notes } : {}),
+        })),
         ...guessed.map((g) => ({
           capability_ref: capRef.get(g.capability_id),
           ...(g.fit ? { fit: g.fit } : {}),
@@ -218,6 +225,7 @@ export async function GET({ request, locals }) {
         ref: capRef.get(capability.id),
         parent_ref: includedCapabilityIds.has(capability.parent_id) ? capRef.get(capability.parent_id) : null,
         name: capability.name,
+        slug: capability.slug,
         description: capability.description,
         maturity: capability.maturity,
         facets: capability.facets,

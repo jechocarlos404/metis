@@ -74,13 +74,28 @@ docker compose up --build
 - API: http://localhost:8000 (OpenAPI docs at /docs)
 - Keycloak: http://localhost:8080 (admin console: `admin` / `admin`)
 
+Every published port (5432, 8080, 8000, 4321, and 8001 for the `mcp` profile) is
+bound to `127.0.0.1`, so nothing is reachable from your network: the dev
+defaults (Keycloak `admin`/`admin`, `dev-backend-secret`) would hand it over. To
+expose one on purpose, replace those defaults first, then change its mapping in
+`docker-compose.yml` (say `"0.0.0.0:4321:4321"`). Signing in from another
+machine also needs `PUBLIC_APP_URL`, `KC_HOSTNAME`/`KEYCLOAK_ISSUER` and the
+realm's redirect URIs set to the address it uses; they all say `localhost` now.
+
 Seeded realm users (temporary passwords — Keycloak will force a change on first login):
 
 | User | Password | Role |
 |---|---|---|
-| `admin@metis.local` | `admin` | admin (Settings: users, AI models, raw data) |
-| `editor@metis.local` | `editor` | editor (read + write domain) |
-| `viewer@metis.local` | `viewer` | viewer (read-only) |
+| `admin@metis.local` | `admin-dev-only` | admin (Settings: users, AI models, raw data) |
+| `editor@metis.local` | `editor-dev-only` | editor (read + write domain) |
+| `viewer@metis.local` | `viewer-dev-only` | viewer (read-only) |
+
+Passwords need 12 or more characters and can't be the username.
+
+An existing install keeps its old realm: Keycloak skips `--import-realm` for a
+realm that already exists, so set the policy in the admin console (metis realm →
+Authentication → Policies), or recreate the Keycloak container. It has no
+volume, so recreating it resets every user to the three seeded accounts.
 
 For curl / seed scripts against the API without a browser session, set
 `AUTH_ENABLED=false` in `.env` — every request becomes an admin on the desktop
@@ -90,10 +105,24 @@ surface, so writes work exactly as they do in the real app (see
 A fresh instance is empty: metis holds only real data, loaded from seed files
 exported from actual repositories (`metis-export`, then `metis-seed-instance`).
 There is no demo data, and nothing a repo only describes — plans, specs, or code
-it ships without running — is recorded as existing. The schema is `create_all` on boot — after pulling a
-schema change, reset the dev volume (`docker compose down -v`). Realm import only
-runs on a fresh Keycloak data directory; to re-import users/roles, recreate the
-Keycloak container without a persisted volume (compose already does that).
+it ships without running — is recorded as existing. So once you have loaded seed
+files, the `pgdata` volume holds the only copy of that work: never reset it
+(`docker compose down -v` deletes it). Back it up before anything risky, and restore
+the same way:
+
+```sh
+docker compose exec -T postgres pg_dump -U metis -Fc metis > metis-$(date +%F).dump
+docker compose exec -T postgres pg_restore -U metis -d metis --clean --if-exists < metis-YYYY-MM-DD.dump
+```
+
+There are no migrations. On boot the backend runs `create_all`, which adds missing
+tables but never a column to a table that already exists; each column added since
+has its own idempotent `add column if not exists` step in `backend/app/db.py`. If a
+change you pull adds a column without such a step, add the step (or run the
+`alter table` by hand) rather than resetting the volume.
+
+Realm import only runs on a fresh Keycloak data directory; to re-import users/roles,
+recreate the Keycloak container without a persisted volume (compose already does that).
 
 The app runs with zero LLM keys — chat replies with a clear "provider not configured"
 notice, and everything else works. Add any subset of provider credentials to `.env`
@@ -136,10 +165,17 @@ capability says nothing about whose feature this is.
 A product can be someone else's (`external`): you know its features as a user and
 map them to the capabilities they need, declaring `unknown_capabilities` where you
 can't tell. External products show what exists in the world; they never count as what
-*we* can do — coverage of an idea counts only capabilities our own features realize. `GET /api/products/{id}/coverage` scores an existing product the same way: which of
-its features we could build from what we have — a lower bound, since a feature with
-unknown capabilities never counts as buildable. Alongside it, `known_covered` lists the
-unknown-capability features whose every *named* capability is ours — a weaker signal.
+*we* can do — a capability is ours only when a finished (`done`) feature of one of
+our own products realizes it, and coverage of an idea counts only those.
+`GET /api/products/{id}/coverage` scores someone else's product the same way (the
+desktop and MCP score only external products: an own product's features are what make
+its capabilities ours): which of its features we could build from what we have — a lower bound, since a feature with
+unknown capabilities never counts as buildable. Every feature lands in exactly one
+group: `buildable`, `partly` (every *named* capability is ours, but the list is
+incomplete), `missing` (needs a capability that isn't ours) or `not_described` (no
+capability named yet). `missing_capabilities` ranks what's missing by how many
+features it would complete, and `closest_products` names the three of our products
+that have built the most of what it names (a tie at third place is kept whole).
 
 **Journeys** (`/journeys`, `/api/journeys`) are ordered paths of features a person moves
 through — inside one product or across several, ours or external. A step can also be one
@@ -237,14 +273,23 @@ question would answer differently on Tuesday.
 Read-only everywhere except the desktop. A write from any other surface returns:
 
 ```
-403 { "error": "human_action_required",
-      "message": "Binding a slot is a human action.",
-      "href": "/stacks?slot=api::Auth" }
+403 { "detail": { "error": "human_action_required",
+                  "message": "Binding a slot is a human action.",
+                  "href": "/stacks?slot=9f6c1d2e-…" } }
 ```
 
 Not `401` — the caller is who they say. Not `405` — the route exists. The refusal names
 the reason and hands over the screen that can act. Surface is derived from the token's
 signed `azp`, so a service or MCP token cannot present itself as the desktop.
+
+A 403 has two shapes. That object is the surface's. A person on the desktop whose role
+can't write (a viewer) gets a plain sentence instead, and no screen would help them:
+
+```
+403 { "detail": "Requires editor or admin role" }
+```
+
+Read `detail.error` to tell them apart: it is there only on the first.
 
 Nothing in this codebase binds a slot. An agent that can bind a slot can silence a gap,
 and the gaps are the product.
@@ -307,9 +352,9 @@ tool list: [docs/mcp.md](docs/mcp.md). It calls the same **HTTP API** a browser
 does — not the services in-process — so a chat transcript and an API log line up, and
 the write boundary is inherited rather than re-implemented.
 
-Sixteen tools. Eight answer inventory questions: `products`, `capability_inventory`,
-`check_idea`, `product_score`, `capability`, `feature_why`, `journeys`, `ready_features`.
-The other eight: the six `question` keys, plus `tech_search` (navigation — everything else
+Seventeen tools. Nine answer inventory questions: `products`, `capability_inventory`,
+`check_idea`, `product_score`, `capability`, `feature_why`, `journeys`, `ready_features`,
+`recheck`. The other eight: the six `question` keys, plus `tech_search` (navigation — everything else
 takes a slug it returns) and `propose_binding` (a hand-off that persists nothing).
 Four resources: `metis://ontology/model`, `metis://policy/adoptions`, and the templated
 `metis://tech/{slug}` and `metis://stacks/{product}`. Three prompts.
@@ -325,8 +370,9 @@ The server refuses to start SSE without `MCP_SSE_TOKEN`: it holds an API token, 
 open port would lend it to anyone who can reach the address.
 
 **Claude Code plugin.** [`plugin/`](plugin/README.md) brings this server to a coding
-session in any repo, with skills that check for reuse before building
-(`metis-check-idea`, `metis-find-reuse`, `metis-what-next`) and read-only hooks: a
+session in any repo, with eight skills (among them `metis-check-idea`,
+`metis-find-reuse` and `metis-what-next`, which check for reuse before building)
+and read-only hooks: a
 product brief at session start, a one-line nudge when a prompt names a capability another
 product already has, and a reminder to re-export the seed file after code changes. The
 repo root is its marketplace:
@@ -348,25 +394,38 @@ DB-backed and editable in Settings → AI models.
 Metis supports both **in-app** and **skill-driven** seed round-trips (seed file format:
 `backend/app/ontology/seed-format.md`):
 
-- In the **Products** page, admins/editors can:
-  - **Export seed**: download the selected Spec as a `metis-seed/v1` JSON file,
-    including its attributed goals, capabilities, features, edges, and optional PRD.
-  - **Import seed**: paste or upload a `metis-seed.json`, run a dry-run validation,
-    then import it with the same **idempotent, add-only** identity rules as the
-    seed loader.
+- Admins/editors can:
+  - **Export seed** (on the **Products** page): download the selected Spec as a
+    `metis-seed/v1` JSON file, including its attributed goals, capabilities,
+    features, edges, and optional PRD.
+  - **Import seed** (in **Settings → Seed files**, and on Get started): paste or
+    upload a `metis-seed.json`, check it with a dry run, then import it with the
+    same **idempotent, never-deleting** identity rules as the seed loader.
 - Imports validate the seed shape before writing anything, show reuse/create counts,
-  and surface expected notes/warnings such as "product already has a PRD".
+  and surface expected notes/warnings such as "product already has a PRD". A
+  re-import updates the status and description of the product's existing
+  features to the file's, and the dry run lists each such overwrite and each
+  capability it would create.
 
 ### Claude Code skills
 
-The metis Claude Code plugin (`plugin/`) ships three skills for seeding an
-instance from real codebases (using the same seed format and add-only semantics
+The metis Claude Code plugin (`plugin/`) ships eight skills (all listed in
+[plugin/README.md](plugin/README.md)); these three seed an instance from real codebases (using the same seed format and identity rules
 as the in-app flow):
 
 - `plugin/skills/metis-seed-instance` loads a `metis-seed.json` into the running
-  instance via the API: idempotent, add-only. `plugin/skills/metis-unseed`
-  removes what a seed file created. With auth enabled, either use a browser session through the UI, set
-  `AUTH_ENABLED=false`, or pass a bearer token.
+  instance via the API: idempotent, never deletes. `plugin/skills/metis-unseed`
+  removes what a seed file created. Against an instance with `AUTH_ENABLED=false`
+  the scripts need no token. With auth on, only a person signed in to the web
+  app as an editor or admin may write: Keycloak issues that token to the web
+  app's login once the person enters their password, and the app keeps it in
+  an encrypted cookie. The scripts sign no one in. So with
+  auth on, the scripts' `--dry-run` works with any valid token (`--token`, or
+  `METIS_TOKEN`; the read-only `metis-mcp` service account's is enough, see
+  the skill's "With auth on"), and the real import or removal happens in the
+  app, in Settings → Seed files. On a 401 or 403 the scripts say so; a
+  viewer hears that it can't write in the app either, and that an editor or
+  admin can.
 - `plugin/skills/metis-export` analyzes *any* repository and writes a `metis-seed.json`.
   To use it from other repos, symlink it into your global skills once per machine:
 
@@ -398,23 +457,29 @@ All optional — see `.env.example`:
 | `OLLAMA_BASE_URL` | Ollama; compose default reaches host Ollama at `host.docker.internal:11434` |
 | `AUTH_ENABLED` | `false` makes every request an admin on the desktop surface — scripts only |
 | `METIS_MCP_SSE_TOKEN` | Required for the MCP server's SSE mode |
+| `METIS_MCP_CLIENT_SECRET` | The `metis-mcp` Keycloak client's secret, which the MCP server signs in with (dev default `dev-mcp-secret`) |
 | `ANTHROPIC_MODELS` etc. | Override the model dropdowns (comma-separated) |
 
 ## Development
 
 ```sh
-# database
-docker compose up -d postgres
+# settings, once: compose and the backend below both read this file
+cp .env.example .env
 
-# backend (Python 3.11+)
+# database, and Keycloak: the backend checks every token against it and the
+# frontend signs in through it (or set AUTH_ENABLED=false in .env for scripts)
+docker compose up -d postgres keycloak
+
+# backend (Python 3.12, as CI and the Docker image use). Settings come from the
+# environment or a .env in the current directory, so point it at the root one.
 cd backend
 python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
-.venv/bin/uvicorn app.main:app --reload --port 8000
+.venv/bin/uvicorn app.main:app --reload --port 8000 --env-file ../.env
 
 # tests (uses a metis_test database on the compose postgres)
 .venv/bin/python -m pytest
 
-# frontend
+# frontend, in a second terminal from the repo root (uvicorn holds this one)
 cd frontend
 npm install
 npm run dev            # http://localhost:4321, proxies to localhost:8000
@@ -441,6 +506,6 @@ backend/
   app/ontology/    model.md — served to the UI, the API and MCP from one file
 frontend/          Astro app: pages, React islands, design system (ds/), API proxy
 docs/              ontology design record (divergence, mental model, graph spec)
-plugin/skills/     metis-export, metis-seed-instance, metis-unseed (Claude Code plugin)
+plugin/            Claude Code plugin: MCP wiring, hooks, eight skills (see its README)
 docker-compose.yml
 ```

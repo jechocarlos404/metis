@@ -182,8 +182,8 @@ def test_mvp_cut_capability_counts():
     assert cut["capabilities"][CAP_B] == {"required": 0, "total": 1}
 
 
-def test_capability_coupling_projection():
-    """Feature precedence projects onto capabilities; internal edges drop."""
+def test_capability_impact_follows_feature_needs():
+    """A feature need between capabilities shows on both sides; needs inside one capability don't."""
     graph = FeatureGraph(sessionmaker=None)
     search = fake_feature(1, "search", capability_id=CAP_A)
     index = fake_feature(2, "index", capability_id=CAP_A)
@@ -193,7 +193,6 @@ def test_capability_coupling_projection():
     graph.add_edge(search.id, index.id, "DEPENDS_ON")  # internal to CAP_A
     graph.add_edge(export.id, search.id, "DEPENDS_ON")  # crosses capabilities
 
-    assert graph.coupling_edges() == {(CAP_B, CAP_A)}
     impact = graph.capability_impact({CAP_A})
     assert impact["dependents"] == [CAP_B]
     assert impact["dependencies"] == []
@@ -202,15 +201,85 @@ def test_capability_coupling_projection():
     assert impact["dependencies"] == [CAP_A]
 
 
-def test_coupling_projects_every_realized_capability():
-    """A feature realizing two capabilities couples each of them to what it needs."""
+def test_capability_impact_counts_every_capability_of_a_needing_feature():
+    """A feature realizing two capabilities makes both depend on what it needs."""
     graph = FeatureGraph(sessionmaker=None)
     summary = fake_feature(1, "ride summary", capability_ids=(CAP_A, CAP_B))
     importer = fake_feature(2, "import rides", capability_id=CAP_C)
     for f in (summary, importer):
         graph.upsert_node(f)
     graph.add_edge(summary.id, importer.id, "DEPENDS_ON")
-    assert graph.coupling_edges() == {(CAP_A, CAP_C), (CAP_B, CAP_C)}
+    assert set(graph.capability_impact({CAP_C})["dependents"]) == {CAP_A, CAP_B}
+    assert set(graph.capability_impact({CAP_A})["dependencies"]) == {CAP_C}
+
+
+def test_capability_impact_never_bridges_products_through_a_shared_capability():
+    """The audit's path: a cafe app and a planning tool both use File Storage.
+    Projected onto capability pairs, Cafe Directory -> File Storage -> LLM ->
+    Knowledge Graph made the cafe app "need" the knowledge graph. No cafe
+    feature needs a knowledge-graph feature, so only LLM depends on it."""
+    cafe_dir, files, llm, kg = (uuid.uuid4() for _ in range(4))
+    cafes, planner = uuid.uuid4(), uuid.uuid4()
+    graph = FeatureGraph(sessionmaker=None)
+    new_cafe = fake_feature(1, "log a cup at a new cafe", capability_id=cafe_dir, product_id=cafes)
+    photos = fake_feature(2, "log a cup with photos", capability_id=files, product_id=cafes)
+    attach = fake_feature(3, "attach documents", capability_id=files, product_id=planner)
+    threads = fake_feature(4, "conversation threads", capability_id=llm, product_id=planner)
+    prereqs = fake_feature(5, "suggest prerequisites", capability_id=llm, product_id=planner)
+    skills = fake_feature(6, "organize skills", capability_id=kg, product_id=planner)
+    for f in (new_cafe, photos, attach, threads, prereqs, skills):
+        graph.upsert_node(f)
+    graph.add_edge(new_cafe.id, photos.id, "DEPENDS_ON")
+    graph.add_edge(attach.id, threads.id, "DEPENDS_ON")
+    graph.add_edge(prereqs.id, skills.id, "DEPENDS_ON")
+
+    assert graph.capability_impact({kg}) == {"dependents": [llm], "dependencies": []}
+    assert graph.capability_impact({cafe_dir}) == {"dependents": [], "dependencies": [files]}
+
+
+def test_capability_impact_follows_links_of_links_including_its_own_features():
+    """A feature of the capability that needs another one of its features
+    brings its other capabilities along, and so does whatever needs it."""
+    cap_d = uuid.uuid4()
+    graph = FeatureGraph(sessionmaker=None)
+    base = fake_feature(1, "store the graph", capability_id=CAP_A)
+    linker = fake_feature(2, "link features", capability_ids=(CAP_A, CAP_B))
+    search = fake_feature(3, "search links", capability_id=CAP_C)
+    report = fake_feature(4, "report on links", capability_id=cap_d)
+    loose = fake_feature(5, "unrelated", capability_id=uuid.uuid4())
+    for f in (base, linker, search, report, loose):
+        graph.upsert_node(f)
+    graph.add_edge(linker.id, base.id, "DEPENDS_ON")
+    graph.add_edge(linker.id, search.id, "BLOCKS")  # search needs linker
+    graph.add_edge(report.id, search.id, "DEPENDS_ON")
+
+    assert set(graph.capability_impact({CAP_A})["dependents"]) == {CAP_B, CAP_C, cap_d}
+    assert graph.capability_impact({cap_d})["dependencies"] == sorted({CAP_A, CAP_B, CAP_C}, key=str)
+
+
+def test_capability_impact_puts_a_capability_on_both_sides_without_a_cycle():
+    """The audit's Knowledge Graph page (A25): one feature built on two
+    capabilities needs another built on the same two, and a third capability's
+    features need and are needed by the first's. Both land on both lists, and
+    the features themselves form no cycle."""
+    kg, catalog, skills = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    graph = FeatureGraph(sessionmaker=None)
+    library = fake_feature(1, "keep a features library", capability_ids=(catalog, kg))
+    link = fake_feature(2, "link features", capability_ids=(catalog, kg))
+    organize = fake_feature(3, "organize skills", capability_ids=(skills, kg))
+    suggest = fake_feature(4, "suggest prerequisites", capability_id=skills)
+    profiles = fake_feature(5, "grade skills", capability_ids=(skills, kg))
+    spot = fake_feature(6, "spot rare skills", capability_id=kg)
+    for f in (library, link, organize, suggest, profiles, spot):
+        graph.upsert_node(f)
+    graph.add_edge(link.id, library.id, "DEPENDS_ON")
+    graph.add_edge(suggest.id, organize.id, "DEPENDS_ON")
+    graph.add_edge(spot.id, profiles.id, "DEPENDS_ON")
+
+    impact = graph.capability_impact({kg})
+    assert set(impact["dependents"]) == {catalog, skills}
+    assert set(impact["dependencies"]) == {catalog, skills}
+    assert graph.find_cycles() == []
 
 
 def test_layout_carries_the_features_own_product():

@@ -100,10 +100,30 @@ def test_broad_capabilities_collapse_to_a_count():
     graph = graph_of(target, *only_big, *only_half)
 
     result = graph.recheck(target.id, {big: "Login", half: "Audit", rare: "Rare"}, {})
-    assert result["broad"] == [{"id": str(big), "name": "Login", "features": 6}]
+    # The count is the number the rule judged: 7 features use Login.
+    assert result["broad"] == [{"id": str(big), "name": "Login", "features": 7}]
     # Sharing only a broad capability means appearing only in the count.
     assert names(result["retest"]) == [f"half {i}" for i in range(5)]
     assert all(r["shared"] == [{"id": str(half), "name": "Audit"}] for r in result["retest"])
+
+
+def test_broad_count_keeps_features_listed_under_breaks():
+    """The audit's case: most features that share the admin console also need
+    the sign-in feature, so they show under breaks. The broad count still
+    says how many use it (at least 6), not the 2 left over."""
+    console = uuid.uuid4()
+    target = feat("sign in", [console])
+    needers = [feat(f"admin page {i}", [console]) for i in range(10)]
+    others = [feat(f"other {i}", [console]) for i in range(2)]
+    plain = [feat(f"public page {i}", []) for i in range(8)]
+    graph = graph_of(target, *needers, *others, *plain)
+    for n in needers:
+        graph.add_edge(n.id, target.id, "DEPENDS_ON")
+
+    result = graph.recheck(target.id, {console: "Admin Console"}, {})
+    assert len(result["breaks"]) == 10
+    assert result["broad"] == [{"id": str(console), "name": "Admin Console", "features": 13}]
+    assert result["retest"] == []
 
 
 def test_a_small_product_never_has_broad_capabilities():

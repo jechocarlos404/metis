@@ -43,11 +43,12 @@ const groups = [
   },
   {
     label: "Build & buy",
-    // Closed by default; open when the current page is inside it. Decided by
-    // path, not by the items, so a page under /tech opens it even if the
-    // presence call failed.
+    // Closed by default; open when the current page is inside it, or once
+    // technologies or stacks exist, so the item that arrives with them is
+    // seen. The path check keeps a page under /tech open even if the presence
+    // call failed.
     collapsible: true,
-    open: ["/features", "/tech", "/stacks"].some(under),
+    open: hasTech || hasStacks || ["/features", "/tech", "/stacks"].some(under),
     items: [
       { href: "/features", label: "Features", icon: "network" },
       hasTech && { href: "/tech", label: "Technology", icon: "circuit-board" },
@@ -99,7 +100,7 @@ const initials =
             style="font-family:var(--font-display); font-weight:var(--weight-semibold); font-size:20px; letter-spacing:var(--tracking-tight); color:var(--text-heading);"
             >metis</span
           >
-          <span class="rail-hide" style="font-family:var(--font-mono); font-size:10px; color:var(--text-secondary);"
+          <span class="rail-hide" style="font-family:var(--font-mono); font-size:var(--text-2xs); color:var(--text-secondary);"
             >v0.1</span
           >
         </div>

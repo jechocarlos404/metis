@@ -9,8 +9,10 @@ const query = Astro.url.searchParams.get("q") ?? "";
 const kind = Astro.url.searchParams.get("kind") ?? "";
 const layer = Astro.url.searchParams.get("layer") ?? "";
 const adoption = Astro.url.searchParams.get("adoption") ?? "";
+const product = Astro.url.searchParams.get("product") ?? ""; // a product slug: exposure for that product only
+const canWrite = ["editor", "admin"].includes(Astro.locals.user?.role);
 ---
 
-<AppLayout title="Tech">
-  <TechCatalogIsland client:load initialView={view} initialQuery={query} initialKind={kind} initialLayer={layer} initialAdoption={adoption} />
+<AppLayout title="Technology">
+  <TechCatalogIsland client:load initialView={view} initialQuery={query} initialKind={kind} initialLayer={layer} initialAdoption={adoption} initialProduct={product} canWrite={canWrite} />
 </AppLayout>

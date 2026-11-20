@@ -372,6 +372,63 @@ async def test_exposure_reason_is_machine_readable(db, client):
 
 
 @pytest.mark.asyncio
+async def test_exposure_for_one_product_names_it_and_counts_only_its_own(db, client):
+    """The filter keeps what the product records using; the subject, the
+    lifecycle gap and the href are the product's, not the estate's."""
+    async with db() as session:
+        product = Product(slug="opensails", name="OpenSails")
+        session.add(product)
+        await session.commit()
+        await session.refresh(product)
+        dying = await tech_service.create_technology(
+            session, TechnologyCreate(slug="nestjs", name="NestJS", kind=TechKind.framework)
+        )
+        await tech_service.create_version(
+            session, dying.id, VersionCreate(label="9.0", eol_on=date.today() + timedelta(days=30))
+        )
+        await tech_service.create_technology(
+            session, TechnologyCreate(slug="redis", name="Redis", kind=TechKind.service)
+        )
+
+    estate = (await client.get("/api/exposure")).json()
+    assert estate["subject"] == {"kind": "estate", "slug": "estate"}
+    assert [r["tech"] for r in estate["answer"]] == ["nestjs"]
+    assert estate["unresolved"][0]["subject"] == "estate"
+    assert estate["href"] == "/tech?view=exposure&window_days=180"
+
+    # OpenSails records no technology: the dying one is not its, and the gap says why.
+    body = (await client.get("/api/exposure?product=opensails")).json()
+    check_envelope(body, Question.tech_exposure)
+    assert body["subject"] == {"kind": "product", "slug": "opensails"}
+    assert body["answer"] == []
+    assert body["unresolved"] == [{
+        "subject": "opensails",
+        "reason": "no technology is recorded as used by this product, so this says "
+        "nothing about what it runs on",
+        "blocked_by": [],
+    }]
+    assert body["href"] == "/tech?view=exposure&window_days=180&product=opensails"
+    # The page that href opens counts the same set: none, for this product.
+    assert (await client.get("/api/tech/lifecycle?product=opensails")).json() == {
+        "technologies": 0, "unknown": 0,
+    }
+    assert (await client.get("/api/tech/lifecycle?product=gone")).status_code == 404
+
+    async with db() as session:
+        await stack_service.record_usage(
+            session, product.id, ProductTechnologyWrite(tech_id=dying.id)
+        )
+    body = (await client.get("/api/exposure?product=opensails&window_days=60")).json()
+    assert [r["tech"] for r in body["answer"]] == ["nestjs"]
+    # NestJS is dated; Redis, unused here, no longer counts against it.
+    assert body["unresolved"] == []
+    assert body["href"] == "/tech?view=exposure&window_days=60&product=opensails"
+    assert (await client.get("/api/tech/lifecycle?product=opensails")).json() == {
+        "technologies": 1, "unknown": 0,
+    }
+
+
+@pytest.mark.asyncio
 async def test_redundancy_is_reported_never_resolved(db, client):
     seeded = await seed(db)
     async with db() as session:

@@ -34,8 +34,12 @@ async def list_features(
 # NB: static routes must be registered before /{feature_id}.
 @router.get("/search", response_model=list[FeatureRead])
 async def search(
-    q: str = Query(min_length=1), limit: int = 20, session: AsyncSession = Depends(get_db)
+    q: str = Query(min_length=1),
+    limit: int | None = Query(None, ge=1),
+    session: AsyncSession = Depends(get_db),
 ):
+    """Every match unless a limit is asked for: the directory shows the
+    count and filters by product, so a silent cap would make both lie."""
     return await search_service.search_features(session, q, limit)
 
 

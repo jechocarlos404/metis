@@ -6,8 +6,8 @@ import pytest
 from fastapi import HTTPException
 from sqlalchemy import select
 
-from app.models import CapabilityMaturity, Feature, FeatureCapability, Product
-from app.schemas.capability import CapabilityCreate, CoverageRequest
+from app.models import CapabilityMaturity, Feature, FeatureCapability, Product, WorkStatus
+from app.schemas.capability import CapabilityCreate, CapabilityUpdate, CoverageRequest
 from app.schemas.feature import FeatureCreate, FeatureUpdate
 from app.services import capabilities as capability_service
 from app.services import features as feature_service
@@ -39,6 +39,7 @@ async def two_products(session):
             name="Estimate climb power",
             product_id=climb.id,
             capability_ids=[physics.id, elevation.id, strava.id],
+            status=WorkStatus.done,
         ),
     )
     await feature_service.create_feature(
@@ -47,6 +48,7 @@ async def two_products(session):
             name="Show ride summary",
             product_id=cycling.id,
             capability_ids=[strava.id, elevation.id],
+            status=WorkStatus.done,
         ),
     )
     return {
@@ -154,6 +156,89 @@ async def test_coverage_of_a_product_idea(db):
     # Summary counts distinct needs, not mentions.
     assert (report.needed, report.existing) == (3, 2)
     assert report.missing == ["Weather forecast"]
+
+
+@pytest.mark.asyncio
+async def test_a_capability_nobody_builds_is_not_ours(db):
+    """Naming a capability is not having it: with no feature realizing it
+    anywhere, it is neither ours nor known from an external product."""
+    async with db() as session:
+        await two_products(session)
+        report = await capability_service.coverage(
+            session,
+            CoverageRequest.model_validate(
+                {"features": [{"name": "Plan a route", "capabilities": ["Route planner"]}]}
+            ),
+        )
+        inventory = {e.name: e for e in await capability_service.inventory(session)}
+        health = await capability_service.health(session)
+
+    match = report.features[0].capabilities[0].match
+    assert match is not None and match.name == "Route planner"
+    assert match.ours is False
+    assert (match.products, match.external_products) == ([], [])
+    assert (report.needed, report.existing) == (1, 0)
+    assert report.missing == ["Route planner"]
+    assert inventory["Route planner"].ours is False
+    # Still ours to explain: planned, and nothing builds toward it.
+    assert any(
+        f.kind == "aspirational_gap" and f.subject_name == "Route planner" for f in health
+    )
+
+
+@pytest.mark.parametrize(
+    ("status", "ours"),
+    [(WorkStatus.pending, False), (WorkStatus.in_progress, False), (WorkStatus.done, True)],
+)
+@pytest.mark.asyncio
+async def test_ours_needs_a_finished_feature(db, status, ours):
+    """Planned or in-progress work isn't having it: only a finished feature of
+    ours makes a capability ours — for the inventory, an idea's coverage and
+    its proven count, and the score of the very product doing the work."""
+    async with db() as session:
+        sync = await make_capability(session, "Cloud sync", CapabilityMaturity.beta)
+        app = await make_product(session, "Notes App")
+        await feature_service.create_feature(
+            session,
+            FeatureCreate(name="Sync notes", product_id=app.id, capability_ids=[sync.id], status=status),
+        )
+        entry = {e.name: e for e in await capability_service.inventory(session)}["Cloud sync"]
+        report = await capability_service.coverage(
+            session,
+            CoverageRequest.model_validate(
+                {"features": [{"name": "Back up", "capabilities": ["Cloud sync"]}]}
+            ),
+        )
+        own = await capability_service.product_coverage(session, app.id)
+
+    assert entry.ours is ours
+    # Who works on it is still shown, whatever the status.
+    assert [p.name for p in entry.products] == ["Notes App"]
+    assert entry.features == 1
+    assert report.features[0].capabilities[0].match.ours is ours
+    assert (report.existing, report.mature) == ((1, 1) if ours else (0, 0))
+    assert report.missing == ([] if ours else ["Cloud sync"])
+    # Its own unfinished feature doesn't make it buildable: not circular.
+    assert (own.buildable, own.missing) == ((["Sync notes"], []) if ours else ([], ["Sync notes"]))
+
+
+@pytest.mark.asyncio
+async def test_a_renamed_capability_is_found_by_its_new_name(db):
+    """A rename keeps the slug, so coverage must also match the current name."""
+    async with db() as session:
+        caps = await two_products(session)
+        await capability_service.update_capability(
+            session, caps["strava"].id, CapabilityUpdate(name="Activity import")
+        )
+        report = await capability_service.coverage(
+            session,
+            CoverageRequest.model_validate(
+                {"features": [{"name": "Sync rides", "capabilities": ["Activity import", "Strava import"]}]}
+            ),
+        )
+    by_name = {n.name: n.match for n in report.features[0].capabilities}
+    assert by_name["Activity import"] is not None and by_name["Activity import"].ours
+    assert by_name["Strava import"].slug == "strava-import"  # the old name still resolves by slug
 
 
 @pytest.mark.asyncio

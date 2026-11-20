@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      # Same image as docker-compose.yml. The tests connect to localhost:5432
+      # as metis/metis and drop and recreate metis_test (backend/tests/conftest.py).
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: metis
+          POSTGRES_PASSWORD: metis
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U metis -d postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12" # backend/Dockerfile: python:3.12-slim
+      - run: pip install -r requirements.txt -r requirements-dev.txt
+      - run: python -m pytest -q
+
+  plugin:
+    # The plugin's hooks and skill scripts promise python3 3.9 or later
+    # (plugin/README.md), and the seed format and its validator live in
+    # hand-kept copies. The backend job runs the same file on 3.12; this runs
+    # it alone, with no backend dependencies, on the floor version.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.9"
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22" # to check the desktop importer's validator agrees
+      - run: pip install pytest
+      - run: python -m pytest -q --noconftest -p no:cacheprovider backend/tests/test_plugin_scripts.py
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22" # frontend/Dockerfile: node:22-alpine
+      - run: npm ci
+      - run: npm run build
+      - run: npm test --if-present

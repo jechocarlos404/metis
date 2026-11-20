@@ -215,8 +215,9 @@ class Offer(BaseModel):
 
 
 class ProductBreak(BaseModel):
-    """Question 2: what breaks if we drop this technology. off_stack means
-    nobody declared the dependency in the first place."""
+    """Question 2: what breaks if we drop this technology. off_stack means the
+    product's stack never declared it; with no stack at all, it is false
+    and the row (no slot) only says the product uses it."""
 
     product_id: uuid.UUID
     product: str

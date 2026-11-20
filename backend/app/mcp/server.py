@@ -19,8 +19,10 @@ import json
 import re
 import uuid
 
+import jsonschema
 from mcp.server import Server
 from mcp.types import (
+    CallToolResult,
     GetPromptResult,
     Prompt,
     PromptMessage,
@@ -32,7 +34,8 @@ from mcp.types import (
 from pydantic import AnyUrl
 
 from app.mcp import render
-from app.mcp.client import ApiError, MetisClient
+from app.mcp.client import ApiError, MetisClient, SetupError
+from app.services.slugs import slugify
 
 server = Server("metis")
 client = MetisClient()
@@ -99,8 +102,8 @@ TOOLS = [
         name="tech_blast_radius",
         description=(
             "What breaks if we drop this technology, and what could replace it. "
-            "required is a break; optional is an inconvenience; off_stack means "
-            "nobody declared the dependency."
+            "required is a break; optional is an inconvenience; off_stack means the "
+            "product's stack never declared it; a product with no stack just uses it."
         ),
         inputSchema={
             "type": "object",
@@ -119,7 +122,7 @@ TOOLS = [
             "type": "object",
             "properties": {
                 "window_days": {"type": "integer", "default": 180},
-                "product": {"type": "string", "description": "Product slug, optional"},
+                "product": {"type": "string", "description": "Product id or slug, optional"},
             },
         },
     ),
@@ -131,7 +134,7 @@ TOOLS = [
         ),
         inputSchema={
             "type": "object",
-            "properties": {"product": {"type": "string", "description": "Product slug"}},
+            "properties": {"product": {"type": "string", "description": "Product id or slug"}},
             "required": ["product"],
         },
     ),
@@ -157,7 +160,7 @@ TOOLS = [
         inputSchema={
             "type": "object",
             "properties": {
-                "product": {"type": "string", "description": "Product slug"},
+                "product": {"type": "string", "description": "Product id or slug"},
                 "slot": {"type": "string", "description": "Slot id, optional"},
                 "archetype": {"type": "string", "description": "Archetype stack id"},
             },
@@ -194,9 +197,13 @@ TOOLS = [
     Tool(
         name="capability_inventory",
         description=(
-            "What we can already do, most reused first: each capability with "
-            "its maturity, our products, our feature count, and external "
-            "products that have it. Ours first, then known only from outside."
+            "What we can already do, most reused first: each capability's "
+            "slug and exact name, its maturity when ours, our products and "
+            "feature count (any status, sub-capabilities included and said), "
+            "and external products that have it. "
+            "Ours (a finished feature of ours realizes it) first, then only "
+            "elsewhere (an external product has it), then not built yet "
+            "(realized by no finished feature)."
         ),
         inputSchema={
             "type": "object",
@@ -211,7 +218,8 @@ TOOLS = [
         description=(
             "How much of a product idea we already have. Give features, each "
             "with the capability names it needs. Each need comes back ours, "
-            "external only, or no match with near names as candidates. Exact "
+            "only elsewhere, not built yet (no finished feature realizes it), or "
+            "no match with near names as candidates. Exact "
             "names only: a candidate is never counted as a match. Ends with an "
             "Open: link that pre-fills Home's idea check; it saves nothing."
         ),
@@ -245,9 +253,13 @@ TOOLS = [
     Tool(
         name="product_score",
         description=(
-            "How much of a product (ours or external) we could build from what "
-            "we have: buildable, partly known, not described, missing a "
-            "capability. A lower bound."
+            "How much of an external product we could build from what "
+            "we have: its features split into four groups that sum to the "
+            "total — buildable, partly known, not described, missing a "
+            "capability. A lower bound. Then the capabilities we lack, ranked by "
+            "how many features each alone would cover, and the three products of "
+            "ours that already have the most of what it names. Our own products "
+            "are not scored."
         ),
         inputSchema={
             "type": "object",
@@ -258,13 +270,15 @@ TOOLS = [
     Tool(
         name="capability",
         description=(
-            "One capability by slug: our products and features that realize "
-            "it, external products apart, the goals that motivate it, and its "
-            "progress rollup."
+            "One capability by slug or name (a name matches by its slug, as in "
+            "check_idea): our products and features that realize it, external "
+            "products apart, the goals that motivate it, and its progress rollup."
         ),
         inputSchema={
             "type": "object",
-            "properties": {"slug": {"type": "string", "description": "Capability slug"}},
+            "properties": {
+                "slug": {"type": "string", "description": "Capability slug or name"}
+            },
             "required": ["slug"],
         },
     ),
@@ -272,24 +286,30 @@ TOOLS = [
         name="feature_why",
         description=(
             "Why a feature exists: the capabilities it realizes, their parents, "
-            "and the goals that motivate them, up to org intent."
+            "and the goals that motivate them, up to org intent. Goals of the "
+            "feature's own product come first; the rest are labelled with their "
+            "products, and each says which capability it motivates."
         ),
         inputSchema={
             "type": "object",
-            "properties": {"feature": {"type": "string", "description": "Feature id"}},
+            "properties": {
+                "feature": {"type": "string", "description": "Feature id or exact feature name"}
+            },
             "required": ["feature"],
         },
     ),
     Tool(
         name="journeys",
         description=(
-            "List journeys, or with an id, one journey's analysis: each step's "
-            "verdict (buildable, known_covered, missing, unknown) and whether "
-            "a user can do it today."
+            "List journeys, or with an id or exact name, one journey's analysis: "
+            "each step's verdict (buildable, known_covered, missing, unknown) and "
+            "whether a user can do it today."
         ),
         inputSchema={
             "type": "object",
-            "properties": {"journey": {"type": "string", "description": "Journey id, optional"}},
+            "properties": {
+                "journey": {"type": "string", "description": "Journey id or exact name, optional"}
+            },
         },
     ),
     Tool(
@@ -330,12 +350,66 @@ async def list_tools() -> list[Tool]:
     return TOOLS
 
 
-@server.call_tool()
-async def call_tool(name: str, arguments: dict) -> list[TextContent]:
+#: The desktop screen of each tool's subject: where an error's Open: line
+#: points when the refusal carries no screen of its own.
+_SCREENS = {
+    "tech_search": "/tech",
+    "capability_supply": "/capabilities",
+    "tech_blast_radius": "/tech",
+    "tech_exposure": "/tech?view=exposure",
+    "stack_redundancy": "/stacks",
+    "tech_encounters": "/tech",
+    "stack_recommend": "/stacks",
+    "propose_binding": "/stacks",
+    "products": "/products",
+    "capability_inventory": "/capabilities",
+    "check_idea": "/home",
+    "product_score": "/products",
+    "capability": "/capabilities",
+    "feature_why": "/features",
+    "journeys": "/journeys",
+    "ready_features": "/features",
+    "recheck": "/features",
+}
+
+
+_TOOLS_BY_NAME = {tool.name: tool for tool in TOOLS}
+
+
+def _check_arguments(name: str, arguments: dict) -> None:
+    """The SDK's own check, made here so its refusal ends with an Open: line
+    like every other: an unknown tool, or arguments its schema refuses."""
+    tool = _TOOLS_BY_NAME.get(name)
+    if tool is None:
+        raise BadInput(f"No tool named {name!r}. The tools are: {', '.join(_TOOLS_BY_NAME)}.")
     try:
+        jsonschema.validate(instance=arguments, schema=tool.inputSchema)
+    except jsonschema.ValidationError as exc:
+        where = ".".join(str(part) for part in exc.absolute_path)
+        raise BadInput(f"Arguments refused{f' at {where}' if where else ''}: {exc.message}.") from None
+
+
+@server.call_tool(validate_input=False)
+async def call_tool(name: str, arguments: dict) -> list[TextContent] | CallToolResult:
+    """An answer, or an error the agent can act on: isError set, one plain
+    sentence, and the Open: line every answer ends with."""
+    href = _SCREENS.get(name, "/home")
+    try:
+        _check_arguments(name, arguments or {})
         return _text(await _dispatch(name, arguments or {}))
     except ApiError as exc:
-        return _text(render.api_error(exc.status, exc.body))
+        hint = None
+        if exc.status == 401:
+            hint = (
+                "This server sent no token (its AUTH_ENABLED is false), and the API "
+                "wants one: set AUTH_ENABLED=true for this server as well."
+                if not client._settings.auth_enabled
+                else "The API refused this server's metis-mcp token."
+            )
+        text = render.api_error(exc.status, exc.body, href, hint)
+    except (BadInput, SetupError) as exc:
+        text = render.error(str(exc), href)
+    return CallToolResult(content=_text(text), isError=True)
 
 
 async def _dispatch(name: str, args: dict) -> str:
@@ -350,48 +424,64 @@ async def _dispatch(name: str, args: dict) -> str:
                 "limit": args.get("limit", 20),
             },
         )
-        return render.tech_search(page, args.get("q"))
+        catalog = page["total"]
+        if not catalog and any(args.get(k) for k in ("q", "kind", "layer", "adoption")):
+            catalog = (await client.get("/api/tech", {"limit": 1}))["total"]
+        return render.tech_search(page, args.get("q"), catalog)
 
     if name == "capability_supply":
-        slug = _safe_slug(args["capability"])
+        # Found the way `capability` finds it, so an unknown one is the same
+        # answer with the same near names, not a refusal.
+        entry, slug = await _find_capability(args["capability"])
+        if entry is None:
+            return await _no_capability(args["capability"], slug)
         envelope = await client.get(
-            f"/api/capabilities/{slug}/supply",
+            f"/api/capabilities/{_safe_slug(entry['slug'])}/supply",
             {"include_unadopted": str(args.get("include_unadopted", True)).lower()},
         )
         stop = _hard_stop(envelope)
         return stop or render.capability_supply(envelope)
 
     if name == "tech_blast_radius":
-        return render.tech_blast_radius(
-            await client.get(f"/api/tech/{_safe_slug(args['tech'])}/blast-radius")
+        tech = _safe_slug(args["tech"], "tech")
+        return await _or_absent(
+            render.tech_blast_radius, f"/api/tech/{tech}/blast-radius", render.no_tech(tech)
         )
 
     if name == "tech_exposure":
+        slug = None
+        if args.get("product"):
+            product = await _product(args["product"])
+            if product is None:
+                return render.no_product(args["product"])
+            slug = _safe_slug(product["slug"], "product")
         return render.tech_exposure(
             await client.get(
-                "/api/exposure",
-                {
-                    "window_days": args.get("window_days", 180),
-                    "product": _safe_slug(args["product"]) if args.get("product") else None,
-                },
+                "/api/exposure", {"window_days": args.get("window_days", 180), "product": slug}
             )
         )
 
     if name == "stack_redundancy":
+        product = await _product(args["product"])
+        if product is None:
+            return render.no_product(args["product"])
         return render.stack_redundancy(
-            await client.get(f"/api/stacks/{_safe_slug(args['product'])}/redundancy")
+            await client.get(f"/api/stacks/{_safe_slug(product['slug'], 'product')}/redundancy")
         )
 
     if name == "tech_encounters":
-        return render.tech_encounters(
-            await client.get(f"/api/tech/{_safe_slug(args['tech'])}/encounters")
+        tech = _safe_slug(args["tech"], "tech")
+        return await _or_absent(
+            render.tech_encounters, f"/api/tech/{tech}/encounters", render.no_tech(tech)
         )
 
     if name == "stack_recommend":
         body = {k: args[k] for k in ("slot", "archetype") if args.get(k)}
-        return render.stack_recommend(
-            await client.post(f"/api/stacks/{_safe_slug(args['product'])}/recommend", body)
-        )
+        product = await _product(args["product"])
+        if product is None:
+            return render.no_product(args["product"])
+        slug = _safe_slug(product["slug"], "product")
+        return render.stack_recommend(await client.post(f"/api/stacks/{slug}/recommend", body))
 
     if name == "propose_binding":
         return await _propose(args)
@@ -424,25 +514,50 @@ async def _dispatch(name: str, args: dict) -> str:
         product = await _product(args["product"])
         if product is None:
             return render.no_product(args["product"])
+        if not product["external"]:
+            return render.own_product(product)
         return render.product_score(
             await client.get(f"/api/products/{_safe_id(product['id'])}/coverage")
         )
 
     if name == "capability":
-        return await _capability(_safe_slug(args["slug"]))
+        return await _capability(args["slug"])
 
     if name == "feature_why":
+        products = await client.get("/api/products")
+        feature_id, named = await _feature_id(args["feature"])
+        if feature_id is None:
+            return render.no_feature(args["feature"], named, products)
+        try:
+            why = await client.get(f"/api/features/{feature_id}/why")
+        except ApiError as exc:
+            if exc.status == 404:
+                return render.no_feature(args["feature"], [], products)
+            raise
+        # The chain lists each goal once; the motivations say which
+        # capability each goal motivates, the goals and products whose it is.
         return render.feature_why(
-            await client.get(f"/api/features/{_safe_id(args['feature'])}/why")
+            why,
+            await client.get(f"/api/features/{feature_id}"),
+            products,
+            await client.get("/api/goals"),
+            await client.get("/api/motivations"),
         )
 
     if name == "journeys":
-        if args.get("journey"):
-            journey = _safe_id(args["journey"])
-            return render.journey_analysis(
-                await client.get(f"/api/journeys/{journey}/analysis")
-            )
-        return render.journeys(await client.get("/api/journeys"))
+        value = args.get("journey")
+        if not value:
+            return render.journeys(await client.get("/api/journeys"))
+        try:
+            journey = _safe_id(value)
+        except BadInput:
+            named = [j for j in await client.get("/api/journeys") if j["name"] == value]
+            if len(named) != 1:
+                return render.no_journey(value, named)
+            journey = _safe_id(named[0]["id"])
+        return await _or_absent(
+            render.journey_analysis, f"/api/journeys/{journey}/analysis", render.no_journey(value, [])
+        )
 
     if name == "ready_features":
         products = await client.get("/api/products")
@@ -451,6 +566,8 @@ async def _dispatch(name: str, args: dict) -> str:
             only = _match_product(products, args["product"])
             if only is None:
                 return render.no_product(args["product"])
+            if only["external"]:
+                return render.external_product_work(only)
         ready = (await client.get("/api/graph/ready"))["ready"]
         pending = None
         if not any(only is None or r["product_id"] == only["id"] for r in ready):
@@ -478,35 +595,68 @@ async def _product(value: str) -> dict | None:
     return _match_product(await client.get("/api/products"), value)
 
 
-async def _recheck(value: str) -> str:
+async def _feature_id(value: str) -> tuple[str | None, list[dict]]:
     """By id, or by exact name. Never a near name, and a name two features
-    share is listed for the agent to pick from, not picked."""
-    products = await client.get("/api/products")
+    share comes back with those features for the agent to pick from, not
+    picked. A name travels only as a query parameter, never in a path."""
     try:
-        feature_id = _safe_id(value)
-    except ValueError:
+        return _safe_id(value), []
+    except BadInput:
         named = [f for f in await client.get("/api/features", {"q": value}) if f["name"] == value]
-        if len(named) != 1:
-            return render.no_feature(value, named, products)
-        feature_id = _safe_id(named[0]["id"])
-    return render.recheck(await client.get(f"/api/graph/recheck/{feature_id}"), products)
+        return (_safe_id(named[0]["id"]) if len(named) == 1 else None), named
 
 
-async def _capability(slug: str) -> str:
-    """Capability routes take an id; agents hold slugs. The inventory resolves
-    one to the other and already carries who uses it, so it is read once."""
-    entry = next(
-        (e for e in await client.get("/api/capabilities/inventory") if e["slug"] == slug),
-        None,
+async def _recheck(value: str) -> str:
+    products = await client.get("/api/products")
+    feature_id, named = await _feature_id(value)
+    if feature_id is None:
+        return render.no_feature(value, named, products)
+    return await _or_absent(
+        lambda answer: render.recheck(answer, products),
+        f"/api/graph/recheck/{feature_id}",
+        render.no_feature(value, [], products),
     )
+
+
+async def _find_capability(value: str) -> tuple[dict | None, str]:
+    """By slug, or by a name matched through its slug — the coverage rule, so
+    this finds what check_idea finds, and a renamed capability by its new name."""
+    slug = _capability_slug(value)
+    entries = await client.get("/api/capabilities/inventory")
+    entry = next((e for e in entries if e["slug"] == slug), None) or next(
+        (e for e in entries if slugify(e["name"]) == slug), None
+    )
+    return entry, slug
+
+
+async def _no_capability(value: str, slug: str) -> str:
+    """The coverage endpoint's own near-name search, so the candidates are the
+    same ones a human would see — and they stay candidates."""
+    report = await client.post(
+        "/api/capabilities/coverage",
+        {"features": [{"name": value, "capabilities": [value]}]},
+    )
+    return render.no_capability(slug, report["features"][0]["capabilities"][0]["candidates"])
+
+
+async def _or_absent(render_fn, path: str, absent: str) -> str:
+    """A subject that doesn't exist under an exact name is an answer, not an
+    error. Only the subject's own 404 reads that way; any other refusal is
+    still one."""
+    try:
+        return render_fn(await client.get(path))
+    except ApiError as exc:
+        if exc.status == 404:
+            return absent
+        raise
+
+
+async def _capability(value: str) -> str:
+    """Capability routes take an id; the inventory resolves one to the other
+    and already carries who uses it, so it is read once."""
+    entry, slug = await _find_capability(value)
     if entry is None:
-        # The coverage endpoint's own near-name search, so the candidates are
-        # the same ones a human would see — and they stay candidates.
-        report = await client.post(
-            "/api/capabilities/coverage",
-            {"features": [{"name": slug, "capabilities": [slug]}]},
-        )
-        return render.no_capability(slug, report["features"][0]["capabilities"][0]["candidates"])
+        return await _no_capability(value, slug)
     cid = _safe_id(entry["id"])
     return render.capability(
         entry,
@@ -541,9 +691,14 @@ async def _propose(args: dict) -> str:
     """Check the slot's offers before proposing. Proposing a technology the
     bind endpoint would reject is worse than proposing nothing — it costs the
     human a click to find out the agent was wrong."""
-    slot, tech = _safe_id(args["slot"]), _safe_slug(args["tech"])
+    slot, tech = _safe_id(args["slot"], "slot"), _safe_slug(args["tech"], "tech")
     href = f"/stacks?slot={slot}&propose={tech}"
-    offers = await client.get(f"/api/stacks/slots/{slot}/offers")
+    try:
+        offers = await client.get(f"/api/stacks/slots/{slot}/offers")
+    except ApiError as exc:
+        if exc.status == 404:
+            return render.no_slot(slot)
+        raise
     slugs = [o["slug"] for o in offers["offers"]]
     if tech not in slugs:
         blocked_by = offers.get("blocked_by") or []
@@ -622,21 +777,75 @@ async def list_resource_templates() -> list[ResourceTemplate]:
 _SLUG = re.compile(r"[a-z0-9][a-z0-9-]*\Z")
 
 
-def _safe_slug(value: str) -> str:
-    if not _SLUG.match(value):
-        raise ValueError(f"Not a slug: {value!r}")
+class BadInput(ValueError):
+    """An argument that cannot be what it claims, refused before any request.
+    The message names what the argument takes and where to find one."""
+
+
+#: What each kind of argument is, and where an agent finds a valid one.
+_TAKES = {
+    "slug": ("a slug", "Slugs are lowercase letters, digits and dashes."),
+    "id": ("an id", "Ids are UUIDs."),
+    "tech": (
+        "a technology slug",
+        "Slugs are lowercase letters, digits and dashes; tech_search lists them.",
+    ),
+    "product": (
+        "a product slug",
+        "Slugs are lowercase letters, digits and dashes; products lists them.",
+    ),
+    "capability": ("a capability slug or name", "capability_inventory lists them."),
+    "slot": (
+        "a slot id",
+        "Slot ids are UUIDs; the metis://stacks/{product} resource lists a product's slots.",
+    ),
+}
+
+
+def _bad(value, kind: str) -> BadInput:
+    what, where = _TAKES[kind]
+    return BadInput(f"Not {what}: {value!r}. {where}")
+
+
+def _safe_slug(value: str, kind: str = "slug") -> str:
+    if not isinstance(value, str) or not _SLUG.match(value):
+        raise _bad(value, kind)
     return value
 
 
-def _safe_id(value: str) -> str:
+def _safe_id(value: str, kind: str = "id") -> str:
     """Slot ids are UUIDs. Same reason as _safe_slug: everything interpolated
     into a request path has to be shaped like what it claims to be."""
-    return str(uuid.UUID(str(value)))
+    try:
+        return str(uuid.UUID(str(value)))
+    except ValueError:
+        raise _bad(value, kind) from None
+
+
+def _capability_slug(value: str) -> str:
+    """A capability slug, or a name matched through its slug — check_idea's
+    rule. Only `slugify`'s output reaches a path, never the value itself."""
+    slug = slugify(value) if isinstance(value, str) else ""
+    if not slug:
+        raise _bad(value, "capability")
+    return slug
 
 
 @server.read_resource()
 async def read_resource(uri: AnyUrl) -> str:
+    """A resource or an error in the tools' shape: one plain sentence and the
+    Open: line, never a raw exception. The SDK sends the message as is."""
     raw = str(uri)
+    href = "/stacks" if raw.startswith("metis://stacks/") else "/tech" if raw.startswith("metis://tech/") else "/home"
+    try:
+        return await _read_resource(raw)
+    except ApiError as exc:
+        raise ValueError(render.api_error(exc.status, exc.body, href)) from None
+    except (BadInput, SetupError) as exc:
+        raise ValueError(render.error(str(exc), href)) from None
+
+
+async def _read_resource(raw: str) -> str:
     if raw == "metis://ontology/model":
         return await client.text("/api/ontology/model")
     if raw == "metis://policy/adoptions":
@@ -646,15 +855,16 @@ async def read_resource(uri: AnyUrl) -> str:
         return json.dumps(await client.get(f"/api/tech/{slug}"), indent=2)
     if raw.startswith("metis://stacks/"):
         product = _safe_slug(raw.removeprefix("metis://stacks/"))
-        stacks = await client.get("/api/stacks")
-        views = []
-        for stack in stacks:
-            if stack.get("product_id"):
-                views.append(await client.get(f"/api/stacks/{stack['id']}"))
+        found = await _product(product)
+        if found is None:
+            raise BadInput(f"No product {product!r} in metis. The products tool lists their slugs.")
+        stacks = await client.get("/api/stacks", {"product_id": found["id"]})
+        views = [await client.get(f"/api/stacks/{stack['id']}") for stack in stacks]
         return json.dumps(
             {"product": product, "stacks": views}, indent=2, default=str
         )
-    raise ValueError(f"Unknown resource: {uri}")
+    known = [str(r.uri) for r in RESOURCES] + [t.uriTemplate for t in RESOURCE_TEMPLATES]
+    raise BadInput(f"No resource {raw!r}. The resources are: {', '.join(known)}.")
 
 
 # ---- prompts ----
@@ -734,7 +944,8 @@ async def get_prompt(name: str, arguments: dict | None) -> GetPromptResult:
             "it to the model's word and say which you are using."
         )
     else:
-        raise ValueError(f"Unknown prompt: {name}")
+        known = ", ".join(p.name for p in PROMPTS)
+        raise ValueError(render.error(f"No prompt named {name!r}. The prompts are: {known}.", "/home"))
     return GetPromptResult(
         description=next(p.description for p in PROMPTS if p.name == name),
         messages=[

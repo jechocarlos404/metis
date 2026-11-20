@@ -191,13 +191,17 @@ does not become a log line, a 404, or an omission.
 **Read-only everywhere except the desktop.** A write from any other surface is:
 
 ```
-403 { "error": "human_action_required",
-      "message": "Binding a slot is a human action.",
-      "href": "/stacks?slot=api::Auth" }
+403 { "detail": { "error": "human_action_required",
+                  "message": "Binding a slot is a human action.",
+                  "href": "/stacks?slot=9f6c1d2e-…" } }
 ```
 
 Not `401` — the caller is who they say. Not `405` — the route exists. The refusal names
 the reason and hands over the screen that can act.
+
+A 403 has two shapes. That object is the surface's. A person on the desktop whose role
+can't write (a viewer) gets a plain sentence, `403 { "detail": "Requires editor or admin
+role" }`: no screen would help them. Only the first has `detail.error`.
 
 Surface comes from the token's signed `azp`, so a service or MCP token cannot present
 itself as the desktop. An unrecognised client gets `api`, the surface with the fewest
@@ -215,8 +219,11 @@ compare a chat transcript against, and the write boundary is inherited rather th
 re-implemented. The server's token is issued to `metis-mcp`, the backend derives
 `Surface.mcp` from the signed `azp`, and any write comes back 403.
 
-Eight tools — the six `question` keys, plus `tech_search` (navigation: everything else
-takes a slug it returns) and `propose_binding` (a hand-off that persists nothing).
+Seventeen tools — the six `question` keys, plus `tech_search` (navigation: everything
+else takes a slug it returns) and `propose_binding` (a hand-off that persists nothing),
+and nine that answer inventory questions: `products`, `capability_inventory`,
+`check_idea`, `product_score`, `capability`, `feature_why`, `journeys`,
+`ready_features` and `recheck`.
 Four resources: `metis://ontology/model` and `metis://policy/adoptions` serve the same
 files as `GET /api/ontology/model` and `/api/ontology/adoptions`; `metis://tech/{slug}`
 and `metis://stacks/{product}` are templated. Three prompts.
@@ -249,9 +256,11 @@ the caller named it on purpose.
    `capability_id` is `RESTRICT`. A Feature's Product is direct (`features.product_id`),
    never derived from the Capabilities it shares with other Products. A Product may
    be `external` — someone else's, known from the outside. Its Features are never
-   our work (excluded from ready, topo, MVP cut and rollup), and a Capability only
-   external Features realize is known, not ours: the inventory lists it apart and
-   coverage counts it missing, whatever its maturity says.
+   our work (excluded from ready, topo, MVP cut and rollup). A Capability is ours
+   only when a finished (`done`) Feature of one of our own Products realizes it.
+   One only external Features realize is known, not ours (`only elsewhere`): the
+   inventory lists it apart and coverage counts it not ours, whatever its maturity
+   says. One only planned or in-progress Features realize is `not built yet`.
 2. `technologies` has no column whose value depends on who is asking.
 3. `REQUIRES ∪ RUNS_ON` is jointly acyclic, rejected at write time. `ALTERNATIVE_TO`
    is symmetric — write both rows, or read with the detail endpoint's `OR`.

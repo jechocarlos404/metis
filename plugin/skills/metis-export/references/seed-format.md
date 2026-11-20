@@ -55,10 +55,15 @@ then copy it over both.
   feature names its product with `product_ref`. A product can be someone else's
   (`"external": true`) — known only from the outside, as a user. Its features say
   what it does; they never count as our work, and capabilities only external
-  features realize never count as ours.
-- **Capabilities are shared across products.** Identity is the exact name, on
-  purpose: when two projects both have "Authentication", they must use that exact
-  name so metis can see the reuse. Never prefix names to keep projects apart, and
+  features realize never count as ours. A capability is ours when a finished
+  (`done`) feature of one of our own products realizes it; one only planned or
+  in-progress features realize is not built yet, and setting a feature's
+  `status` to `done` is what makes its capabilities ours.
+- **Capabilities are shared across products.** Identity is the slug, on
+  purpose: names that differ only in case or punctuation ("Keyword search",
+  "Keyword Search") are the same capability, and any other difference makes a
+  new one. When two projects both have "Authentication", they must use that name
+  so metis can see the reuse. Never prefix names to keep projects apart, and
   never create a near-duplicate ("Auth" next to "Authentication").
 - **Goals** motivate capabilities (via `motivations`), never features directly.
 - Edge semantics: `A DEPENDS_ON B` means *A needs B*. `A BLOCKS B` means *A stands in
@@ -103,12 +108,20 @@ then copy it over both.
   "ref": "cap-graph",
   "parent_ref": null,              // another capability ref (PART_OF, single parent)
   "name": "Feature Graph",         // required; durable noun
+  "slug": "feature-graph",         // optional; default: the name lowercased, each run of
+                                   // characters outside a-z 0-9 turned into one "-", ends trimmed
   "description": "…",
   "maturity": "planned",           // "planned" | "alpha" | "beta" | "ga" | "deprecated" | "retired"
   "facets": { "layer": "service" },        // string -> string only
   "evidence_anchors": ["src/graph/impact.py"]  // file paths or URLs grounding this capability
 }
 ```
+
+The slug is the capability's identity (see "Loader behavior"). Each
+capability's slug (given or derived) must be non-empty and unique within the
+file; give one explicitly when the name has no letters or digits. Otherwise
+leave it out unless you copy it from metis: a file metis exports carries each
+capability's slug, so it finds the same capability even after a rename.
 
 ### motivations
 
@@ -167,8 +180,8 @@ on a technology, below) are links metis stores as marked guesses:
   confirmed and goes in `capability_refs`.
 
 For an **external** product: no evidence anchors (there is no code to point at),
-leave capability `maturity` unset — it describes *our* implementation, and an
-external-only capability's maturity is ignored anyway. Put only the links you
+leave capability `maturity` unset — it describes *our* implementation, and a
+capability that is only elsewhere has its maturity ignored anyway. Put only the links you
 can confirm in `capability_refs`; anything inferred goes in
 `capability_guesses`, with `unknown_capabilities: true`.
 
@@ -260,24 +273,30 @@ satisfies. A technology is shared across products, like a capability.
   as a guess.
 - `fit` is `"native"`, `"partial"` or `"workaround"`. It is required on a
   confirmed entry and optional on a guess. `basis` is optional, one sentence.
+  On a confirmed entry it is stored as the link's note, and metis's export
+  writes that note back as `basis`.
 - Each `capability_ref` is a capabilities[] ref and appears once per technology.
 - Slugs are identity: the loader reuses an existing technology with the same
   slug. Each technology's slug (given or derived) must be non-empty and unique
   within the file; give one explicitly when the name has no letters or digits.
-- Adoption stances and stack slots are human decisions and are never in a seed file.
+- Adoption stances, stack slots and a link's cost (license, ops burden,
+  familiarity, lock-in) are human decisions and are never in a seed file. Nor is what
+  people record about a technology: its vendor, homepage, versions and who
+  used it.
 
 ## Loader behavior (what you can rely on)
 
-- **Idempotent, add-only.** The loader matches existing entities (goals by
-  (goal_type, title); capabilities and products by name; features by
+- **Idempotent, never deletes.** The loader matches existing entities (goals by
+  (goal_type, title); capabilities by slug; products by name; features by
   (product, name); technologies by slug; edges by (src, dst, kind); motivations,
   product technologies and satisfactions by pair) and reuses them instead of
   duplicating. It never deletes an entity or a confirmed link, and updates only
   two things: an existing feature gains the file's confirmed links it lacks and
-  takes its stated `unknown_capabilities` (below), and a guess that already
-  exists for the same (capability, feature) or (capability, technology) pair
-  takes the file's `confidence` and `basis`. The only row that goes away is a
-  guess the file confirms. Re-running the same file is safe.
+  takes the `status`, `description` and `unknown_capabilities` the file states
+  (below), and a guess that already exists for the same (capability, feature)
+  or (capability, technology) pair takes the file's `confidence` and `basis`.
+  The only row that goes away is a guess the file confirms. Re-running the same
+  file is safe: the second run changes nothing.
 - After a load that writes (not a dry run), the loader records that every product
   in the file was just seeded; metis shows that time as how fresh the product's
   map is. This is bookkeeping, not a change to the product.
@@ -286,18 +305,32 @@ satisfies. A technology is shared across products, like a capability.
   uses for the same ability (read `GET /api/capabilities/inventory` first) — that
   shared name is what links projects. Only features and products need names that
   stay distinct across projects.
+- A capability matches by slug: its explicit `slug`, else the slug its name
+  derives. A rename in metis keeps the old slug, so when no slug matches, the
+  derived slug is also compared with each capability's current name, slugified
+  the same way. Case and punctuation never make a second capability. Every
+  capability the file would create is listed by name in the dry run, with the
+  closest existing names, so a near-duplicate can be caught before the import.
 - An existing feature (matched by (product, name)) is reused, and its confirmed
   links only grow: every `capability_refs` entry it does not realize yet is
-  added, and a link the file leaves out is never removed. When the file states
-  `unknown_capabilities`, the feature takes that value (a repo's own export is
-  the authority on its own features); when the file leaves it out, the feature
-  keeps its own; so a file that states `true` reopens a flag someone cleared.
-  Its name, description, status and everything else stay as they are. Its `capability_guesses` are still loaded, so a product's next export can
-  add guesses to features metis already has.
+  added, and a link the file leaves out is never removed. A product's own seed
+  is the authority on its own features, so when the file states `status`,
+  `description` or `unknown_capabilities` and it differs, the feature takes the
+  file's value: exporting again after a feature ships marks it `done`. This can
+  overwrite a value someone set by hand in metis (a file that states `true`
+  reopens an `unknown_capabilities` flag someone cleared), so the dry run lists
+  every overwrite per feature with the old and new value, long text trimmed
+  to where it differs, for example
+  `feature "Export a PRD": status in_progress → done; description "Exports a PRD." → "Exports a PRD as Markdown."`
+  (the app shows the status in plain words, and both full texts on hover), and the import reports the same. A field the file leaves out is left alone,
+  and the feature's name, priority, priority rationale and facets never change:
+  a file that only adds links (a gaps file, say) should leave out `status` and
+  `description`. Its `capability_guesses` are still loaded, so a product's next
+  export can add guesses to features metis already has.
 - Confirming a link retires its guess: when a feature gains a confirmed link,
   metis deletes any guess about that same (feature, capability) pair.
-- An existing capability is reused as-is: its description, maturity, facets and
-  `evidence_anchors` are not updated.
+- An existing capability is reused as-is: its name, description, maturity,
+  facets and `evidence_anchors` are not updated.
 - A guess is skipped when the instance already has that link confirmed (the
   feature already realizes the capability, or the technology already satisfies
   it). An existing technology keeps its name, kind and layer.

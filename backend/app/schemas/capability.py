@@ -78,13 +78,18 @@ class ProductRef(BaseModel):
 class InventoryEntry(CapabilityRead):
     """A capability and who uses it, over its submap — derived from the
     features realizing it, never stored, never from bundles. `products` and
-    `features` are ours; `external_products` are someone else's that have it.
-    `ours` is false only when every realizing feature is external."""
+    `features` are ours, whatever their status; `external_products` are
+    someone else's that have it. `ours` is true only when a finished (done)
+    feature of ours realizes it: false while ours are planned or in progress,
+    when every realizing feature is external, and when nothing realizes it."""
 
     ours: bool
     products: list[ProductRef]
     external_products: list[ProductRef]
     features: int
+    #: Of `features`, those linked to this capability itself; the rest reach
+    #: it only through a sub-capability.
+    direct_features: int
 
 
 class IdeaFeature(BaseModel):
@@ -103,8 +108,11 @@ class CapabilityMatch(BaseModel):
     slug: str
     name: str
     maturity: CapabilityMaturity
-    #: False when only external products realize it: it exists, we don't have it.
+    #: True only when a finished (done) feature of ours realizes it. False when
+    #: only external products have it (it exists, we don't have it) or when no
+    #: finished feature does — tell the two apart by `external_products`.
     ours: bool
+    #: Our products realizing it, whatever their features' status.
     products: list[ProductRef]
     external_products: list[ProductRef]
 
@@ -129,25 +137,63 @@ class CoverageReport(BaseModel):
     #: Distinct needs across the idea (a capability two features need counts once).
     needed: int
     existing: int
-    #: Distinct needs we have (external-only matches count as missing).
+    #: Distinct needs we have (a match that isn't ours — only elsewhere, or
+    #: realized by no finished feature — counts as missing).
     #: `mature`: those of ours at beta or ga — built and proven, not just named.
     mature: int
     missing: list[str]
 
 
+class MissingCapability(BaseModel):
+    """A capability a scored product's features name that isn't ours."""
+
+    name: str
+    #: None when the name resolves to no capability: nothing to link to.
+    slug: str | None
+    #: How many of the product's features name it.
+    features: int
+    #: Of those, how many lack only this one: adding it covers everything they
+    #: name (not necessarily all they need, when their list is incomplete).
+    only_gap: int
+    #: Products other than the scored one that have it — never ours, or it
+    #: wouldn't be missing. Empty: no other product in metis has it.
+    elsewhere: list[ProductRef]
+
+
+class ClosestProduct(BaseModel):
+    product: ProductRef
+    #: How many of the capabilities the scored product's features name it has
+    #: built (a finished feature realizes them).
+    capabilities: int
+
+
 class ProductCoverage(BaseModel):
     """How much of an existing product — typically someone else's — we could
     build from what we already have. A lower bound: features declaring unknown
-    capabilities never count as buildable, whatever their known links say."""
+    capabilities never count as buildable, whatever their known links say.
+    `buildable`, `partly`, `missing` and `not_described` are feature names, in
+    feature order, and partition the product's features: each is in exactly one."""
 
     product: ProductRef
     total_features: int
-    #: Features whose every capability is known and ours.
+    #: Every capability known, at least one named, and all of them ours.
     buildable: list[str]
-    #: Features whose capability list is declared incomplete.
-    unknown_features: list[str]
-    #: Of those, the ones where we have every capability anyone could name — a
-    #: weaker signal than buildable, since the unnamed rest may be missing.
-    known_covered: list[str]
+    #: Capability list declared incomplete; every capability named so far is
+    #: ours — a weaker signal than buildable, since the unnamed rest may be missing.
+    partly: list[str]
+    #: Names at least one capability that isn't ours, complete list or not.
+    missing: list[str]
+    #: Of `missing`, those whose capability list is also declared incomplete:
+    #: adding what's named may still not be enough.
+    missing_incomplete: list[str]
+    #: Names no capability at all.
+    not_described: list[str]
     #: Coverage of the features' known capabilities; None when none are known.
     report: CoverageReport | None
+    #: Every named capability that isn't ours, most useful first: by `only_gap`,
+    #: then `features`, then name.
+    missing_capabilities: list[MissingCapability]
+    #: The three of our products, never this one, that have built the most of
+    #: the capabilities its features name (`report.needed` is the whole), plus
+    #: any tied with the third — so the list can be longer than three.
+    closest_products: list[ClosestProduct]

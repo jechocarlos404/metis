@@ -1,18 +1,22 @@
 import React from "react";
 import { PageHeader } from "../shell/PageHeader.jsx";
-import { Badge, Button, Dialog, Icon, IconButton, Input, Select, Switch, DeleteConfirm } from "../../ds";
+import { Badge, Button, Dialog, Icon, IconButton, Input, Select, Switch, DeleteConfirm, Toast } from "../../ds";
 import { api } from "../../lib/api.js";
-import { pressable } from "../../lib/pressable.js";
 import { ROLE_WORDS, roleCan, roleLabel } from "../shell/roles.js";
 
 const ROLES = ["admin", "editor", "viewer"].map((r) => ({ value: r, label: roleLabel(r) }));
 const ROLE_TONES = { admin: "accent", editor: "ok", viewer: "neutral" };
+const NO_ROLE = "No role yet, so this person sees nothing until you give them one.";
+const displayName = (u) => [u.first_name, u.last_name].filter(Boolean).join(" ") || u.username;
 
 const TH = {
-  fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: "var(--tracking-caps)",
+  fontFamily: "var(--font-mono)", fontSize: "var(--text-2xs)", letterSpacing: "var(--tracking-caps)",
   textTransform: "uppercase", color: "var(--text-secondary)",
 };
 const COLS = "1fr 1fr 90px 90px 40px";
+// Under 560px the email sits under the name and status under the role, so
+// every column stays on screen.
+const NARROW_COLS = "minmax(0,1fr) auto 40px";
 const EMPTY = { username: "", email: "", firstName: "", lastName: "", role: "viewer", password: "", temporary: true };
 
 export default function UsersIsland() {
@@ -25,6 +29,22 @@ export default function UsersIsland() {
   const [saving, setSaving] = React.useState(false);
   const [dialogError, setDialogError] = React.useState(null);
   const [confirmingDelete, setConfirmingDelete] = React.useState(false);
+  const [toast, setToast] = React.useState(null);
+  // The table's own width, measured after mount (the island is server-rendered).
+  const [tableEl, setTableEl] = React.useState(null);
+  const [narrow, setNarrow] = React.useState(false);
+  React.useEffect(() => {
+    if (!tableEl) return undefined;
+    const observer = new ResizeObserver(() => setNarrow(tableEl.offsetWidth < 560));
+    observer.observe(tableEl);
+    return () => observer.disconnect();
+  }, [tableEl]);
+
+  React.useEffect(() => {
+    if (!toast) return undefined;
+    const id = setTimeout(() => setToast(null), 6000);
+    return () => clearTimeout(id);
+  }, [toast]);
 
   const editing = dialog?.mode === "edit" ? users.find((u) => u.id === dialog.id) : null;
 
@@ -49,7 +69,7 @@ export default function UsersIsland() {
       email: u.email ?? "",
       firstName: u.first_name ?? "",
       lastName: u.last_name ?? "",
-      role: u.role ?? "viewer",
+      role: u.role ?? "", // no role stays no role until the admin picks one
       enabled: u.enabled,
     });
     setNewPassword("");
@@ -81,20 +101,32 @@ export default function UsersIsland() {
             temporary: draft.temporary,
           },
         });
-      } else {
-        await api(`/users/${editing.id}`, {
-          method: "PATCH",
-          body: {
-            email: draft.email.trim() || null,
-            first_name: draft.firstName.trim() || null,
-            last_name: draft.lastName.trim() || null,
-            role: draft.role,
-            enabled: draft.enabled,
-          },
+        await load();
+        setDialog(null);
+        setToast({
+          title: `Created ${draft.username.trim()} as ${roleLabel(draft.role)}`,
+          detail: draft.temporary ? "They choose their own password the first time they sign in." : undefined,
         });
+      } else {
+        const body = {
+          email: draft.email.trim() || null,
+          first_name: draft.firstName.trim() || null,
+          last_name: draft.lastName.trim() || null,
+          role: draft.role || null,
+          enabled: draft.enabled,
+        };
+        const changes = [
+          body.role !== (editing.role ?? null) && `role now ${roleLabel(body.role)}`,
+          body.enabled !== editing.enabled && (body.enabled ? "can sign in again" : "can't sign in now"),
+          body.email !== (editing.email ?? null) && "email updated",
+          (body.first_name !== (editing.first_name ?? null) || body.last_name !== (editing.last_name ?? null)) && "name updated",
+        ].filter(Boolean);
+        const { username } = editing;
+        await api(`/users/${editing.id}`, { method: "PATCH", body });
+        await load();
+        setDialog(null);
+        setToast({ title: `Saved ${username}`, detail: changes.length ? `${changes.join(", ")}.` : "Nothing changed." });
       }
-      await load();
-      setDialog(null);
     } catch (e) {
       setDialogError(String(e.message));
     } finally {
@@ -114,6 +146,10 @@ export default function UsersIsland() {
       setNewPassword("");
       setDialogError(null);
       setDialog(null);
+      setToast({
+        title: `Password set for ${editing.username}`,
+        detail: newPasswordTemp ? "They choose a new one the next time they sign in." : undefined,
+      });
     } catch (e) {
       setDialogError(String(e.message));
     } finally {
@@ -125,9 +161,11 @@ export default function UsersIsland() {
     setSaving(true);
     setDialogError(null);
     try {
+      const { username } = editing;
       await api(`/users/${editing.id}`, { method: "DELETE" });
       await load();
       setDialog(null);
+      setToast({ title: `Deleted ${username}` });
     } catch (e) {
       setDialogError(String(e.message));
       setConfirmingDelete(false);
@@ -159,37 +197,51 @@ export default function UsersIsland() {
         <div style={{ padding: "8px 24px", fontSize: "var(--text-sm)", color: "var(--danger-fg)" }}>{error}</div>
       )}
       <div style={{ flex: 1, overflowY: "auto", margin: 20, minWidth: 0 }}>
-        <div style={{ background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", overflow: "hidden" }}>
-          <div style={{ display: "grid", gridTemplateColumns: COLS, padding: "8px 16px", borderBottom: "1px solid var(--border-hairline)", ...TH }}>
-            <span>User</span><span>Email</span><span>Role</span><span>Status</span><span />
+        <div ref={setTableEl} style={{ background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", overflowX: "auto" }}>
+          <div style={{ minWidth: narrow ? 0 : 560 }}>
+          <div style={{ display: "grid", gridTemplateColumns: narrow ? NARROW_COLS : COLS, gap: narrow ? 8 : 0, padding: "8px 16px", borderBottom: "1px solid var(--border-hairline)", ...TH }}>
+            {narrow
+              ? <><span>User</span><span>Role</span><span /></>
+              : <><span>User</span><span>Email</span><span>Role</span><span>Status</span><span /></>}
           </div>
-          {users.map((u, i) => (
-            <div key={u.id} {...pressable(() => openEdit(u))}
-              style={{ display: "grid", gridTemplateColumns: COLS, alignItems: "center", padding: "10px 16px", gap: 8,
+          {users.map((u, i) => {
+            const email = <span style={{ color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{u.email || "—"}</span>;
+            const role = <span title={u.role ? roleCan(u.role) : NO_ROLE}>{u.role ? <Badge tone={ROLE_TONES[u.role]}>{roleLabel(u.role)}</Badge> : <Badge tone="warn">no role</Badge>}</span>;
+            const status = (
+              <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: u.enabled ? "var(--ok-fg)" : "var(--text-secondary)" }}>
+                {u.enabled ? "enabled" : "disabled"}
+              </span>
+            );
+            // A click anywhere on the row edits; keyboard and screen readers
+            // use the row's one button, so no control sits inside another.
+            return (
+            <div key={u.id} onClick={() => openEdit(u)}
+              style={{ display: "grid", gridTemplateColumns: narrow ? NARROW_COLS : COLS, alignItems: "center", padding: "10px 16px", gap: 8,
                 borderBottom: i < users.length - 1 ? "1px solid var(--border-hairline)" : "none", cursor: "pointer", fontSize: "var(--text-sm)" }}>
               <span style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
                 <span style={{ color: "var(--text-heading)", fontWeight: "var(--weight-medium)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {[u.first_name, u.last_name].filter(Boolean).join(" ") || u.username}
+                  {displayName(u)}
                 </span>
                 {u.username !== u.email && (
                   <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     {u.username}
                   </span>
                 )}
+                {narrow && email}
               </span>
-              <span style={{ color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{u.email || "—"}</span>
-              <span title={u.role ? roleCan(u.role) : "No role yet, so this person sees nothing until you give them one."}>{u.role ? <Badge tone={ROLE_TONES[u.role]}>{roleLabel(u.role)}</Badge> : <Badge tone="warn">no role</Badge>}</span>
-              <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: u.enabled ? "var(--ok-fg)" : "var(--text-secondary)" }}>
-                {u.enabled ? "enabled" : "disabled"}
-              </span>
-              <IconButton size="sm" label="Edit user" onClick={(e) => { e.stopPropagation(); openEdit(u); }}>
+              {narrow
+                ? <span style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 4 }}>{role}{status}</span>
+                : <>{email}{role}{status}</>}
+              <IconButton size="sm" label={`Edit ${displayName(u)}`} onClick={(e) => { e.stopPropagation(); openEdit(u); }}>
                 <Icon name="pencil" size={13} />
               </IconButton>
             </div>
-          ))}
+            );
+          })}
           {users.length === 0 && !error && (
             <div style={{ padding: 16, fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>No users yet. Add one with New user above.</div>
           )}
+          </div>
         </div>
       </div>
 
@@ -203,10 +255,13 @@ export default function UsersIsland() {
               <DeleteConfirm armed={confirmingDelete} onArm={() => setConfirmingDelete(true)} onCancel={() => setConfirmingDelete(false)} onConfirm={remove} disabled={saving}
                 label="Delete" confirmLabel={"Delete user"} style={{ marginRight: "auto" }} />
             )}
-            <Button size="sm" variant="secondary" onClick={() => setDialog(null)}>Cancel</Button>
-            <Button size="sm" variant="accent" disabled={saving} onClick={save}>
-              {dialog?.mode === "new" ? "Create user" : "Save"}
-            </Button>
+            {/* While a delete is armed, Keep is the one way back. */}
+            {!confirmingDelete && <>
+              <Button size="sm" variant="secondary" onClick={() => setDialog(null)}>Cancel</Button>
+              <Button size="sm" variant="accent" disabled={saving} onClick={save}>
+                {dialog?.mode === "new" ? "Create user" : "Save"}
+              </Button>
+            </>}
           </>
         }
       >
@@ -222,16 +277,17 @@ export default function UsersIsland() {
           )}
           <Input label="Email" type="email" value={draft.email}
             onChange={(e) => setDraft({ ...draft, email: e.target.value })} placeholder="jane@metis.local" />
-          <div style={{ display: "flex", gap: 12 }}>
-            <Input label="First name" style={{ flex: 1 }} value={draft.firstName}
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
+            <Input label="First name" style={{ flex: "1 1 140px", minWidth: 0 }} inputStyle={{ minWidth: 0 }} value={draft.firstName}
               onChange={(e) => setDraft({ ...draft, firstName: e.target.value })} />
-            <Input label="Last name" style={{ flex: 1 }} value={draft.lastName}
+            <Input label="Last name" style={{ flex: "1 1 140px", minWidth: 0 }} inputStyle={{ minWidth: 0 }} value={draft.lastName}
               onChange={(e) => setDraft({ ...draft, lastName: e.target.value })} />
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             <Select label="Role" value={draft.role}
-              onChange={(e) => setDraft({ ...draft, role: e.target.value })} options={ROLES} />
-            <span style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>{roleCan(draft.role)}</span>
+              onChange={(e) => setDraft({ ...draft, role: e.target.value })}
+              options={draft.role ? ROLES : [{ value: "", label: "No role", disabled: true }, ...ROLES]} />
+            <span style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>{draft.role ? roleCan(draft.role) : NO_ROLE}</span>
           </div>
 
           {dialog?.mode === "new" ? (
@@ -259,6 +315,11 @@ export default function UsersIsland() {
           )}
         </div>
       </Dialog>
+      {toast && (
+        <div style={{ position: "fixed", bottom: 20, right: 20, zIndex: 200, maxWidth: "calc(100vw - 40px)" }}>
+          <Toast tone="ok" title={toast.title} detail={toast.detail} onDismiss={() => setToast(null)} style={{ width: "auto", maxWidth: 340 }} />
+        </div>
+      )}
     </>
   );
 }

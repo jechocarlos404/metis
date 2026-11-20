@@ -1,6 +1,7 @@
 import uuid
 
 from fastapi import APIRouter, Depends, Query
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
@@ -30,7 +31,8 @@ from app.schemas.technology import (
     VersionRead,
     VersionUpdate,
 )
-from app.models import Technology
+from app.models import Product, Technology
+from app.services import stacks as stack_service
 from app.services import technologies as tech_service
 from app.services.slugs import by_slug
 
@@ -109,6 +111,23 @@ async def exposure(session: AsyncSession = Depends(get_db)):
     """What are we exposed to: EOL inside 180 days, a stance already given up
     on, or a bus factor of one. Computed per request, never stored."""
     return await tech_service.exposure(session)
+
+
+class Lifecycle(BaseModel):
+    technologies: int
+    unknown: int  # no end-of-life date and no maintainer count recorded
+
+
+@router.get("/lifecycle", response_model=Lifecycle)
+async def lifecycle(product: str | None = None, session: AsyncSession = Depends(get_db)):
+    """How many technologies exposure can't judge, so "nothing at risk" is
+    never read as "safe" when nothing is known. `product` (a slug) narrows it
+    to the technologies that product uses, as exposure's filter does."""
+    using = None
+    if product is not None:
+        target = await by_slug(session, Product, product, "Product")
+        using = await stack_service.tech_ids_used_by(session, target.id)
+    return await tech_service.lifecycle(session, using)
 
 
 @router.get("/offers", response_model=list[Offer])

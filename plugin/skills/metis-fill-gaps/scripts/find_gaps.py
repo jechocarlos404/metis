@@ -8,7 +8,10 @@ hooks find it, with exact matches only:
      slugified, equals one of our products' slugs.
 Pass --product "<exact name>" to name it yourself instead.
 
-Usage: python3 find_gaps.py [--repo DIR] [--product NAME] [--base-url URL]
+With auth on, pass a token (--token, or METIS_TOKEN / METIS_API_TOKEN): any
+valid token reads, including the read-only metis-mcp service account's.
+
+Usage: python3 find_gaps.py [--repo DIR] [--product NAME] [--base-url URL] [--token TOKEN]
 """
 import argparse
 import json
@@ -16,6 +19,7 @@ import os
 import re
 import subprocess
 import sys
+import urllib.error
 import urllib.request
 
 
@@ -23,13 +27,19 @@ def slugify(value):
     return re.sub(r"[^a-z0-9]+", "-", value.strip().lower()).strip("-")
 
 
-def get(base, path):
+def get(base, path, token):
     req = urllib.request.Request(base.rstrip("/") + path)
-    token = os.environ.get("METIS_API_TOKEN")
     if token:
         req.add_header("Authorization", f"Bearer {token}")
-    with urllib.request.urlopen(req, timeout=10) as resp:
-        return json.load(resp)
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return json.load(resp)
+    except urllib.error.HTTPError as e:
+        if e.code == 401:
+            why = "the token was refused (expired? they last 5 minutes)" if token else "no token was sent"
+            sys.exit(f"error: GET {path} returned 401: the API has auth on and {why}. "
+                     "Pass --token or set METIS_TOKEN; see the skill's SKILL.md.")
+        raise
 
 
 def git(cwd, *args):
@@ -71,12 +81,17 @@ def main():
     ap.add_argument("--repo", default=os.getcwd())
     ap.add_argument("--product", help="exact product name, instead of finding it from the repo")
     ap.add_argument("--base-url", default=os.environ.get("METIS_API_URL", "http://localhost:8000"))
+    ap.add_argument(
+        "--token",
+        default=os.environ.get("METIS_TOKEN") or os.environ.get("METIS_API_TOKEN"),
+        help="bearer token for an instance with auth on (default: $METIS_TOKEN, else $METIS_API_TOKEN)",
+    )
     args = ap.parse_args()
 
     try:
-        products = get(args.base_url, "/api/products")
-        features = get(args.base_url, "/api/features")
-        cap_names = {c["id"]: c["name"] for c in get(args.base_url, "/api/capabilities")}
+        products = get(args.base_url, "/api/products", args.token)
+        features = get(args.base_url, "/api/features", args.token)
+        cap_names = {c["id"]: c["name"] for c in get(args.base_url, "/api/capabilities", args.token)}
     except OSError as e:
         sys.exit(f"error: metis at {args.base_url} is unreachable: {e}")
 

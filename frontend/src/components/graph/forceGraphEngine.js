@@ -23,6 +23,7 @@ import { forceSimulation, forceLink, forceManyBody, forceCollide, forceX, forceY
 import { select } from "d3-selection";
 import { zoom as d3zoom, zoomIdentity } from "d3-zoom";
 import { drag as d3drag } from "d3-drag";
+import { READABLE_SCALE, fitTransform, openTransform, pickTransform, readableUnion, revealTransform } from "./graph-data.js";
 
 // Keeps card-shaped nodes from overlapping. A circle wide enough for a card
 // also pushes rows far apart vertically; this pushes each overlapping pair
@@ -69,6 +70,9 @@ const DEFAULTS = {
   scaleExtent: [0.2, 2.5],
   renderTauMs: 70, // low-pass time constant for the render-position smoothing
   reducedMotion: false,
+  // Screen px to keep clear on each side when framing, for the controls drawn
+  // over the canvas: {top, right, bottom, left} (graph-data.js frame()).
+  frameInsets: () => 0,
 };
 
 const TICK_MS = 1000 / 60;
@@ -131,24 +135,28 @@ export function createForceGraph(opts) {
   // from the same rAF loop that drives physics so there's a single clock
   // driving every visual change instead of a second, independent one.
   let transformAnimation = null;
-  // Set by fitWhenSettled(): frame the nodes once the layout stops moving.
-  // A pan or zoom by the user cancels it, so a late fit never yanks the view.
-  let fitPending = false;
+  // Set by openWhenSettled(): {focusId}, framed once the layout stops moving.
+  // A pan or zoom by the user cancels it, so a late frame never yanks the view.
+  let openPending = null;
 
   let currentTransform = zoomIdentity;
 
   // ---------------------------------------------------------------- zoom --
+  // Extent from the client box, as every fit here measures: d3's default
+  // reads the svg's width length, which throws while it isn't laid out
+  // (a tween step as Group by switches).
   const zoomBehavior = d3zoom()
+    .extent(() => [[0, 0], [svgEl.clientWidth || 1, svgEl.clientHeight || 1]])
     .scaleExtent(o.scaleExtent)
     .on("zoom", (event) => {
       if (event.sourceEvent) {
         transformAnimation = null; // a real gesture always wins over a running tween
-        fitPending = false;
+        openPending = null;
       }
       currentTransform = event.transform;
       viewportEl.setAttribute("transform", currentTransform.toString());
-      // Below this scale labels are under 6px: unreadable, and costly to redraw.
-      svgEl.classList.toggle("graph-far", currentTransform.k < 0.5);
+      // Below this scale names would draw under 11px: hidden, never shrunk.
+      svgEl.classList.toggle("graph-far", currentTransform.k < READABLE_SCALE);
     });
   select(svgEl).call(zoomBehavior).on("dblclick.zoom", null); // dblclick is reserved for unpinning
 
@@ -318,9 +326,10 @@ export function createForceGraph(opts) {
     }
     for (const id of edgeEls.keys()) paintEdge(id);
 
-    if (fitPending && settled && draggingId == null) {
-      fitPending = false;
-      fitToView();
+    if (openPending && settled && draggingId == null) {
+      const { focus } = openPending;
+      openPending = null;
+      openView(focus);
     }
     if (!settled || draggingId != null || transformAnimation) {
       rafHandle = requestAnimationFrame(frame);
@@ -365,36 +374,120 @@ export function createForceGraph(opts) {
     if (p >= 1) transformAnimation = null;
   }
 
-  function fitWhenSettled() {
-    fitPending = true;
+  // A card's box in graph units, plus `margin`.
+  function boxOf(id, margin) {
+    const p = renderPos.get(id);
+    const n = nodeById.get(id);
+    if (!p || !n) return null;
+    const hw = (n.halfW ?? halfW) + margin;
+    const hh = (n.halfH ?? halfH) + margin;
+    return { x0: p.x - hw, y0: p.y - hh, x1: p.x + hw, y1: p.y + hh };
+  }
+
+  function bounds() {
+    const boxes = Array.from(renderPos.keys(), (id) => boxOf(id, 40)).filter(Boolean);
+    if (!boxes.length) return null;
+    return {
+      x0: Math.min(...boxes.map((b) => b.x0)),
+      y0: Math.min(...boxes.map((b) => b.y0)),
+      x1: Math.max(...boxes.map((b) => b.x1)),
+      y1: Math.max(...boxes.map((b) => b.y1)),
+    };
+  }
+
+  function frameTo(t, duration) {
+    // Fit may need to go further out than the zoom floor; let the wheel follow it there.
+    const [min, max] = zoomBehavior.scaleExtent();
+    if (t.k < min) zoomBehavior.scaleExtent([t.k, max]);
+    animateTransform(zoomIdentity.translate(t.x, t.y).scale(t.k), duration);
+  }
+
+  /** Every node in view, however small that makes them. */
+  function fitToView(duration = 450) {
+    openPending = null; // pressed while settling: the view the graph opens on must not undo it (B40)
+    const b = bounds();
+    if (b) frameTo(fitTransform(b, svgEl.clientWidth || 1, svgEl.clientHeight || 1, o.frameInsets(), o.scaleExtent[1]), duration);
+  }
+
+  /**
+   * The view a graph opens on (openTransform()). `focus` is a card's id, kept
+   * in view, or {ids, centre}: the first of those cards and as many after it
+   * as show with it at a readable scale (readableUnion()), centred; or
+   * {pick, near}: a picked card and the cards it lights (framePick()).
+   */
+  function openView(focus, duration = 450) {
+    if (focus?.pick != null) {
+      if (boxOf(focus.pick, 8)) {
+        framePick(focus.pick, focus.near, duration);
+        return;
+      }
+      focus = null; // no such card (a stale ?goal=): the plain opening view
+    }
+    const b = bounds();
+    if (!b) return;
+    const w = svgEl.clientWidth || 1;
+    const h = svgEl.clientHeight || 1;
+    const inset = o.frameInsets();
+    const { ids, centre = false } = focus == null ? { ids: [] } : typeof focus === "object" ? focus : { ids: [focus] };
+    const box = readableUnion(ids.map((id) => boxOf(id, 8)).filter(Boolean), w, h, inset);
+    frameTo(openTransform(b, w, h, inset, o.scaleExtent[1], box, centre), duration);
+  }
+
+  function openWhenSettled(focus) {
+    openPending = { focus };
     ensureLoopRunning();
   }
 
-  function fitToView(duration = 450) {
-    const pts = Array.from(renderPos.values());
-    if (!pts.length) return;
-    const pad = Math.max(o.nodeSize.width, o.nodeSize.height) / 2 + 32;
-    const xMin = Math.min(...pts.map((p) => p.x)) - pad;
-    const xMax = Math.max(...pts.map((p) => p.x)) + pad;
-    const yMin = Math.min(...pts.map((p) => p.y)) - pad;
-    const yMax = Math.max(...pts.map((p) => p.y)) + pad;
-    const w = svgEl.clientWidth || 1;
-    const h = svgEl.clientHeight || 1;
-    const spanX = Math.max(1, xMax - xMin);
-    const spanY = Math.max(1, yMax - yMin);
-    const k = Math.min(o.scaleExtent[1], Math.max(o.scaleExtent[0], Math.min(w / spanX, h / spanY)));
-    const cx = (xMin + xMax) / 2;
-    const cy = (yMin + yMax) / 2;
-    animateTransform(zoomIdentity.translate(w / 2 - cx * k, h / 2 - cy * k).scale(k), duration);
+  /**
+   * Pans to a card picked outside the canvas when it is out of view. Never
+   * mid-drag. While the graph is still settling, the view it opens on keeps
+   * it in view instead, unless that view is a grouped graph's hubs (a feature
+   * selected for you on load must not pull the view off its goals).
+   */
+  function reveal(id) {
+    if (draggingId != null) return;
+    if (openPending) {
+      if (!openPending.focus?.centre) openPending = { focus: id };
+      return;
+    }
+    const box = boxOf(id, 8);
+    if (!box) return;
+    const t = revealTransform(currentTransform, box, svgEl.clientWidth || 1, svgEl.clientHeight || 1, o.frameInsets());
+    if (!t) return;
+    openPending = null;
+    frameTo(t, 300);
+  }
+
+  /**
+   * Frames a card picked outside the canvas with the cards in `near` (the
+   * ones it lights), so its lines are in view: centred on it when they fit
+   * around it at a readable scale, else all of them fitted (pickTransform()).
+   * Never closer than scale 1, or the user's zoom when closer. Never
+   * mid-drag, so a card pressed on the canvas stays under the pointer. While
+   * the graph is still settling, it becomes what opens.
+   */
+  function framePick(id, near = [], duration = 300) {
+    if (draggingId != null) return;
+    if (openPending) {
+      openPending = { focus: { pick: id, near } };
+      return;
+    }
+    const box = boxOf(id, 8);
+    if (!box) return;
+    const k = Math.min(o.scaleExtent[1], Math.max(1, currentTransform.k));
+    const boxes = near.map((n) => boxOf(n, 8)).filter(Boolean);
+    frameTo(pickTransform(box, boxes, svgEl.clientWidth || 1, svgEl.clientHeight || 1, o.frameInsets(), k), duration);
   }
 
   function zoomBy(factor) {
+    openPending = null; // as Fit (B40)
     const w = svgEl.clientWidth || 1;
     const h = svgEl.clientHeight || 1;
     const cx = w / 2;
     const cy = h / 2;
     const t0 = currentTransform;
-    const k1 = Math.min(o.scaleExtent[1], Math.max(o.scaleExtent[0], t0.k * factor));
+    const [min, max] = zoomBehavior.scaleExtent();
+    const k1 = Math.min(max, Math.max(min, t0.k * factor));
     const wx = (cx - t0.x) / t0.k;
     const wy = (cy - t0.y) / t0.k;
     animateTransform(zoomIdentity.translate(cx - wx * k1, cy - wy * k1).scale(k1), 180);
@@ -503,7 +596,10 @@ export function createForceGraph(opts) {
     unregisterEdge,
     update,
     fitToView,
-    fitWhenSettled,
+    openView,
+    openWhenSettled,
+    reveal,
+    framePick,
     zoomBy,
     setReducedMotion,
     destroy,

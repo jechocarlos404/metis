@@ -12,7 +12,7 @@ export { Switch } from "./forms/Switch.jsx";
 export { BudgetBadge } from "./pipeline/BudgetBadge.jsx";
 export { PipelineStepper } from "./pipeline/PipelineStepper.jsx";
 export { PriorityBadge } from "./pipeline/PriorityBadge.jsx";
-export { StatusBadge } from "./pipeline/StatusBadge.jsx";
+export { STATUS_TONE, StatusBadge } from "./pipeline/StatusBadge.jsx";
 export { TicketCard } from "./pipeline/TicketCard.jsx";
 export { Card } from "./surfaces/Card.jsx";
 export { Dialog } from "./surfaces/Dialog.jsx";

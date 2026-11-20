@@ -1,6 +1,6 @@
 import React from "react";
 import { PageHeader } from "../shell/PageHeader.jsx";
-import { Button, Dialog, Icon, IconButton, Input, PriorityBadge, Select, StatusBadge, Tabs, DeleteConfirm } from "../../ds";
+import { Button, Dialog, Icon, IconButton, Input, PriorityBadge, Select, StatusBadge, Tabs, Toast, DeleteConfirm } from "../../ds";
 import { api } from "../../lib/api.js";
 import { readParam, useParamRestore, writeParams } from "../../lib/url-state.js";
 import { GoalNetworkView } from "../graph/GoalNetworkView.jsx";
@@ -20,6 +20,8 @@ export default function GoalsIsland({ canWrite = true }) {
   const [saving, setSaving] = React.useState(false);
   const [confirmingDelete, setConfirmingDelete] = React.useState(false);
   const [error, setError] = React.useState(null);
+  const [notice, setNotice] = React.useState(null); // what the last write did
+  const [scrollTo, setScrollTo] = React.useState(null); // a goal to bring into view once rendered
 
   const load = React.useCallback(async () => {
     const [goalList, products, motivations, capabilities] = await Promise.all([
@@ -99,8 +101,9 @@ export default function GoalsIsland({ canWrite = true }) {
     setSaving(true);
     setError(null);
     try {
+      let saved;
       if (dialog.mode === "new") {
-        await api("/goals", {
+        saved = await api("/goals", {
           method: "POST",
           body: {
             goal_type: draft.goal_type,
@@ -112,7 +115,7 @@ export default function GoalsIsland({ canWrite = true }) {
           },
         });
       } else {
-        await api(`/goals/${dialog.goal.id}`, {
+        saved = await api(`/goals/${dialog.goal.id}`, {
           method: "PATCH",
           body: {
             title: draft.title.trim(),
@@ -124,9 +127,13 @@ export default function GoalsIsland({ canWrite = true }) {
           },
         });
       }
+      const created = dialog.mode === "new";
       setDialog(null);
       setDraft(EMPTY_DRAFT);
       await load();
+      setNotice({ tone: "ok", title: `${created ? "Created" : "Saved"} ${saved.display_id}`, detail: saved.title });
+      setHighlight(saved.id);
+      setScrollTo(saved.id);
     } catch (e) {
       setError(String(e.message));
     } finally {
@@ -138,9 +145,11 @@ export default function GoalsIsland({ canWrite = true }) {
     setSaving(true);
     setError(null);
     try {
-      await api(`/goals/${dialog.goal.id}`, { method: "DELETE" });
+      const gone = dialog.goal;
+      await api(`/goals/${gone.id}`, { method: "DELETE" });
       setDialog(null);
       await load();
+      setNotice({ tone: "ok", title: `Deleted ${gone.display_id}`, detail: gone.title });
     } catch (e) {
       setError(String(e.message));
       setConfirmingDelete(false);
@@ -162,11 +171,22 @@ export default function GoalsIsland({ canWrite = true }) {
     writeParams({ goal: id }, { push: true });
   };
 
+  React.useEffect(() => {
+    if (!scrollTo) return;
+    document.getElementById(`goal-${scrollTo}`)?.scrollIntoView({ block: "center", behavior: "smooth" });
+    setScrollTo(null);
+  }, [scrollTo, goals]);
+  React.useEffect(() => {
+    if (!notice) return undefined;
+    const t = setTimeout(() => setNotice(null), 6000);
+    return () => clearTimeout(t);
+  }, [notice]);
+
   const highlightStyle = (id) => (id === highlight ? { outline: "2px solid var(--accent)", outlineOffset: 2 } : null);
 
   const editButton = (goal) =>
     canWrite ? (
-      <IconButton size="sm" label="Edit goal"
+      <IconButton size="sm" label={`Edit ${goal.title}`}
         onClick={(e) => { e.preventDefault(); e.stopPropagation(); openEdit(goal); }}>
         <Icon name="pencil" size={13} />
       </IconButton>
@@ -215,18 +235,20 @@ export default function GoalsIsland({ canWrite = true }) {
           <div style={{ display: "flex", flexDirection: "column", gap: 28 }}>
             {orgs.map((org) => (
               <div key={org.id}>
-                <div id={`goal-${org.id}`} style={{ background: "var(--surface-inverse)", borderRadius: "var(--radius-lg)", padding: "20px 24px", display: "flex", alignItems: "center", gap: 16, ...highlightStyle(org.id) }}>
+                <div id={`goal-${org.id}`} style={{ background: "var(--surface-inverse)", borderRadius: "var(--radius-lg)", padding: "20px 24px", display: "flex", flexWrap: "wrap", alignItems: "center", gap: 16, ...highlightStyle(org.id) }}>
                   <Icon name="target" size={20} style={{ color: "var(--aegean-4)" }} />
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: "var(--tracking-caps)", textTransform: "uppercase", color: "var(--aegean-4)" }}>org goal · {org.display_id}</div>
+                  <div style={{ flex: "1 1 220px", minWidth: 0 }}>
+                    <div style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-2xs)", letterSpacing: "var(--tracking-caps)", textTransform: "uppercase", color: "var(--aegean-4)" }}>org goal · {org.display_id}</div>
                     <div style={{ fontFamily: "var(--font-display)", fontSize: "var(--text-xl)", fontWeight: "var(--weight-semibold)", color: "var(--text-inverse)", letterSpacing: "var(--tracking-tight)" }}>{org.title}</div>
+                    {org.description && <div style={{ fontSize: "var(--text-sm)", color: "var(--aegean-4)", marginTop: 4 }}>{org.description}</div>}
+                    {org.success_criteria && <div style={{ fontSize: "var(--text-xs)", color: "var(--aegean-4)", marginTop: 2 }}>Success: {org.success_criteria}</div>}
                   </div>
                   <span style={{ fontSize: "var(--text-xs)", color: "var(--aegean-4)", whiteSpace: "nowrap" }}>
                     {count(orgCapabilityCount(org), "capability", "capabilities")} linked
                   </span>
                   <StatusBadge status={org.status} />
                   {canWrite && (
-                    <IconButton size="sm" label="Edit goal" style={{ color: "var(--aegean-4)" }}
+                    <IconButton size="sm" label={`Edit ${org.title}`} style={{ color: "var(--aegean-4)" }}
                       onClick={() => openEdit(org)}>
                       <Icon name="pencil" size={13} />
                     </IconButton>
@@ -235,6 +257,7 @@ export default function GoalsIsland({ canWrite = true }) {
                 <GoalList
                   goals={productGoals.filter((g) => g.parent_goal_id === org.id)}
                   productCounts={productCounts}
+                  orgProducts={productCounts[org.id] ?? []}
                   capsByGoal={capsByGoal}
                   highlightStyle={highlightStyle}
                   editButton={editButton}
@@ -254,6 +277,12 @@ export default function GoalsIsland({ canWrite = true }) {
           </div>
         </div>
       </div>
+      )}
+
+      {notice && (
+        <div style={{ position: "fixed", right: 20, bottom: 20, zIndex: 200 }}>
+          <Toast {...notice} onDismiss={() => setNotice(null)} />
+        </div>
       )}
 
       <Dialog
@@ -338,21 +367,31 @@ export default function GoalsIsland({ canWrite = true }) {
   );
 }
 
-function GoalList({ goals, productCounts, capsByGoal, highlightStyle, editButton, emptyText, canWrite }) {
+function GoalList({ goals, productCounts, orgProducts = [], capsByGoal, highlightStyle, editButton, emptyText, canWrite }) {
   return (
     <>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "16px 0 10px", fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: "var(--tracking-caps)", textTransform: "uppercase", color: "var(--text-secondary)" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "16px 0 10px", fontFamily: "var(--font-mono)", fontSize: "var(--text-2xs)", letterSpacing: "var(--tracking-caps)", textTransform: "uppercase", color: "var(--text-secondary)" }}>
         <span style={{ width: 14, height: 1, background: "var(--ink-3)" }} />product goals · {goals.length}
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         {goals.map((g) => {
-          const served = productCounts[g.id] || [];
+          const served = productCounts[g.id]?.length ? productCounts[g.id] : orgProducts;
           const caps = capsByGoal[g.id] || [];
           return (
-            <div key={g.id} id={`goal-${g.id}`} style={{ display: "flex", alignItems: "center", gap: 14, background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", boxShadow: "var(--shadow-card)", padding: "14px 18px", ...highlightStyle(g.id) }}>
+            <div key={g.id} id={`goal-${g.id}`} style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 14, background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", boxShadow: "var(--shadow-card)", padding: "14px 18px", ...highlightStyle(g.id) }}>
               <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-secondary)", width: 46 }}>{g.display_id}</span>
-              <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ flex: "1 1 220px", minWidth: 0 }}>
                 <div style={{ fontSize: "var(--text-md)", fontWeight: "var(--weight-semibold)", color: "var(--text-heading)" }}>{g.title}</div>
+                {served.length > 0 && (
+                  <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", marginTop: 2 }}>
+                    For {served.map((p, i) => (
+                      <React.Fragment key={p.id}>{i > 0 && ", "}<a href={`/products?product=${p.id}`}>{p.name}</a></React.Fragment>
+                    ))}
+                  </div>
+                )}
+                {g.description && (
+                  <div style={{ fontSize: "var(--text-sm)", color: "var(--text-body)", marginTop: 2 }}>{g.description}</div>
+                )}
                 {g.success_criteria && (
                   <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", marginTop: 2 }}>Success: {g.success_criteria}</div>
                 )}
@@ -369,12 +408,11 @@ function GoalList({ goals, productCounts, capsByGoal, highlightStyle, editButton
                   )}
                 </div>
               </div>
-              {g.priority != null && <PriorityBadge priority={g.priority} rationale={PRIORITY_HINT} />}
-              {served.map((p) => (
-                <a key={p.id} href={`/products?product=${p.id}`} style={{ fontSize: "var(--text-xs)", whiteSpace: "nowrap" }}>{p.name}</a>
-              ))}
-              <StatusBadge status={g.status} />
-              {editButton(g)}
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginLeft: "auto" }}>
+                {g.priority != null && <PriorityBadge priority={g.priority} rationale={PRIORITY_HINT} />}
+                <StatusBadge status={g.status} />
+                {editButton(g)}
+              </div>
             </div>
           );
         })}

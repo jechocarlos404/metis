@@ -3,7 +3,7 @@
 
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
-import { changeLabel, fieldRows } from "../src/components/chat/proposal-words.js";
+import { changeLabel, display, fieldRows, objects } from "../src/components/chat/proposal-words.js";
 
 const GOAL_ID = "bc55de64-3d5a-4934-b404-b0945c6e2492";
 
@@ -28,6 +28,24 @@ describe("approval card", () => {
     assert.equal(rows.unknown_capabilities.label, "capability list incomplete");
     assert.equal(rows.unknown_capabilities.text, "yes");
     assert.equal(rows.name.raw, null);
+  });
+
+  test("a thing an earlier change creates shows by name, even in a list", () => {
+    const made = { proposal: "p-1", name: "Ride Café Stops" };
+    const [row] = fieldRows({ capability: made }, null);
+    assert.equal(row.text, "Ride Café Stops");
+    const [list] = fieldRows({ capabilities: ["Maps", made] }, null);
+    assert.equal(list.text, "Maps, Ride Café Stops");
+  });
+
+  test("untrusted shapes become text, never objects on the page (SR2)", () => {
+    assert.equal(display({ nested: true }), '{"nested":true}');
+    assert.equal(display(["a", 2]), "a, 2");
+    assert.equal(display(null), "");
+    assert.deepEqual(objects("not a list"), []);
+    assert.deepEqual(objects(["s", 7, null, ["x"], { title: "E" }]), [{ title: "E" }]);
+    const rows = fieldRows({ maturity: { odd: 1 } }, null);
+    assert.equal(rows[0].text, '{"odd":1}');
   });
 
   test("headings say what the change does, not the tool's name", () => {

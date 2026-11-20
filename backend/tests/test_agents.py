@@ -507,6 +507,59 @@ async def test_named_arguments_cover_features_products_tickets_and_prd_pins(db):
         assert epic["capability"] == str(maps.id)  # the arguments themselves are not touched
 
 
+MALFORMED_DOCUMENTS = [
+    "not a document",
+    {"epics": "not a list"},
+    {"epics": ["an epic as a string", 7, None]},
+    {"epics": [{"title": "E", "capability": {"nested": True}, "stories": "not a list"}]},
+    {"epics": [{"title": "E", "stories": ["a story as a string", {"title": "S", "feature": ["x"]}]}]},
+]
+
+
+@pytest.mark.asyncio
+async def test_sr2_malformed_prd_documents_never_break_proposing_or_reading(db):
+    """SR2: model output is untrusted. A PRD document of the wrong shape is
+    still proposed (the tool refuses it when applied) or refused plainly, and
+    the thread still lists, its card falling back to the raw arguments."""
+    async with db() as session:
+        session.add(Product(slug="atlas", name="Atlas", summary="s"))
+        await session.commit()
+    calls = [("create_prd_draft", {"product": "Atlas", "document": d}) for d in MALFORMED_DOCUMENTS]
+    reply, _ = await _propose_turn(db, "spec_decomposer", *calls)
+    assert reply.status == "done"
+    # A non-string where a reference goes is refused; every other shape is proposed.
+    assert [s["status"] for s in reply.tool_calls] == ["proposed", "proposed", "proposed", "failed", "failed"]
+
+    # Rows saved before pinning existed can hold anything: reading still works.
+    async with db() as session:
+        for d in MALFORMED_DOCUMENTS:
+            session.add(ChatProposal(message_id=reply.id, tool_name="create_prd_draft", arguments={"product": 5, "document": d}))
+        session.add(ChatProposal(message_id=reply.id, tool_name="link_features", arguments={"src": {"proposal": "x", "name": "Gone"}, "dst": ["?"]}))
+        await session.commit()
+    async with chat_client(db) as http:
+        response = await http.get(f"/api/chat/threads/{reply.thread_id}/messages")
+    assert response.status_code == 200
+    cards = response.json()[-1]["proposals"]
+    assert len(cards) == 3 + len(MALFORMED_DOCUMENTS) + 1
+    assert cards[-1]["named_arguments"]["src"] == "Gone"
+
+
+@pytest.mark.asyncio
+async def test_sr2_a_naming_error_leaves_the_raw_arguments(db, monkeypatch):
+    import app.agents.proposals as proposal_module
+
+    async def boom(*args, **kwargs):
+        raise RuntimeError("unexpected")
+
+    reply, _ = await _propose_turn(db, "feature_manager", ("create_capability", {"name": "Search"}))
+    monkeypatch.setattr(proposal_module, "named_arguments", boom)
+    async with chat_client(db) as http:
+        response = await http.get(f"/api/chat/threads/{reply.thread_id}/messages")
+    assert response.status_code == 200
+    (card,) = response.json()[-1]["proposals"]
+    assert card["named_arguments"] is None and card["arguments"] == {"name": "Search"}
+
+
 @pytest.mark.asyncio
 async def test_existing_product_coverage_says_what_the_product_page_says(db):
     """A6: the model gets the page's four groups, ranking and closest products

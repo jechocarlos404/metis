@@ -235,10 +235,16 @@ async def named_arguments(session: AsyncSession, tool_name: str, arguments: dict
 
 
 async def name_proposals(session: AsyncSession, proposals) -> None:
-    """Fill `named_arguments` on each ProposalRead of one reply."""
+    """Fill `named_arguments` on each ProposalRead of one reply. A proposal
+    whose arguments can't be named keeps None, and the card shows them raw."""
     positions = {str(p.id): i for i, p in enumerate(proposals, 1)}
     for p in proposals:
-        p.named_arguments = await named_arguments(session, p.tool_name, p.arguments, positions)
+        try:
+            p.named_arguments = await named_arguments(session, p.tool_name, p.arguments, positions)
+        except Exception:
+            log.exception("Naming proposal %s failed", p.id)
+            await session.rollback()
+            p.named_arguments = None
 
 
 # ---- deciding ----

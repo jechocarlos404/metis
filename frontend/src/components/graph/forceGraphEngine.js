@@ -23,6 +23,7 @@ import { forceSimulation, forceLink, forceManyBody, forceCollide, forceX, forceY
 import { select } from "d3-selection";
 import { zoom as d3zoom, zoomIdentity } from "d3-zoom";
 import { drag as d3drag } from "d3-drag";
+import { READABLE_SCALE, fitTransform, openTransform, revealTransform } from "./graph-data.js";
 
 // Keeps card-shaped nodes from overlapping. A circle wide enough for a card
 // also pushes rows far apart vertically; this pushes each overlapping pair
@@ -133,9 +134,9 @@ export function createForceGraph(opts) {
   // from the same rAF loop that drives physics so there's a single clock
   // driving every visual change instead of a second, independent one.
   let transformAnimation = null;
-  // Set by fitWhenSettled(): frame the nodes once the layout stops moving.
-  // A pan or zoom by the user cancels it, so a late fit never yanks the view.
-  let fitPending = false;
+  // Set by openWhenSettled(): {focusId}, framed once the layout stops moving.
+  // A pan or zoom by the user cancels it, so a late frame never yanks the view.
+  let openPending = null;
 
   let currentTransform = zoomIdentity;
 
@@ -145,12 +146,12 @@ export function createForceGraph(opts) {
     .on("zoom", (event) => {
       if (event.sourceEvent) {
         transformAnimation = null; // a real gesture always wins over a running tween
-        fitPending = false;
+        openPending = null;
       }
       currentTransform = event.transform;
       viewportEl.setAttribute("transform", currentTransform.toString());
-      // Below this scale labels are under 6px: unreadable, and costly to redraw.
-      svgEl.classList.toggle("graph-far", currentTransform.k < 0.5);
+      // Below this scale names would draw under 11px: hidden, never shrunk.
+      svgEl.classList.toggle("graph-far", currentTransform.k < READABLE_SCALE);
     });
   select(svgEl).call(zoomBehavior).on("dblclick.zoom", null); // dblclick is reserved for unpinning
 
@@ -320,9 +321,10 @@ export function createForceGraph(opts) {
     }
     for (const id of edgeEls.keys()) paintEdge(id);
 
-    if (fitPending && settled && draggingId == null) {
-      fitPending = false;
-      fitToView();
+    if (openPending && settled && draggingId == null) {
+      const { focusId } = openPending;
+      openPending = null;
+      openView(focusId);
     }
     if (!settled || draggingId != null || transformAnimation) {
       rafHandle = requestAnimationFrame(frame);
@@ -367,28 +369,62 @@ export function createForceGraph(opts) {
     if (p >= 1) transformAnimation = null;
   }
 
-  function fitWhenSettled() {
-    fitPending = true;
+  // A card's box in graph units, plus `margin`.
+  function boxOf(id, margin) {
+    const p = renderPos.get(id);
+    const n = nodeById.get(id);
+    if (!p || !n) return null;
+    const hw = (n.halfW ?? halfW) + margin;
+    const hh = (n.halfH ?? halfH) + margin;
+    return { x0: p.x - hw, y0: p.y - hh, x1: p.x + hw, y1: p.y + hh };
+  }
+
+  function bounds() {
+    const boxes = Array.from(renderPos.keys(), (id) => boxOf(id, 40)).filter(Boolean);
+    if (!boxes.length) return null;
+    return {
+      x0: Math.min(...boxes.map((b) => b.x0)),
+      y0: Math.min(...boxes.map((b) => b.y0)),
+      x1: Math.max(...boxes.map((b) => b.x1)),
+      y1: Math.max(...boxes.map((b) => b.y1)),
+    };
+  }
+
+  function frameTo(t, duration) {
+    // Fit may need to go further out than the zoom floor; let the wheel follow it there.
+    const [min, max] = zoomBehavior.scaleExtent();
+    if (t.k < min) zoomBehavior.scaleExtent([t.k, max]);
+    animateTransform(zoomIdentity.translate(t.x, t.y).scale(t.k), duration);
+  }
+
+  /** Every node in view, however small that makes them. */
+  function fitToView(duration = 450) {
+    const b = bounds();
+    if (b) frameTo(fitTransform(b, svgEl.clientWidth || 1, svgEl.clientHeight || 1, o.fitInsetLeft(), o.scaleExtent[1]), duration);
+  }
+
+  /** The view a graph opens on: see openTransform(). `focusId` is kept in view. */
+  function openView(focusId, duration = 450) {
+    const b = bounds();
+    if (!b) return;
+    const t = openTransform(b, svgEl.clientWidth || 1, svgEl.clientHeight || 1, o.fitInsetLeft(), o.scaleExtent[1],
+      focusId != null ? boxOf(focusId, 8) : null);
+    frameTo(t, duration);
+  }
+
+  function openWhenSettled(focusId) {
+    openPending = { focusId };
     ensureLoopRunning();
   }
 
-  function fitToView(duration = 450) {
-    const pts = Array.from(renderPos.values());
-    if (!pts.length) return;
-    const pad = Math.max(o.nodeSize.width, o.nodeSize.height) / 2 + 32;
-    const xMin = Math.min(...pts.map((p) => p.x)) - pad;
-    const xMax = Math.max(...pts.map((p) => p.x)) + pad;
-    const yMin = Math.min(...pts.map((p) => p.y)) - pad;
-    const yMax = Math.max(...pts.map((p) => p.y)) + pad;
-    const inset = o.fitInsetLeft();
-    const w = Math.max(1, (svgEl.clientWidth || 1) - inset);
-    const h = svgEl.clientHeight || 1;
-    const spanX = Math.max(1, xMax - xMin);
-    const spanY = Math.max(1, yMax - yMin);
-    const k = Math.min(o.scaleExtent[1], Math.max(o.scaleExtent[0], Math.min(w / spanX, h / spanY)));
-    const cx = (xMin + xMax) / 2;
-    const cy = (yMin + yMax) / 2;
-    animateTransform(zoomIdentity.translate(inset + w / 2 - cx * k, h / 2 - cy * k).scale(k), duration);
+  /** Pans to a card picked outside the canvas when it is out of view. Never mid-drag. */
+  function reveal(id) {
+    const box = boxOf(id, 8);
+    if (!box || draggingId != null) return;
+    const t = revealTransform(currentTransform, box, svgEl.clientWidth || 1, svgEl.clientHeight || 1, o.fitInsetLeft());
+    if (!t) return;
+    openPending = null;
+    frameTo(t, 300);
   }
 
   function zoomBy(factor) {
@@ -397,7 +433,8 @@ export function createForceGraph(opts) {
     const cx = w / 2;
     const cy = h / 2;
     const t0 = currentTransform;
-    const k1 = Math.min(o.scaleExtent[1], Math.max(o.scaleExtent[0], t0.k * factor));
+    const [min, max] = zoomBehavior.scaleExtent();
+    const k1 = Math.min(max, Math.max(min, t0.k * factor));
     const wx = (cx - t0.x) / t0.k;
     const wy = (cy - t0.y) / t0.k;
     animateTransform(zoomIdentity.translate(cx - wx * k1, cy - wy * k1).scale(k1), 180);
@@ -506,7 +543,9 @@ export function createForceGraph(opts) {
     unregisterEdge,
     update,
     fitToView,
-    fitWhenSettled,
+    openView,
+    openWhenSettled,
+    reveal,
     zoomBy,
     setReducedMotion,
     destroy,

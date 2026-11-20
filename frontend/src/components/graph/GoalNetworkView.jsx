@@ -2,7 +2,7 @@ import React from "react";
 import { StatusBadge } from "../../ds";
 import { createForceGraph } from "./forceGraphEngine.js";
 import { buildGoalNetwork, buildAdjacency, NODE_W, NODE_H } from "./graph-data.js";
-import { CardLabel, GraphToolbar } from "./FeatureGraphView.jsx";
+import { CardLabel, GraphCaption, GraphToolbar } from "./FeatureGraphView.jsx";
 import { count } from "../../lib/words.js";
 
 const useIsomorphicLayoutEffect = typeof window !== "undefined" ? React.useLayoutEffect : React.useEffect;
@@ -24,6 +24,7 @@ export function GoalNetworkView({ goals, capsByGoal, selectedId, onSelect }) {
   const edgeElsRef = React.useRef(new Map());
   const onSelectRef = React.useRef(onSelect);
   const hasFitRef = React.useRef(false);
+  const keyRef = React.useRef(null);
   const [hoveredId, setHoveredId] = React.useState(null);
 
   const data = React.useMemo(() => buildGoalNetwork(goals, capsByGoal), [goals, capsByGoal]);
@@ -52,8 +53,7 @@ export function GoalNetworkView({ goals, capsByGoal, selectedId, onSelect }) {
       alphaDecay: 0.06,
       linkDistance,
       linkStrength,
-      // Never so far out that names are hidden: past this, pan instead.
-      scaleExtent: [0.5, 2.5],
+      fitInsetLeft: () => (keyRef.current?.open ? keyRef.current.offsetLeft + keyRef.current.offsetWidth : 0),
       reducedMotion: window.matchMedia("(prefers-reduced-motion: reduce)").matches,
       onSelect: (id) => onSelectRef.current?.(id),
     });
@@ -70,16 +70,22 @@ export function GoalNetworkView({ goals, capsByGoal, selectedId, onSelect }) {
     engineRef.current?.update(data.nodes, data.edges);
     if (!hasFitRef.current && data.nodes.length) {
       hasFitRef.current = true;
-      engineRef.current?.fitToView(0);
-      engineRef.current?.fitWhenSettled(); // the first fit sees unspread nodes
+      engineRef.current?.openView(selectedId, 0);
+      engineRef.current?.openWhenSettled(selectedId); // the first frame sees unspread nodes
     }
   }, [data]);
+
+  // A goal picked in the side list is brought into view.
+  useIsomorphicLayoutEffect(() => {
+    if (selectedId != null) engineRef.current?.reveal(selectedId);
+  }, [selectedId]);
 
   const wantFocus = hoveredId ?? selectedId ?? null;
   // Fade the rest only when the focused card has relationships to show;
   // fading everything around a loner just makes the graph hard to read.
   const focusId = wantFocus != null && adjacency.get(wantFocus)?.size ? wantFocus : null;
   const focusNeighbors = focusId ? adjacency.get(focusId) : null;
+  const named = data.nodes.find((n) => n.id === (hoveredId ?? selectedId));
   const ref = (map, id, register, unregister) => (el) => {
     if (!el) return;
     map.set(id, el);
@@ -91,49 +97,51 @@ export function GoalNetworkView({ goals, capsByGoal, selectedId, onSelect }) {
   };
 
   return (
-    <div style={{ flex: 1, display: "flex", flexWrap: "wrap", minHeight: 0, overflowY: "auto" }}>
-      <div style={{ flex: "999 1 420px", minHeight: 420, position: "relative", margin: 20, background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", overflow: "hidden", minWidth: 0 }}>
-        <svg ref={svgRef} role="img" aria-label="Goals linked by the capabilities they share"
-          style={{ width: "100%", height: "100%", display: "block", cursor: "grab", touchAction: "none" }}>
-          <g ref={viewportRef}>
-            <g>
-              {data.edges.map((e) => {
-                const dim = focusId != null && e.source !== focusId && e.target !== focusId;
-                const shares = e.kind === "SHARES";
-                return (
-                  <line key={e.id} ref={ref(edgeElsRef.current, e.id, "registerEdge", "unregisterEdge")}
-                    stroke={shares ? "var(--accent)" : "var(--ink-4)"}
-                    strokeWidth={(shares ? sharesWidth(e.weight) : 1.2) + (focusId != null && !dim ? 1 : 0)}
-                    strokeLinecap="round"
-                    opacity={dim ? 0.06 : shares ? (focusId != null ? 0.7 : 0) : 0.6}
-                    style={{ transition: "opacity var(--dur-med) var(--ease-out)" }}>
-                    {shares && <title>{`Shares ${count(e.weight, "capability", "capabilities")}: ${e.capabilities.map((c) => c.name).join(", ")}`}</title>}
-                  </line>
-                );
-              })}
+    // Side by side, the canvas fills the height and the list scrolls on its
+    // own; stacked (.graph-goal-row wraps), the list leads (base.css).
+    <div className="graph-goal-network" style={{ flex: 1, display: "flex", minHeight: 0 }}>
+      <div className="graph-goal-row" style={{ flex: 1, display: "flex", minHeight: 0, overflowY: "auto" }}>
+        <div style={{ flex: "999 1 420px", minHeight: 420, position: "relative", margin: 20, background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", overflow: "hidden", minWidth: 0 }}>
+          <svg ref={svgRef} role="img" aria-label="Goals linked by the capabilities they share"
+            style={{ width: "100%", height: "100%", display: "block", cursor: "grab", touchAction: "none" }}>
+            <g ref={viewportRef}>
+              <g>
+                {data.edges.map((e) => {
+                  const dim = focusId != null && e.source !== focusId && e.target !== focusId;
+                  const shares = e.kind === "SHARES";
+                  return (
+                    <line key={e.id} ref={ref(edgeElsRef.current, e.id, "registerEdge", "unregisterEdge")}
+                      stroke={shares ? "var(--accent)" : "var(--ink-4)"}
+                      strokeWidth={(shares ? sharesWidth(e.weight) : 1.2) + (focusId != null && !dim ? 1 : 0)}
+                      strokeLinecap="round"
+                      opacity={dim ? 0.06 : shares ? (focusId != null ? 0.7 : 0) : 0.6}
+                      style={{ transition: "opacity var(--dur-med) var(--ease-out)" }}>
+                      {shares && <title>{`Shares ${count(e.weight, "capability", "capabilities")}: ${e.capabilities.map((c) => c.name).join(", ")}`}</title>}
+                    </line>
+                  );
+                })}
+              </g>
+              <g>
+                {data.nodes.map((n) => (
+                  <GoalNode key={n.id} node={n}
+                    isSelected={selectedId === n.id}
+                    isTabStop={selectedId ? selectedId === n.id : n.id === data.nodes[0]?.id}
+                    isDimmed={focusId != null ? focusId !== n.id && !focusNeighbors?.has(n.id) : !sharing.has(n.id)}
+                    onSelect={onSelect} onHoverChange={setHoveredId}
+                    registerEl={ref(nodeElsRef.current, n.id, "registerNode", "unregisterNode")} />
+                ))}
+              </g>
             </g>
-            <g>
-              {data.nodes.map((n) => (
-                <GoalNode key={n.id} node={n}
-                  isSelected={selectedId === n.id}
-                  isTabStop={selectedId ? selectedId === n.id : n.id === data.nodes[0]?.id}
-                  isDimmed={focusId != null ? focusId !== n.id && !focusNeighbors?.has(n.id) : !sharing.has(n.id)}
-                  onSelect={onSelect} onHoverChange={setHoveredId}
-                  registerEl={ref(nodeElsRef.current, n.id, "registerNode", "unregisterNode")} />
-              ))}
-            </g>
-          </g>
-        </svg>
-        <GraphToolbar
-          onZoomIn={() => engineRef.current?.zoomBy(1.4)}
-          onZoomOut={() => engineRef.current?.zoomBy(1 / 1.4)}
-          onFit={() => engineRef.current?.fitToView()} />
-        <NetworkKey />
-        <div style={{ position: "absolute", bottom: 10, left: 12, pointerEvents: "none", fontFamily: "var(--font-mono)", fontSize: "var(--text-2xs)", color: "var(--text-secondary)" }}>
-          drag to move · double-click to release · scroll to zoom
+          </svg>
+          <GraphToolbar
+            onZoomIn={() => engineRef.current?.zoomBy(1.4)}
+            onZoomOut={() => engineRef.current?.zoomBy(1 / 1.4)}
+            onFit={() => engineRef.current?.fitToView()} />
+          <NetworkKey keyRef={keyRef} />
+          <GraphCaption name={named?.goal.title} />
         </div>
+        <GoalPanel goals={goals} edges={data.edges} capsByGoal={capsByGoal} selectedId={selectedId} onSelect={onSelect} />
       </div>
-      <GoalPanel goals={goals} edges={data.edges} capsByGoal={capsByGoal} selectedId={selectedId} onSelect={onSelect} />
     </div>
   );
 }
@@ -146,6 +154,7 @@ function GoalNode({ node, isSelected, isTabStop, isDimmed, onSelect, onHoverChan
       aria-label={`${isOrg ? "Org goal" : "Product goal"}: ${goal.title}`} aria-pressed={isSelected}
       className={isDimmed ? "graph-node is-dim" : "graph-node"}
       onMouseEnter={() => onHoverChange(node.id)} onMouseLeave={() => onHoverChange(null)}
+      onFocus={() => onHoverChange(node.id)} onBlur={() => onHoverChange(null)}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
@@ -159,12 +168,14 @@ function GoalNode({ node, isSelected, isTabStop, isDimmed, onSelect, onHoverChan
         stroke={ring} strokeWidth={isSelected ? 2 : 1}
         strokeDasharray={!isOrg && node.capCount === 0 ? "3,3" : undefined} />
       <circle cx={NODE_W / 2 - 12} cy={-NODE_H / 2 + 12} r={3} fill={STATUS_DOT[goal.status] || STATUS_DOT.pending} />
-      <CardLabel name={goal.title} x={-NODE_W / 2 + 12} fill={isOrg ? "var(--text-inverse)" : "var(--text-heading)"} />
+      {/* Faded, the box fades but the name stays readable (base.css): dark on a faded org box, grey on a product's. */}
+      <CardLabel name={goal.title} x={-NODE_W / 2 + 12}
+        fill={isDimmed ? (isOrg ? "var(--text-heading)" : "var(--text-secondary)") : isOrg ? "var(--text-inverse)" : "var(--text-heading)"} />
     </g>
   );
 }
 
-function NetworkKey() {
+function NetworkKey({ keyRef }) {
   const row = { display: "flex", alignItems: "center", gap: 6 };
   const card = (fill, stroke, dash) => (
     <svg width="16" height="10"><rect x="1" y="1" width="14" height="8" rx="2" fill={fill} stroke={stroke} strokeDasharray={dash} /></svg>
@@ -173,7 +184,7 @@ function NetworkKey() {
     <svg width="16" height="8"><line x1="0" y1="4" x2="16" y2="4" stroke={stroke} strokeWidth={width} strokeLinecap="round" /></svg>
   );
   return (
-    <details style={{ position: "absolute", top: 10, left: 10, background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-sm)", boxShadow: "var(--shadow-card)", padding: "6px 10px", fontFamily: "var(--font-mono)", fontSize: "var(--text-2xs)", color: "var(--text-secondary)" }}>
+    <details ref={keyRef} style={{ position: "absolute", top: 10, left: 10, background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-sm)", boxShadow: "var(--shadow-card)", padding: "6px 10px", fontFamily: "var(--font-mono)", fontSize: "var(--text-2xs)", color: "var(--text-secondary)" }}>
       <summary style={{ cursor: "pointer", color: "var(--text-heading)" }}>Key</summary>
       <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 6 }}>
         <div style={row}>{card("var(--surface-inverse)", "var(--surface-inverse)")}org goal</div>
@@ -204,7 +215,7 @@ function GoalPanel({ goals, edges, capsByGoal, selectedId, onSelect }) {
     const sharing = new Set(shares.flatMap((e) => [e.source, e.target]));
     const most = [...shares].sort((a, b) => b.weight - a.weight || a.id.localeCompare(b.id)).slice(0, 6);
     return (
-      <aside style={panel}>
+      <aside className="graph-goal-panel" style={panel}>
         <div style={{ color: "var(--text-secondary)" }}>Pick a goal to see which other goals rely on the same capabilities.</div>
         <div style={{ color: "var(--text-secondary)" }}>{count(sharing.size, "goal")} of {goals.length} share a capability with another goal.</div>
         {most.length > 0 && (
@@ -233,7 +244,7 @@ function GoalPanel({ goals, edges, capsByGoal, selectedId, onSelect }) {
   const caps = capsByGoal[goal.id] ?? [];
 
   return (
-    <aside style={panel} aria-label="Selected goal">
+    <aside className="graph-goal-panel" style={panel} aria-label="Selected goal">
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
         <div style={head}>{goal.goal_type === "org" ? "org goal" : "product goal"} · {goal.display_id}</div>
         <div style={{ fontWeight: "var(--weight-semibold)", color: "var(--text-heading)" }}>{goal.title}</div>

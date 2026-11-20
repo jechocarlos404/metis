@@ -81,10 +81,24 @@ main:focus { outline: none; }
 .graph-node:focus { outline: none; }
 .graph-node:focus-visible > rect { stroke: var(--border-focus); stroke-width: 2.5px; }
 .graph-far .graph-node text { display: none; }
+/* Zoomed out, the canvas caption names the card pointed at, focused or selected. */
+.graph-caption { display: none; }
+.graph-far ~ .graph-caption { display: block; }
+.graph-far ~ .graph-caption ~ .graph-hint { display: none; }
+@media (max-width: 960px), (pointer: coarse) { .graph-hint { display: none; } }
+/* Goals network: side by side, the canvas keeps the page's height and the list
+   scrolls; once they stack (canvas 420 + 40 margin, list 300), the list leads. */
+.graph-goal-network { container-type: inline-size; }
+@container (max-width: 759.98px) {
+  .graph-goal-row { flex-wrap: wrap; }
+  .graph-goal-panel { order: -1; border-left: none !important; }
+}
 /* Dim a card through its shapes, not group opacity: opacity on hundreds of
    <g> makes the browser blend each card separately and drags drop to ~50fps. */
 .graph-node > * { transition: fill-opacity var(--dur-med) var(--ease-out), stroke-opacity var(--dur-med) var(--ease-out); }
 .graph-node.is-dim > * { fill-opacity: 0.25; stroke-opacity: 0.25; }
+/* A faded goal's box fades, its name stays readable (GoalNetworkView picks its colour). */
+.graph-goal-network .graph-node.is-dim > text { fill-opacity: 1; }
 
 /* Agent replies rendered from markdown (ChatIsland). */
 .chat-md > :first-child { margin-top: 0; }

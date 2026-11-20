@@ -190,6 +190,7 @@ class ProductCoverage(BaseModel):
     #: Every named capability that isn't ours, most useful first: by `only_gap`,
     #: then `features`, then name.
     missing_capabilities: list[MissingCapability]
-    #: Up to three of our products, never this one, that have built the most
-    #: of the capabilities its features name (`report.needed` is the whole).
+    #: The three of our products, never this one, that have built the most of
+    #: the capabilities its features name (`report.needed` is the whole), plus
+    #: any tied with the third — so the list can be longer than three.
     closest_products: list[ClosestProduct]

@@ -316,3 +316,35 @@ async def test_what_to_build_next_is_ranked_and_the_closest_product_named(db):
     assert own.missing_capabilities == []
     assert [(p.product.name, p.capabilities) for p in own.closest_products] == [("Atlas", 1)]
 
+
+@pytest.mark.asyncio
+async def test_closest_products_have_it_built_and_keep_ties(db):
+    """A product of ours is close only through what it has finished, and a
+    tie at third place is shown whole instead of broken by name."""
+    async with db() as session:
+        maps = await cap(session, "Base maps")
+        routes = await cap(session, "Route planning")
+        target = await product(session, "Target", external=True)
+        ours = {n: await product(session, n) for n in ["Alpha", "Bravo", "Charlie", "Delta", "Echo", "Foxtrot"]}
+
+        async def feature(name, prod, caps, status=WorkStatus.done):
+            await feature_service.create_feature(
+                session,
+                FeatureCreate(name=name, product_id=prod.id, capability_ids=[c.id for c in caps], status=status),
+            )
+
+        await feature("Navigate", target, [maps, routes])
+        await feature("A", ours["Alpha"], [maps, routes])
+        for n in ["Bravo", "Charlie", "Delta", "Echo"]:
+            await feature(n, ours[n], [maps])
+        # Foxtrot is still building route planning: it doesn't have it yet.
+        await feature("F", ours["Foxtrot"], [routes], WorkStatus.in_progress)
+        score = await capability_service.product_coverage(session, target.id)
+
+    assert [(p.product.name, p.capabilities) for p in score.closest_products] == [
+        ("Alpha", 2),
+        ("Bravo", 1),
+        ("Charlie", 1),
+        ("Delta", 1),
+        ("Echo", 1),
+    ]

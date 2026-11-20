@@ -880,5 +880,9 @@ def _what_to_build(
             if len(lacking) == 1:
                 gap.only_gap += 1
     missing = sorted(gaps.values(), key=lambda g: (-g.only_gap, -g.features, g.name.lower()))
-    closest = sorted(ours.values(), key=lambda pc: (-len(pc[1]), pc[0].name.lower()))[:3]
+    ranked = sorted(ours.values(), key=lambda pc: (-len(pc[1]), pc[0].name.lower()))
+    # The top three, and anyone tied with the third: a cut through a tie would
+    # pick a winner by name.
+    cutoff = len(ranked[2][1]) if len(ranked) > 3 else 0
+    closest = [pc for i, pc in enumerate(ranked) if i < 3 or len(pc[1]) == cutoff]
     return missing, [ClosestProduct(product=p, capabilities=len(caps)) for p, caps in closest]

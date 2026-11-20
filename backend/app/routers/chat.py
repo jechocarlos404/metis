@@ -22,6 +22,8 @@ class NamedProposalRead(ProposalRead):
 
 
 class ThreadMessageRead(MessageRead):
+    #: Each step in `tool_calls` also carries `named_arguments`: its
+    #: `arguments` with every ID replaced by its row's name, for "What it did".
     proposals: list[NamedProposalRead] = []
 
 
@@ -69,6 +71,7 @@ async def list_messages(thread_id: uuid.UUID, session: AsyncSession = Depends(ge
     messages = [ThreadMessageRead.model_validate(m) for m in thread.messages]
     for m in messages:
         await proposal_service.name_proposals(session, m.proposals)
+        m.tool_calls = await proposal_service.name_steps(session, m.tool_calls)
     return messages
 
 

@@ -2,32 +2,25 @@ import React from "react";
 import { PageHeader } from "../shell/PageHeader.jsx";
 import { VizBlock } from "../chat/VizBlock.jsx";
 import { ProposalDraft } from "../chat/ProposalDraft.jsx";
-import { changeLabel } from "../chat/proposal-words.js";
+import { changeLabel, stepLabel, stepRows } from "../chat/proposal-words.js";
 import { Badge, Button, Icon, IconButton, Select, DeleteConfirm } from "../../ds";
 import { AGENT, PROPOSAL_STATUS, count } from "../../lib/words.js";
 import { Term } from "../shared/Term.jsx";
 import { api } from "../../lib/api.js";
 import { renderChatMarkdown } from "../../lib/chat-markdown.js";
 
-const stepLabel = (name) => name.replace(/_/g, " ");
 const STEP_STATUS = { started: "running…", finished: "done", failed: "failed", proposed: "proposed" };
 
-const agentLabel = (name) => AGENT[name] ?? (name ? stepLabel(name) : "Metis");
+const agentLabel = (name) => AGENT[name] ?? (name ? name.replace(/_/g, " ") : "Metis");
 
-const argValue = (v) => {
-  if (v == null) return "none";
-  if (typeof v !== "object") return String(v);
-  if (Array.isArray(v)) return v.every((x) => x == null || typeof x !== "object") ? v.join(", ") : count(v.length, "item");
-  return count(Object.keys(v).length, "field");
-};
-
-// A step's arguments as readable lines; the exact JSON stays one click away.
-function StepArgs({ args }) {
+// A step's arguments as readable lines, things by name as the approval card
+// names them; each raw value is the hover, the exact JSON one click away.
+function StepArgs({ args, named }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 2, color: "var(--text-secondary)" }}>
-      {Object.entries(args).map(([k, v]) => (
-        <div key={k} style={{ overflowWrap: "anywhere" }}>
-          {stepLabel(k)}: <span style={{ color: "var(--text-body)" }}>{argValue(v)}</span>
+      {stepRows(args, named).map((r) => (
+        <div key={r.key} style={{ overflowWrap: "anywhere" }}>
+          {r.label}: <span title={r.raw ?? undefined} style={{ color: "var(--text-body)" }}>{r.text}</span>
         </div>
       ))}
       <details>
@@ -62,7 +55,7 @@ function AgentSteps({ tools, waiting = false }) {
                 {STEP_STATUS[t.status] ?? t.status}
               </span>
             </span>
-            {t.arguments && Object.keys(t.arguments).length > 0 && <StepArgs args={t.arguments} />}
+            {t.arguments && Object.keys(t.arguments).length > 0 && <StepArgs args={t.arguments} named={t.named_arguments} />}
             {t.summary && t.status !== "proposed" && <div style={{ color: t.status === "failed" ? "var(--danger-fg)" : "var(--text-body)" }}>→ {t.summary}</div>}
           </li>
         ))}

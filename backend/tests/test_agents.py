@@ -507,6 +507,70 @@ async def test_named_arguments_cover_features_products_tickets_and_prd_pins(db):
         assert epic["capability"] == str(maps.id)  # the arguments themselves are not touched
 
 
+@pytest.mark.asyncio
+async def test_what_it_did_names_ids_and_keeps_what_the_agent_typed(db):
+    """A36: each step's IDs read as names, as on the approval card. A name or
+    code stays as typed (matching it again could pick another row than the
+    card's); an ID no row has now stays raw; the saved steps don't change."""
+    import copy
+    import uuid
+
+    from app.models import Goal
+    from app.schemas.capability import CapabilityCreate
+    from app.schemas.feature import FeatureCreate
+    from app.services import capabilities as capability_service
+    from app.services import features as feature_service
+
+    async with db() as session:
+        graph_cap = await capability_service.create_capability(session, CapabilityCreate(name="Knowledge Graph"))
+        await capability_service.create_capability(session, CapabilityCreate(name="Knowledge Base"))
+        goal = Goal(goal_type="product", title="Plan work from goal to ticket")
+        product = Product(slug="atlas", name="Atlas", summary="s")
+        session.add_all([goal, product])
+        await session.commit()
+        plan = await feature_service.create_feature(session, FeatureCreate(name="Plan a route", capability_ids=[graph_cap.id]))
+        gone = str(uuid.uuid4())
+        steps = [
+            {"name": "list_goals", "arguments": {}, "changes": False, "status": "finished", "summary": "1 result"},
+            {"name": "motivate_capability", "arguments": {"goal": str(goal.id), "capability": str(graph_cap.id)},
+             "changes": True, "status": "proposed", "summary": "waiting for your approval"},
+            {"name": "capability_rollup", "arguments": {"capability": "Knowledge"}, "changes": False, "status": "failed",
+             "summary": "error: `Knowledge` fits more than one capability"},
+            {"name": "update_feature", "arguments": {"feature": gone, "priority": 2}, "changes": True, "status": "failed",
+             "summary": f"error: No feature has the ID `{gone}`."},
+            {"name": "mvp_cut", "arguments": {"targets": [str(plan.id), str(graph_cap.id), "Plan a route"]},
+             "changes": False, "status": "finished", "summary": "features: 1"},
+            {"name": "create_prd_draft", "arguments": {"product": str(product.id), "document": {
+                "epics": [{"title": "E", "capability": str(graph_cap.id), "stories": [{"title": "S", "feature": str(plan.id)}]}]}},
+             "changes": True, "status": "proposed", "summary": "waiting for your approval"},
+        ]
+        thread = ChatThread(title="t")
+        session.add(thread)
+        await session.flush()
+        reply = ChatMessage(thread_id=thread.id, role="agent", agent_name="feature_manager", content="", viz=[], tool_calls=steps)
+        session.add(reply)
+        await session.commit()
+        thread_id, reply_id = thread.id, reply.id
+        saved = copy.deepcopy(steps)
+
+    async with chat_client(db) as http:
+        response = await http.get(f"/api/chat/threads/{thread_id}/messages")
+    assert response.status_code == 200
+    listed, motivate, rollup, update, cut, prd = response.json()[-1]["tool_calls"]
+    assert "named_arguments" not in listed  # no arguments, nothing to name
+    assert motivate["named_arguments"] == {"goal": f"PG-{goal.seq:02d} Plan work from goal to ticket", "capability": "Knowledge Graph"}
+    assert motivate["arguments"] == {"goal": str(goal.id), "capability": str(graph_cap.id)}
+    assert rollup["named_arguments"] == {"capability": "Knowledge"}  # as typed, never a guess
+    assert update["named_arguments"] == {"feature": gone, "priority": 2}
+    assert cut["named_arguments"]["targets"] == ["Plan a route", "Knowledge Graph", "Plan a route"]
+    assert prd["named_arguments"]["product"] == "Atlas"
+    epic = prd["named_arguments"]["document"]["epics"][0]
+    assert (epic["capability"], epic["stories"][0]["feature"]) == ("Knowledge Graph", "Plan a route")
+
+    async with db() as session:
+        assert (await session.get(ChatMessage, reply_id)).tool_calls == saved
+
+
 MALFORMED_DOCUMENTS = [
     "not a document",
     {"epics": "not a list"},

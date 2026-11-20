@@ -234,6 +234,54 @@ async def named_arguments(session: AsyncSession, tool_name: str, arguments: dict
     return named
 
 
+async def _row_name(session, kinds, value):
+    """The name of the row a UUID is, trying each kind in turn; anything else,
+    or an ID no row has now, as it is."""
+    if not isinstance(value, str):
+        return value
+    try:
+        row_id = uuid.UUID(value)
+    except ValueError:
+        return value
+    for kind in kinds:
+        found = await session.get(kind[0], row_id)
+        if found is not None:
+            return kind[4](found)
+    return value
+
+
+async def name_steps(session: AsyncSession, steps: list[dict] | None) -> list[dict] | None:
+    """Each step "What it did" lists, with `named_arguments`: every ID the
+    agent passed replaced by its row's name. A name or code stays as typed: it
+    already reads, and matching it again could name another row than the one
+    the approval card pins. The saved steps are never changed."""
+    if not steps:
+        return steps
+
+    async def visit(kind, value, exact_only):
+        return await _row_name(session, [kind], value)
+
+    named_steps = []
+    for step in steps:
+        args = step.get("arguments")
+        if not isinstance(args, dict) or not args:
+            named_steps.append(step)
+            continue
+        try:
+            named = await _walk(str(step.get("name")), args, visit)
+            if step.get("name") == "mvp_cut" and isinstance(named.get("targets"), list):
+                named["targets"] = [await _row_name(session, [_FEATURE, _CAPABILITY], t) for t in named["targets"]]
+            for key, model in (("epic_id", Epic), ("story_id", Story)):
+                if isinstance(named.get(key), str) and named[key]:
+                    named[key] = await _title(session, model, named[key])
+        except Exception:
+            log.exception("Naming a step of %s failed", step.get("name"))
+            await session.rollback()
+            named = None
+        named_steps.append({**step, "named_arguments": named})
+    return named_steps
+
+
 async def name_proposals(session: AsyncSession, proposals) -> None:
     """Fill `named_arguments` on each ProposalRead of one reply. A proposal
     whose arguments can't be named keeps None, and the card shows them raw."""

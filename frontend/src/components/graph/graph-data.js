@@ -342,12 +342,15 @@ export function goalHubs(features, motivations, goals, ownProductId) {
     }
     byFeature.set(f.id, [...ids]);
   }
+  // A feature here may belong to a product that has goals: its capabilities
+  // just link to none of them. Say that, never "no goal" (B34).
+  const none = ownProductId ? "Linked to none of this product's goals" : "Linked to no goal";
   return {
     hubs: [...hubs.values()],
     byFeature,
-    empty: { id: "goal:none", name: "No goal of this product yet", tone: "empty" },
+    empty: { id: "goal:none", name: none, tone: "empty" },
     legend: {
-      shapes: [["org", "Org goal"], ["product", "Product goal"], ["empty", "No goal of this product yet"]],
+      shapes: [["org", "Org goal"], ["product", "Product goal"], ["empty", none]],
       line: "Its capabilities serve this goal",
     },
   };

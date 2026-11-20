@@ -27,7 +27,9 @@ test("only the product's own goals are hubs, whatever top goal another product's
   const spec = goalHubs(features, motivations, goals, "p1");
   assert.deepEqual(spec.hubs.map((h) => h.id), ["goal:pg-ours"]);
   assert.deepEqual(spec.byFeature.get("f1"), ["goal:pg-ours"]);
-  assert.deepEqual(spec.byFeature.get("f2"), []); // falls to "No goal of this product yet"
+  assert.deepEqual(spec.byFeature.get("f2"), []);
+  // Its product has goals; this feature just links to none of them (B34).
+  assert.equal(spec.empty.name, "Linked to none of this product's goals");
 });
 
 test("with no product every goal counts", () => {

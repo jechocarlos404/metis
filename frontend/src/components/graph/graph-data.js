@@ -6,6 +6,60 @@
 export const NODE_W = 148;
 export const NODE_H = 56;
 
+// Card names are LABEL_PX graph units tall. Zoomed out past READABLE_SCALE
+// they would draw under 11px, so the engine hides them instead (.graph-far)
+// and the canvas caption names the card you point at, focus or select.
+export const LABEL_PX = 11.5;
+export const READABLE_SCALE = Math.ceil((11 / LABEL_PX) * 100) / 100;
+
+/**
+ * The view that shows every node: `bounds` {x0, y0, x1, y1} in graph units
+ * framed in a `w` x `h` px canvas with `inset` px kept clear on the left.
+ * Never limited by a zoom floor, so nothing is cut off. Returns {k, x, y}.
+ */
+export function fitTransform(bounds, w, h, inset = 0, maxK = 2.5) {
+  const frameW = Math.max(1, w - inset);
+  const k = Math.min(maxK, frameW / Math.max(1, bounds.x1 - bounds.x0), Math.max(1, h) / Math.max(1, bounds.y1 - bounds.y0));
+  return {
+    k,
+    x: inset + frameW / 2 - ((bounds.x0 + bounds.x1) / 2) * k,
+    y: Math.max(1, h) / 2 - ((bounds.y0 + bounds.y1) / 2) * k,
+  };
+}
+
+/**
+ * The view a graph opens on. Everything, when names are readable that way;
+ * otherwise names at full size (scale 1) from the drawing's top-left corner,
+ * so its first column is not cut off. A `focus` box (the selected card) out
+ * of that view is brought in, as revealTransform() does.
+ */
+export function openTransform(bounds, w, h, inset = 0, maxK = 2.5, focus = null) {
+  const fit = fitTransform(bounds, w, h, inset, maxK);
+  if (fit.k >= READABLE_SCALE) return fit;
+  const t = { k: 1, x: inset - bounds.x0, y: -bounds.y0 };
+  return (focus && revealTransform(t, focus, w, h, inset)) || t;
+}
+
+/**
+ * Brings `box` into view when it is not wholly in it: across, it becomes the
+ * first column (the cards left of it go wholly out of view, not half); down,
+ * it is centred. Null when it is already in view.
+ */
+export function revealTransform(t, box, w, h, inset = 0) {
+  const sx0 = box.x0 * t.k + t.x;
+  const sx1 = box.x1 * t.k + t.x;
+  const sy0 = box.y0 * t.k + t.y;
+  const sy1 = box.y1 * t.k + t.y;
+  const inX = sx0 >= inset && sx1 <= w;
+  const inY = sy0 >= 0 && sy1 <= h;
+  if (inX && inY) return null;
+  return {
+    k: t.k,
+    x: inX ? t.x : inset - box.x0 * t.k,
+    y: inY ? t.y : h / 2 - ((box.y0 + box.y1) / 2) * t.k,
+  };
+}
+
 // Keyed by the feature's `layer` facet.
 const LAYER_ACCENT = {
   service: "--stage-feature",

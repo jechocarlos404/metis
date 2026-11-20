@@ -317,11 +317,23 @@ Tools return **text, not JSON** — an agent quotes text back to a user but para
 JSON, and paraphrase is where `workaround` quietly becomes "partial support."
 
 ```sh
-docker compose --profile mcp up mcp     # SSE on the compose network, port 8001
+docker compose --profile mcp up -d mcp  # SSE on 127.0.0.1:8001
 ```
 
-The server refuses to start SSE without `MCP_SSE_TOKEN` — it holds an API token, and an
+The server refuses to start SSE without `MCP_SSE_TOKEN`: it holds an API token, and an
 open port would lend it to anyone who can reach the address.
+
+**Claude Code plugin.** [`plugin/`](plugin/README.md) brings this server to a coding
+session in any repo, with skills that check for reuse before building
+(`metis-check-idea`, `metis-find-reuse`, `metis-next-work`) and read-only hooks: a
+product brief at session start, a one-line nudge when a prompt names a capability another
+product already has, and a reminder to re-export the seed file after code changes. The
+repo root is its marketplace:
+
+```
+/plugin marketplace add /path/to/metis
+/plugin install metis@metis
+```
 
 ### LLM providers
 

@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "metis": {
+      "type": "sse",
+      "url": "${METIS_MCP_URL:-http://localhost:8001/sse}",
+      "headers": { "Authorization": "Bearer ${METIS_MCP_TOKEN}" }
+    }
+  }
+}

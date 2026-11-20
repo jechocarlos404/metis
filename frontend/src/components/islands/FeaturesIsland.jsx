@@ -4,6 +4,7 @@ import { Button, Checkbox, Dialog, Icon, IconButton, Input, PriorityBadge, Selec
 import { EDGE, EDGE_INCOMING, LAYER, PRIORITY_HINT, count, plain, priorityLabel, productOptions, statusLabel } from "../../lib/words.js";
 import { Term } from "../shared/Term.jsx";
 import { CapabilityPicker } from "../shared/CapabilityPicker.jsx";
+import { Guesses } from "../shared/Guesses.jsx";
 import { api, ApiError } from "../../lib/api.js";
 import { FeatureGraphView } from "../graph/FeatureGraphView.jsx";
 import { pressable } from "../../lib/pressable.js";
@@ -456,6 +457,7 @@ export default function FeaturesIsland({ canWrite = true }) {
                 detail={detail}
                 canWrite={canWrite}
                 onEdit={openEdit}
+                onGuessConfirmed={() => { refreshDetail(detail.id); load(); }}
                 onSelect={selectFeature}
                 productIds={nodeById.get(detail.id)?.product_ids ?? []}
                 productById={productById}
@@ -559,7 +561,7 @@ function FeatureLink({ feature, onSelect, active, style }) {
   );
 }
 
-function FeaturePanel({ detail, canWrite, onEdit, onSelect, productIds, productById, capabilityById, journeys, why, goalParent, ownGoalRoots, allNodes, edgeDraft, onEdgeDraft, onAddEdge, onRemoveEdge, impact, onImpact }) {
+function FeaturePanel({ detail, canWrite, onEdit, onGuessConfirmed, onSelect, productIds, productById, capabilityById, journeys, why, goalParent, ownGoalRoots, allNodes, edgeDraft, onEdgeDraft, onAddEdge, onRemoveEdge, impact, onImpact }) {
   const layer = detail.facets?.layer;
   return (
     <>
@@ -612,6 +614,7 @@ function FeaturePanel({ detail, canWrite, onEdit, onSelect, productIds, productB
         {detail.capability_ids.length === 0 && !detail.unknown_capabilities && (
           <div style={NOTE}>No capability linked yet.</div>
         )}
+        {canWrite && <Guesses query={{ feature_id: detail.id }} title="Probably also built on" onConfirmed={onGuessConfirmed} />}
       </div>
 
       <WhySection chain={why?.chain} goalParent={goalParent} ownRoots={ownGoalRoots} hasCapabilities={detail.capability_ids.length > 0} />

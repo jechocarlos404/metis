@@ -116,3 +116,10 @@ export function plain(dict, value) {
 /** The backend's slug rule (services/slugs.py): lowercase kebab. Capability
  *  identity is the slug, so "Route Import" and "route import" are one name. */
 export const slugify = (value) => String(value ?? "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+
+// A guessed capability link (capability_guesses). Never counted until confirmed.
+export const CONFIDENCE = {
+  high: { label: "likely", tone: "accent", hint: "Strong public evidence, such as a docs page that shows it." },
+  medium: { label: "possibly", tone: "warn", hint: "Described somewhere, but not shown." },
+  low: { label: "a hunch", tone: "neutral", hint: "Plausible from what kind of product it is, nothing more." },
+};

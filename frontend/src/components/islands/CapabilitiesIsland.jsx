@@ -2,6 +2,7 @@ import React from "react";
 import { PageHeader } from "../shell/PageHeader.jsx";
 import { Badge, Button, Dialog, Icon, Input, Select } from "../../ds";
 import { MaturityBadge } from "../shared/coverage.jsx";
+import { Guesses } from "../shared/Guesses.jsx";
 import { api } from "../../lib/api.js";
 import { MATURITY, count } from "../../lib/words.js";
 
@@ -169,7 +170,10 @@ export default function CapabilitiesIsland({ canWrite = true }) {
         </div>
 
         {view === "attention" ? (
-          <FindingList findings={shownFindings} total={findings.length} byId={byId} loaded={inventory != null} />
+          <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+            <FindingList findings={shownFindings} total={findings.length} byId={byId} loaded={inventory != null} />
+            {canWrite && <Guesses query={{}} name="both" title="Guessed links to review" />}
+          </div>
         ) : (
           <div style={{ background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", overflow: "hidden" }}>
             <div style={{ display: "grid", gridTemplateColumns: COLUMNS, gap: 12, padding: "8px 16px", borderBottom: "1px solid var(--border-hairline)", ...CAPS_HEADER }}>

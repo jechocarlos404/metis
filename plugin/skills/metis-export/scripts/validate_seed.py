@@ -40,6 +40,10 @@ def tech_slug(tech):
     return slugify(tech["name"]) if isinstance(tech.get("name"), str) else ""
 
 
+# A capability's identity, the same rule: "Keyword search" is "Keyword Search".
+cap_slug = tech_slug
+
+
 def _check_guess(errors, where, item):
     if item.get("confidence") not in CONFIDENCES:
         errors.append(f"{where}: confidence must be one of {sorted(CONFIDENCES)}")
@@ -136,10 +140,19 @@ def validate(doc):
         _check_priority(errors, where, g)
         _check_status(errors, where, g)
 
+    seen_cap_slugs = set()
     for i, c in enumerate(doc.get("capabilities") or []):
         where = f"capabilities[{i}] ({c.get('ref')})"
         if not c.get("name"):
             errors.append(f"{where}: 'name' is required")
+        slug = cap_slug(c)
+        if not isinstance(slug, str) or not slug:
+            errors.append(f"{where}: slug must be a non-empty string "
+                          "(give one when the name yields none)")
+        elif slug in seen_cap_slugs:
+            errors.append(f"{where}: duplicate capability slug {slug!r}")
+        else:
+            seen_cap_slugs.add(slug)
         if c.get("maturity") is not None and c["maturity"] not in MATURITIES:
             errors.append(f"{where}: maturity must be one of {sorted(MATURITIES)}")
         _check_facets(errors, where, c)

@@ -62,9 +62,13 @@ export default function ProductsIsland({ canWrite = true }) {
     const [list, goalList] = await Promise.all([api("/products"), api("/goals")]);
     setProducts(list);
     setGoals(goalList);
-    // With nothing chosen, open on the picker's first product.
-    setProductId((current) => current && list.some((p) => p.id === current) ? current : productOptions(list)[0]?.value ?? null);
   }, []);
+
+  // With nothing chosen, or a product that's gone (deleted, then Back), open
+  // on the picker's first product.
+  React.useEffect(() => {
+    if (products && !products.some((p) => p.id === productId)) setProductId(productOptions(products)[0]?.value ?? null);
+  }, [products, productId]);
 
   const loadDetail = React.useCallback(async (id) => {
     if (!id) return;
@@ -103,7 +107,8 @@ export default function ProductsIsland({ canWrite = true }) {
     currentId.current = productId;
     setFeatures(null); // don't show the previous product's features under this one's name
     setScore(null);
-    loadDetail(productId).catch((e) => setToast({ tone: "danger", title: "Load failed", detail: String(e.message) }));
+    // A product that's gone fails to load; by then the page has moved on, so stay quiet.
+    loadDetail(productId).catch((e) => currentId.current === productId && setToast({ tone: "danger", title: "Load failed", detail: String(e.message) }));
   }, [productId, loadDetail]);
 
   const showError = (title) => (e) => setToast({ tone: "danger", title, detail: String(e.message) });

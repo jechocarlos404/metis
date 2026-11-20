@@ -138,7 +138,7 @@ async def test_proposals_are_decided_in_order_and_approve_all_stops_at_a_failure
         await session.commit()
     provider = FakeProvider([
         call("create_ticket", product="PM Export", title="First"),
-        call("create_ticket", product="No such product", title="Second"),
+        call("create_ticket", product="PM Export", title="Second", context_budget="XL"),  # fails when applied
         call("create_ticket", product="PM Export", title="Third"),
         text("Proposed three tickets."),
     ])
@@ -342,16 +342,131 @@ async def test_the_approval_card_names_the_goal_not_its_uuid(db):
         rows = (await http.get(path)).json()
     create, motivate = rows[-1]["proposals"]
     assert create["named_arguments"] == {"name": "Ride Café Stops", "parent": "Cafe Crawl Planning", "maturity": "planned"}
-    assert motivate["named_arguments"] == {"goal": f"{code} Plan café stops on every ride", "capability": "Ride Café Stops"}
-    assert motivate["arguments"]["goal"] == goal_id  # what approval runs is untouched
+    assert motivate["named_arguments"] == {
+        "goal": f"{code} Plan café stops on every ride", "capability": "Ride Café Stops (new, from change 1)",
+    }
+    # What approval runs: the goal pinned to its ID, the capability to change 1.
+    assert motivate["arguments"] == {"goal": goal_id, "capability": {"proposal": create["id"], "name": "Ride Café Stops"}}
     assert not re.search(UUID_RE, str([p["named_arguments"] for p in rows[-1]["proposals"]]))
 
-    # Approved, the card still names the same things.
+    # Approved, change 1 hands its new ID to change 2, and the card still names the same things.
     await proposals.approve_all(db, GRAPH, messages[-1].id)
     async with chat_client(db) as http:
         rows = (await http.get(path)).json()
     assert [p["status"] for p in rows[-1]["proposals"]] == ["applied", "applied"]
-    assert rows[-1]["proposals"][1]["named_arguments"]["goal"] == f"{code} Plan café stops on every ride"
+    assert rows[-1]["proposals"][1]["named_arguments"] == {
+        "goal": f"{code} Plan café stops on every ride", "capability": "Ride Café Stops",
+    }
+
+
+async def _propose_turn(db, agent, *calls):
+    """One reply whose agent makes these write calls, in order."""
+    script = [[ToolCallEvent(id=f"tc-{i}", name=name, arguments=args), StreamDone("tool_use")]
+              for i, (name, args) in enumerate(calls)]
+    provider = FakeProvider([*script, text("Proposed.")])
+    ask = {"feature_manager": "change a capability", "spec_decomposer": "draft a PRD"}[agent]  # keyword-routed
+    _, messages = await turn(db, FakeRegistry({agent: provider}), ask)
+    return messages[-1], provider
+
+
+@pytest.mark.asyncio
+async def test_sr1_a_name_that_fits_several_rows_is_refused_not_guessed(db):
+    """SR1: no proposal is saved for an ambiguous or unknown reference; the
+    agent is told why, and nothing reaches the card."""
+    from app.schemas.capability import CapabilityCreate
+    from app.services import capabilities as capability_service
+
+    async with db() as session:
+        for name in ("Semantic Search", "Search Index"):
+            await capability_service.create_capability(session, CapabilityCreate(name=name))
+    reply, provider = await _propose_turn(
+        db, "feature_manager",
+        ("update_capability", {"capability": "Search", "maturity": "beta"}),
+        ("update_capability", {"capability": "No Such Thing", "maturity": "beta"}),
+    )
+    assert reply.proposals == []
+    assert [s["status"] for s in reply.tool_calls] == ["failed", "failed"]
+    told = provider.calls[1]["messages"][-1]["content"]
+    assert "Not proposed" in told and "Semantic Search" in told and "Search Index" in told
+    assert "No capability is named `No Such Thing`" in provider.calls[2]["messages"][-1]["content"]
+
+
+@pytest.mark.asyncio
+async def test_sr1_approval_acts_on_the_row_the_card_named(db):
+    """SR1: pinned by a name only one row contained, the change still lands on
+    that row after an exact-name row appears."""
+    from app.models import Goal, Motivation
+    from app.schemas.capability import CapabilityCreate
+    from app.services import capabilities as capability_service
+
+    async with db() as session:
+        goal = Goal(goal_type="product", title="Ride with friends")
+        session.add(goal)
+        await session.commit()
+        crawl = await capability_service.create_capability(session, CapabilityCreate(name="Cafe Crawl Planning"))
+        goal_id, crawl_id = goal.id, crawl.id
+    reply, _ = await _propose_turn(db, "feature_manager", ("motivate_capability", {"capability": "Crawl Planning", "goal": "Ride with"}))
+    (proposal,) = reply.proposals
+    assert proposal.arguments == {"capability": str(crawl_id), "goal": str(goal_id)}
+    async with db() as session:
+        await capability_service.create_capability(session, CapabilityCreate(name="Crawl Planning"))
+    assert (await proposals.approve(db, GRAPH, proposal.id)).status == "applied"
+    async with db() as session:
+        (link,) = (await session.scalars(select(Motivation))).all()
+        assert (link.capability_id, link.goal_id) == (crawl_id, goal_id)
+
+
+@pytest.mark.asyncio
+async def test_sr1_a_creation_hands_on_its_new_id_and_never_matches_by_name(db):
+    """SR1: change 2 refers to "Search", which change 1 creates. A different
+    row containing that name must not catch the link, before or after."""
+    from app.models import Capability, Goal, Motivation
+    from app.schemas.capability import CapabilityCreate
+    from app.services import capabilities as capability_service
+
+    async with db() as session:
+        goal = Goal(goal_type="product", title="Find things fast")
+        session.add(goal)
+        await session.commit()
+        await capability_service.create_capability(session, CapabilityCreate(name="Semantic Search"))
+        goal_id = goal.id
+    reply, _ = await _propose_turn(
+        db, "feature_manager",
+        ("create_capability", {"name": "Search"}),
+        ("motivate_capability", {"capability": "Search", "goal": str(goal_id)}),
+    )
+    first, second = reply.proposals
+    assert second.arguments["capability"] == {"proposal": str(first.id), "name": "Search"}
+    assert [p.status for p in await proposals.approve_all(db, GRAPH, reply.id)] == ["applied", "applied"]
+    async with db() as session:
+        new = await session.scalar(select(Capability).where(Capability.name == "Search"))
+        (link,) = (await session.scalars(select(Motivation))).all()
+        assert link.capability_id == new.id
+        assert (await session.get(ChatProposal, second.id)).arguments["capability"] == str(new.id)
+
+
+@pytest.mark.asyncio
+async def test_sr1_a_rejected_creation_fails_the_change_that_needed_it(db):
+    from app.models import Capability, Goal, Motivation
+
+    async with db() as session:
+        goal = Goal(goal_type="product", title="Find things fast")
+        session.add(goal)
+        await session.commit()
+        goal_id = goal.id
+    reply, _ = await _propose_turn(
+        db, "feature_manager",
+        ("create_capability", {"name": "Search"}),
+        ("motivate_capability", {"capability": "Search", "goal": str(goal_id)}),
+    )
+    first, second = reply.proposals
+    await proposals.reject(db, first.id)
+    failed = await proposals.approve(db, GRAPH, second.id)
+    assert failed.status == "failed"
+    assert "Search" in failed.result and "wasn't applied" in failed.result
+    async with db() as session:
+        assert (await session.scalars(select(Motivation))).all() == []
+        assert (await session.scalars(select(Capability))).all() == []
 
 
 @pytest.mark.asyncio
@@ -374,18 +489,18 @@ async def test_named_arguments_cover_features_products_tickets_and_prd_pins(db):
         await session.commit()
 
         link = {"src": str(plan.id), "dst": str(show.id), "kind": "DEPENDS_ON"}
-        assert await named_arguments(session, "link_features", link, set()) == {
+        assert await named_arguments(session, "link_features", link) == {
             "src": "Plan a route", "dst": "Show the map", "kind": "DEPENDS_ON",
         }
         new = {"name": "Zoom", "product": str(product.id), "capabilities": [str(maps.id), "interactive-maps", "Not Yet"]}
-        named = await named_arguments(session, "create_feature", new, set())
+        named = await named_arguments(session, "create_feature", new)
         assert named["product"] == "Atlas"
         assert named["capabilities"] == ["Interactive Maps", "Interactive Maps", "Not Yet"]
-        named = await named_arguments(session, "update_ticket", {"ticket": f"TKT-{ticket.seq}", "status": "done"}, set())
+        named = await named_arguments(session, "update_ticket", {"ticket": f"TKT-{ticket.seq}", "status": "done"})
         assert named["ticket"] == f"TKT-{ticket.seq:04d} Wire the map"
         epic = {"title": "E", "capability": str(maps.id), "stories": [{"title": "S", "feature": str(plan.id)}]}
         prd = {"product": str(product.id), "document": {"epics": [epic]}}
-        named = await named_arguments(session, "create_prd_draft", prd, set())
+        named = await named_arguments(session, "create_prd_draft", prd)
         assert named["product"] == "Atlas"
         assert named["document"]["epics"][0]["capability"] == "Interactive Maps"
         assert named["document"]["epics"][0]["stories"][0]["feature"] == "Plan a route"

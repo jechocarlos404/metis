@@ -12,7 +12,7 @@
  */
 
 import { STATUS_TONE } from "../ds";
-import { EDGE, MATURITY, plain, statusLabel } from "./words.js";
+import { DONE_WHEN, EDGE, MATURITY, plain, statusLabel } from "./words.js";
 
 // Plain words on screen; each column's `raw` keeps the stored value one hover away.
 const MATURITIES = ["planned", "alpha", "beta", "ga", "deprecated", "retired"]
@@ -55,7 +55,7 @@ const GOALS = {
     { key: "parent_goal_id", label: "Parent goal", type: "select",
       optionsFrom: "goals", optionLabel: (g) => g.title, nullable: true },
     { key: "description", label: "Description", type: "textarea" },
-    { key: "success_criteria", label: "Success criteria", type: "textarea" },
+    { key: "success_criteria", label: DONE_WHEN, type: "textarea" },
     { key: "status", label: "Status", type: "select", options: WORK_STATUSES },
     { key: "priority", label: "Priority", type: "number" },
   ],

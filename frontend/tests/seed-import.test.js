@@ -471,6 +471,20 @@ describe("dry run and re-import", () => {
     assert.deepEqual(again.body.notes, []);
     assert.deepEqual(again.body.warnings, []);
   });
+
+  test("a recorded use that lost its product is named, since an import doesn't link it back", async () => {
+    use(new FakeMetis({ products: [{ name: "Metis" }] }));
+    metis.techs.push({ id: "tech-n", slug: "nestjs", name: "NestJS" });
+    metis.encounters.push(
+      { id: "enc-1", tech_id: "tech-n", person: "ana", product_id: null },
+      { id: "enc-2", tech_id: "tech-n", person: "bo", product_id: metis.products[0].id },
+    );
+    const doc = { ...fresh(), technologies: [{ ref: "t", name: "NestJS", kind: "framework", products: ["p"] }] };
+    const { body } = await importSeed(doc);
+    assert.ok(body.notes.includes(
+      'technology "NestJS" has 1 recorded use naming no product (ana); an import never links a recorded use to a product',
+    ), body.notes.join("\n"));
+  });
 });
 
 describe("unseed uses the importer's capability identity", () => {

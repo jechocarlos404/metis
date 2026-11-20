@@ -1,6 +1,6 @@
 export const prerender = false;
 
-import { EDGE, statusLabel } from "../../../lib/words.js";
+import { EDGE, andList, count, statusLabel } from "../../../lib/words.js";
 
 const backend = () =>
   (process.env.API_INTERNAL_URL || "http://localhost:8000").replace(/\/$/, "");
@@ -861,6 +861,22 @@ class Loader {
           usage.get(productId).add(techId);
           this.note("tech_usage", "created");
         }
+      }
+    }
+
+    // Removing a product leaves a person's recorded use of a technology with
+    // no product, and an import never links one back: say so, so a re-import
+    // isn't read as a full restore.
+    for (const tech of techs) {
+      const slug = techSlug(tech);
+      if (!existing.has(slug) || !(tech.products || []).length) continue;
+      const detail = await this.api.getOptional(`/api/tech/${encodeURIComponent(slug)}`);
+      const people = (detail?.encounters || []).filter((row) => !row.product_id).map((row) => row.person);
+      if (people.length > 0) {
+        this.notes.push(
+          `technology ${JSON.stringify(tech.name)} has ${count(people.length, "recorded use")} naming no product ` +
+            `(${andList(people)}); an import never links a recorded use to a product`,
+        );
       }
     }
 

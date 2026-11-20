@@ -26,6 +26,7 @@ import os
 import re
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 
 # ---------------------------------------------------------------------------
@@ -871,6 +872,22 @@ class Loader:
                         sys.exit(f"error: usage {t['ref']} by {prod_ref} returned {status}: {body}")
                     usage[pid].add(tid)
                     self.note("tech_usage", "created")
+
+        # Removing a product leaves a person's recorded use of a technology
+        # with no product, and an import never links one back: say so, so a
+        # re-import isn't read as a full restore.
+        for t in techs:
+            slug = tech_slug(t)
+            if slug not in existing or not t.get("products"):
+                continue
+            detail = self.api.get_optional(f"/api/tech/{urllib.parse.quote(slug, safe='')}")
+            people = [e["person"] for e in (detail.get("encounters") or []) if not e.get("product_id")] \
+                if isinstance(detail, dict) else []
+            if people:
+                self.notes.append(
+                    f"technology {t['name']!r} has {len(people)} recorded use(s) naming no product "
+                    f"({', '.join(people)}); an import never links a recorded use to a product"
+                )
 
         confirmed = {
             (s["tech_id"], s["capability_id"]) for s in self.api.get("/api/tech/satisfactions")

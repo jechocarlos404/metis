@@ -175,14 +175,14 @@ export default function JourneysIsland({ canWrite }) {
               onError={setError}
             />
           )}
-          {!editing && journeys && journeys.length === 0 && <EmptyState />}
+          {!editing && journeys && journeys.length === 0 && <EmptyState canWrite={canWrite} />}
         </div>
       </div>
     </>
   );
 }
 
-function EmptyState() {
+function EmptyState({ canWrite }) {
   return (
     <div style={{ ...PANEL, padding: 24, display: "flex", flexDirection: "column", gap: 10, fontSize: "var(--text-sm)", color: "var(--text-secondary)", maxWidth: 620 }}>
       <div style={{ color: "var(--text-heading)", fontWeight: "var(--weight-medium)" }}>No ideas or journeys yet</div>
@@ -193,6 +193,19 @@ function EmptyState() {
         names the capabilities it would need. Metis then shows which steps are live today, which
         are buildable from what we have, and what’s missing.
       </div>
+      {canWrite ? (
+        <div>
+          To make one, use the idea check on <a href="/home" style={{ color: "var(--text-accent)" }}>Home</a>:
+          name the idea, pick the capabilities it needs, Check, then Save as idea.
+          A coding agent with the metis plugin can propose some with <code>metis-what-next</code>:
+          each comes with a link that opens Home’s idea check filled in, ready for you to save.
+        </div>
+      ) : (
+        <div>
+          Someone who can edit saves ideas from the idea check on <a href="/home" style={{ color: "var(--text-accent)" }}>Home</a>.
+          You can check an idea there yourself; it just won’t be saved.
+        </div>
+      )}
     </div>
   );
 }

@@ -455,6 +455,21 @@ async def test_check_idea_never_counts_a_near_name(api):
     miss = next(i for i, line in enumerate(lines) if line.strip() == "no match       Elevaton data")
     assert "near names, unconfirmed: elevation-data" in lines[miss + 1]
     assert "Not ours (2): Weather forecast, Elevaton data" in text
+    # Home's idea check, pre-filled: matched needs by slug, the rest as typed.
+    assert lines[-1] == (
+        "Open: /home?idea=Climb%20planner&caps=strava-import,weather-forecast,Elevaton%20data"
+    )
+
+    named = await server._dispatch(
+        "check_idea",
+        {"idea": "Climb, then eat",
+         "features": [{"name": "Plan", "capabilities": ["strava-import", "Elevaton data"]},
+                      {"name": "Eat", "capabilities": ["Strava import", "Food & drink"]}]},
+    )
+    assert named.splitlines()[-1] == (
+        "Open: /home?idea=Climb%2C%20then%20eat"
+        "&caps=strava-import,Elevaton%20data,Food%20%26%20drink"
+    )
 
 
 async def test_product_score_groups_sum_to_the_total(api):
@@ -532,7 +547,10 @@ async def test_ready_features_filters_by_product(api):
     assert text.startswith("1 feature(s) ready to start — pending, every dependency done.")
     assert "Show ride history" in text and "can-i-climb" in text
     rival = await server._dispatch("ready_features", {"product": "rival"})
-    assert rival.startswith("0 feature(s) ready to start in rival") and "Nothing is ready" in rival
+    assert rival.startswith("0 feature(s) ready to start in rival")
+    # Rival's pending features are external, so none of ours is pending there.
+    assert "Nothing is pending" in rival and "check_idea" in rival
+    assert rival.endswith("Open: /home")
     assert (await server._dispatch("ready_features", {"product": "nope"})).startswith("0 products")
 
 

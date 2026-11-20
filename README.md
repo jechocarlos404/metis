@@ -325,7 +325,7 @@ open port would lend it to anyone who can reach the address.
 
 **Claude Code plugin.** [`plugin/`](plugin/README.md) brings this server to a coding
 session in any repo, with skills that check for reuse before building
-(`metis-check-idea`, `metis-find-reuse`, `metis-next-work`) and read-only hooks: a
+(`metis-check-idea`, `metis-find-reuse`, `metis-what-next`) and read-only hooks: a
 product brief at session start, a one-line nudge when a prompt names a capability another
 product already has, and a reminder to re-export the seed file after code changes. The
 repo root is its marketplace:

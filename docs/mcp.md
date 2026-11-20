@@ -10,7 +10,7 @@ human action on the desktop.
 
 **From Claude Code, use the plugin.** [`plugin/`](../plugin/README.md) wires
 this server into any repo over SSE, adds skills that use it
-(`metis-check-idea`, `metis-find-reuse`, `metis-next-work`), and adds read-only
+(`metis-check-idea`, `metis-find-reuse`, `metis-what-next`), and adds read-only
 hooks that brief each session on its product. The rest of this page is for
 other clients and for wiring it by hand.
 
@@ -26,12 +26,12 @@ The inventory tools answer the portfolio questions:
 |---|---|---|
 | `products` | Every product, ours and external, with slug and id. Start here so you never guess an id. | `GET /api/products` |
 | `capability_inventory` | What we can already do, most reused first. Takes an optional `q` substring filter, applied in the server, and a `limit`. | `GET /api/capabilities/inventory` |
-| `check_idea` | How much of an idea we already have. Each need comes back `ours`, `external only`, or `no match` with near names listed as unconfirmed candidates. | `POST /api/capabilities/coverage` (a read) |
+| `check_idea` | How much of an idea we already have. Each need comes back `ours`, `external only`, or `no match` with near names listed as unconfirmed candidates. Takes an optional `idea` name. Its `Open:` line pre-fills Home's idea check (`/home?idea=<name>&caps=<slug>,<slug>,...`: matched needs by slug, the rest as typed) and runs it, so the owner can save it as an idea with one click. The tool itself saves nothing. | `POST /api/capabilities/coverage` (a read) |
 | `product_score` | How much of a product, by id or slug, we could build: buildable, partly known, not described, missing a capability. It is a lower bound. | `GET /api/products/{id}/coverage` |
 | `capability` | One capability by slug: our features and products, external products listed apart, the goals that motivate it directly, its rollup, and the evidence paths an export recorded. | inventory, then `GET /api/capabilities/{id}/scope`, `/motivations`, `/rollup` |
 | `feature_why` | Why a feature exists, from its capabilities up through their parents to the goals that motivate them. | `GET /api/features/{id}/why` |
 | `journeys` | Lists journeys. Given a journey id, it returns each step's verdict (`buildable`, `known_covered`, `missing`, `unknown`) and whether a user can do the step today. | `GET /api/journeys`, `GET /api/journeys/{id}/analysis` |
-| `ready_features` | Our pending features whose dependencies are all done. Optionally limited to one product. | `GET /api/graph/ready` |
+| `ready_features` | Our pending features whose dependencies are all done. Optionally limited to one product. When nothing is ready it says whether anything is pending at all and points to `check_idea`. | `GET /api/graph/ready`, and `GET /api/features` when nothing is ready |
 
 The technology and buy tools, which stay hidden on the desktop until there is
 data for them:

@@ -1,6 +1,7 @@
 import uuid
 
 from fastapi import APIRouter, Depends, Query
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
@@ -109,6 +110,18 @@ async def exposure(session: AsyncSession = Depends(get_db)):
     """What are we exposed to: EOL inside 180 days, a stance already given up
     on, or a bus factor of one. Computed per request, never stored."""
     return await tech_service.exposure(session)
+
+
+class Lifecycle(BaseModel):
+    technologies: int
+    unknown: int  # no end-of-life date and no maintainer count recorded
+
+
+@router.get("/lifecycle", response_model=Lifecycle)
+async def lifecycle(session: AsyncSession = Depends(get_db)):
+    """How many technologies exposure can't judge, so "nothing at risk" is
+    never read as "safe" when nothing is known."""
+    return await tech_service.lifecycle(session)
 
 
 @router.get("/offers", response_model=list[Offer])

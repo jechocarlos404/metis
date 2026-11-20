@@ -6,6 +6,6 @@ const { slug } = Astro.params;
 const canWrite = ["editor", "admin"].includes(Astro.locals.user?.role);
 ---
 
-<AppLayout title={`Tech · ${slug}`}>
+<AppLayout title={`Technology · ${slug}`}>
   <TechDetailIsland client:load slug={slug} canWrite={canWrite} />
 </AppLayout>

@@ -1,6 +1,6 @@
 ---
 name: metis-seed-instance
-description: Load a metis-seed JSON file into the running metis instance via the REST API — goals, capability map, features, dependency edges, motivations, technologies, guessed links, and spec/PRD documents. Use whenever the user wants to seed, load, import, or ingest data into their metis instance, mentions a metis-seed.json or a seed file exported from another repository, or describes goals/capabilities/features in conversation and wants them inserted into metis (author a seed file first, then load it).
+description: Load a metis-seed JSON file into the running metis instance via the REST API: goals, capability map, features, dependency edges, motivations, technologies, guessed links, and spec/PRD documents. Use whenever the user wants to seed, load, import, or ingest data into their metis instance, mentions a metis-seed.json or a seed file exported from another repository, or describes goals/capabilities/features in conversation and wants them inserted into metis (author a seed file first, then load it).
 ---
 
 # Seed the metis instance

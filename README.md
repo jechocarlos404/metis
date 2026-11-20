@@ -346,12 +346,13 @@ Metis supports both **in-app** and **skill-driven** seed round-trips (seed file 
 
 ### Claude Code skills
 
-The repo ships a two-skill pipeline for seeding an instance from real codebases
-(using the same seed format and add-only semantics as the in-app flow):
+The metis Claude Code plugin (`plugin/`) ships three skills for seeding an
+instance from real codebases (using the same seed format and add-only semantics
+as the in-app flow):
 
 - `plugin/skills/metis-seed-instance` loads a `metis-seed.json` into the running
-  instance via the API — idempotent, add-only. Auto-available in this repo.
-  With auth enabled, either use a browser session through the UI, set
+  instance via the API: idempotent, add-only. `plugin/skills/metis-unseed`
+  removes what a seed file created. With auth enabled, either use a browser session through the UI, set
   `AUTH_ENABLED=false`, or pass a bearer token.
 - `plugin/skills/metis-export` analyzes *any* repository and writes a `metis-seed.json`.
   To use it from other repos, symlink it into your global skills once per machine:

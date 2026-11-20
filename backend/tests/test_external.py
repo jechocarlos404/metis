@@ -236,3 +236,56 @@ async def test_a_product_score_partitions_its_features(db):
     assert score.missing == ["Compete on segments", "Segment challenges", "Synced segments"]
     assert score.missing_incomplete == ["Segment challenges", "Synced segments"]
     assert score.not_described == ["Beacon live tracking", "Legacy import"]
+
+
+@pytest.mark.asyncio
+async def test_what_to_build_next_is_ranked_and_the_closest_product_named(db):
+    """Missing capabilities rank by how many features each alone would cover,
+    then by how many need it; the closest products are ours, never the one
+    scored, by how many of its named capabilities they have."""
+    async with db() as session:
+        names = ["Route planning", "Base maps", "Offline maps", "Turn by turn", "Heatmaps", "Beacon"]
+        c = {n: await cap(session, n) for n in names}
+        climb = await product(session, "Can I Climb")
+        atlas = await product(session, "Atlas")
+        rival = await product(session, "Rival", external=True)
+        target = await product(session, "Target", external=True)
+
+        async def feature(name, prod, caps):
+            await feature_service.create_feature(
+                session,
+                FeatureCreate(name=name, product_id=prod.id, capability_ids=[c[n].id for n in caps]),
+            )
+
+        await feature("Plan", climb, ["Route planning", "Base maps"])
+        await feature("Map", atlas, ["Base maps"])
+        await feature("Offline", rival, ["Offline maps"])
+        await feature("Plan offline", target, ["Route planning", "Offline maps"])
+        await feature("Download an area", target, ["Base maps", "Offline maps"])
+        await feature("Navigate", target, ["Route planning", "Turn by turn"])
+        await feature("Navigate offline", target, ["Turn by turn", "Offline maps"])
+        await feature("Heat", target, ["Heatmaps"])
+        await feature("Beacon", target, ["Beacon", "Turn by turn"])
+        score = await capability_service.product_coverage(session, target.id)
+        own = await capability_service.product_coverage(session, climb.id)
+
+    ranked = [(g.name, g.features, g.only_gap) for g in score.missing_capabilities]
+    assert ranked == [
+        ("Offline maps", 3, 2),
+        ("Turn by turn", 3, 1),
+        ("Heatmaps", 1, 1),
+        ("Beacon", 1, 0),
+    ]
+    by_name = {g.name: g for g in score.missing_capabilities}
+    assert by_name["Offline maps"].slug == "offline-maps"
+    # Target has every one of these itself; elsewhere means some other product.
+    assert [p.name for p in by_name["Offline maps"].elsewhere] == ["Rival"]
+    assert by_name["Heatmaps"].elsewhere == []
+    assert score.report.needed == 6
+    assert [(p.product.name, p.capabilities) for p in score.closest_products] == [
+        ("Can I Climb", 2),
+        ("Atlas", 1),
+    ]
+    # Our own product lacks nothing, and is never its own closest product.
+    assert own.missing_capabilities == []
+    assert [(p.product.name, p.capabilities) for p in own.closest_products] == [("Atlas", 1)]

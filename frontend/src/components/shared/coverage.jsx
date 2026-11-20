@@ -1,6 +1,6 @@
 import React from "react";
 import { Badge } from "../../ds";
-import { MATURITY, NEED, VERDICT, coverageHeadline, needKey, scoreGroups } from "../../lib/words.js";
+import { MATURITY, NEED, VERDICT, count, coverageHeadline, needKey, scoreGroups } from "../../lib/words.js";
 import { Term } from "./Term.jsx";
 
 export const MATURITY_TONES = {
@@ -53,6 +53,59 @@ export function ProductScore({ score }) {
           </ul>
         </details>
       ))}
+    </div>
+  );
+}
+
+// A scored product's missing capabilities, the ones that would cover the most
+// features first, and the products of ours that already have the most of what
+// it names. Both come ranked from the API.
+export function BuildNext({ score }) {
+  const gaps = score.missing_capabilities;
+  const closest = score.closest_products;
+  if (gaps.length === 0 && closest.length === 0) return null;
+  const shown = 5;
+  const quiet = { color: "var(--text-secondary)" };
+  const gapRow = (g) => (
+    <li key={g.slug ?? g.name}>
+      {g.slug ? <a href={`/capabilities/${g.slug}`} style={{ color: "var(--text-body)" }}>{g.name}</a> : g.name}
+      <span style={quiet}>
+        {" "}· needed by {count(g.features, "feature")}
+        {g.only_gap > 0 && `; adding it covers everything named for ${g.only_gap} of them`}
+        {" "}· {g.elsewhere.length > 0 ? `also in ${g.elsewhere.map((p) => p.name).join(", ")}` : "in no other product"}
+      </span>
+    </li>
+  );
+  const list = { margin: "6px 0 0", paddingLeft: 18, display: "flex", flexDirection: "column", gap: 2, color: "var(--text-body)" };
+  return (
+    <div style={{ borderTop: "1px solid var(--border-hairline)", padding: "14px 16px", display: "flex", flexDirection: "column", gap: 12, fontSize: "var(--text-xs)" }}>
+      {gaps.length > 0 && (
+        <div>
+          <div style={{ color: "var(--text-heading)", fontWeight: "var(--weight-medium)" }}>
+            {count(gaps.length, "capability", "capabilities")} we don't have, most useful first
+          </div>
+          <ul style={list}>{gaps.slice(0, shown).map(gapRow)}</ul>
+          {gaps.length > shown && (
+            <details>
+              <summary style={{ cursor: "pointer", marginTop: 4, color: "var(--text-accent)" }}>{gaps.length - shown} more</summary>
+              <ul style={list}>{gaps.slice(shown).map(gapRow)}</ul>
+            </details>
+          )}
+        </div>
+      )}
+      {closest.length > 0 && (
+        <div>
+          <div style={{ color: "var(--text-heading)", fontWeight: "var(--weight-medium)" }}>Closest of our products</div>
+          <ul style={list}>
+            {closest.map((c) => (
+              <li key={c.product.id}>
+                <a href={`/products?product=${c.product.id}`} style={{ color: "var(--text-body)" }}>{c.product.name}</a>
+                <span style={quiet}> has {c.capabilities} of the {score.report.needed} capabilities {score.product.name}'s features name</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   );
 }

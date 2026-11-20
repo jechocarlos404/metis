@@ -138,6 +138,28 @@ class CoverageReport(BaseModel):
     missing: list[str]
 
 
+class MissingCapability(BaseModel):
+    """A capability a scored product's features name that isn't ours."""
+
+    name: str
+    #: None when the name resolves to no capability: nothing to link to.
+    slug: str | None
+    #: How many of the product's features name it.
+    features: int
+    #: Of those, how many lack only this one: adding it covers everything they
+    #: name (not necessarily all they need, when their list is incomplete).
+    only_gap: int
+    #: Products other than the scored one that have it — never ours, or it
+    #: wouldn't be missing. Empty: no other product in metis has it.
+    elsewhere: list[ProductRef]
+
+
+class ClosestProduct(BaseModel):
+    product: ProductRef
+    #: How many of the capabilities the scored product's features name it realizes.
+    capabilities: int
+
+
 class ProductCoverage(BaseModel):
     """How much of an existing product — typically someone else's — we could
     build from what we already have. A lower bound: features declaring unknown
@@ -161,3 +183,9 @@ class ProductCoverage(BaseModel):
     not_described: list[str]
     #: Coverage of the features' known capabilities; None when none are known.
     report: CoverageReport | None
+    #: Every named capability that isn't ours, most useful first: by `only_gap`,
+    #: then `features`, then name.
+    missing_capabilities: list[MissingCapability]
+    #: Up to three of our products, never this one, that realize the most of
+    #: the capabilities its features name (`report.needed` is the whole).
+    closest_products: list[ClosestProduct]

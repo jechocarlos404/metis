@@ -433,8 +433,30 @@ def product_score(score: dict) -> str:
             f"Across its named capabilities: {report['existing']}/{report['needed']} ours, "
             f"{report['mature']} proven (beta or ga)."
         )
-        if report["missing"]:
-            lines.append(f"Not ours ({len(report['missing'])}): {', '.join(report['missing'])}")
+        gaps = score["missing_capabilities"]
+        if gaps:
+            lines.append(
+                f"Not ours ({len(gaps)}), most useful first. only_gap: features for which "
+                "it is the one named capability we lack, so adding it covers what they name:"
+            )
+            lines += _table(
+                [
+                    [
+                        f"  {g['slug'] or g['name']}",
+                        f"needed by {g['features']}",
+                        f"only_gap {g['only_gap']}",
+                        f"elsewhere: {_names(g['elsewhere']) or 'none'}",
+                    ]
+                    for g in gaps
+                ]
+            )
+        closest = score["closest_products"]
+        if closest:
+            lines.append(
+                f"Closest of our products, by how many of the {report['needed']} named "
+                "capabilities each has: "
+                + ", ".join(f"{c['product']['slug']} {c['capabilities']}" for c in closest)
+            )
     else:
         lines.append("No capability is named on any of its features, so nothing can be scored.")
     lines += [

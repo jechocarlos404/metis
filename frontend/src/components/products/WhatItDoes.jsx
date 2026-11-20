@@ -1,7 +1,7 @@
 import React from "react";
 import { Select, StatusBadge, Tag } from "../../ds";
 import { count } from "../../lib/words.js";
-import { CoverageReport, ProductScore } from "../shared/coverage.jsx";
+import { BuildNext, CoverageReport, ProductScore } from "../shared/coverage.jsx";
 
 const heading = { fontSize: "var(--text-sm)", fontWeight: "var(--weight-semibold)", color: "var(--text-heading)", marginBottom: 8 };
 const muted = { fontSize: "var(--text-sm)", color: "var(--text-secondary)" };
@@ -49,6 +49,7 @@ export function WhatItDoes({ product, features, score, capabilities, journeys, b
         {score == null && <div role="status" style={{ padding: "0 16px 14px", fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>Scoring…</div>}
         {score === false && <div style={{ padding: "0 16px 14px", fontSize: "var(--text-xs)", color: "var(--danger-fg)" }}>Couldn't score this product.</div>}
         {score && <ProductScore score={score} />}
+        {score && product.external && <BuildNext score={score} />}
         {score && score.report && (
           <details style={{ borderTop: "1px solid var(--border-hairline)" }}>
             <summary style={{ padding: "10px 16px", cursor: "pointer", fontSize: "var(--text-xs)", color: "var(--text-accent)" }}>Capability by capability</summary>

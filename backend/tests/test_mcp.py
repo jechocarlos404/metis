@@ -494,6 +494,13 @@ async def test_product_score_groups_sum_to_the_total(api):
     assert "Partly known" in text and "Rival map" in text
     assert "Not described" in text and "Rival social" in text
     assert "Missing a capability — names one we don't have (1): Rival weather" in text
+    # Ranked gaps by slug, and the product of ours with the most of what's named.
+    assert "Not ours (1), most useful first." in text
+    assert "  weather-forecast  needed by 1  only_gap 1  elsewhere: none" in text.splitlines()
+    assert (
+        "Closest of our products, by how many of the 2 named capabilities each has: "
+        "can-i-climb 1"
+    ) in text
     assert "Lower bound" in text
     assert text.endswith(f"Open: /products?product={w['rival'].id}")
     by_id = await server._dispatch("product_score", {"product": str(w["climb"].id)})

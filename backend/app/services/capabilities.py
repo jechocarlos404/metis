@@ -36,12 +36,14 @@ from app.schemas.capability import (
     CapabilityNode,
     CapabilityRead,
     CapabilityUpdate,
+    ClosestProduct,
     CoverageReport,
     CoverageRequest,
     FeatureCoverage,
     HealthFinding,
     IdeaFeature,
     InventoryEntry,
+    MissingCapability,
     ProductCoverage,
     ProductRef,
     Rollup,
@@ -776,9 +778,50 @@ async def product_coverage(session: AsyncSession, product_id: uuid.UUID) -> Prod
                 groups["missing_incomplete"].append(f.name)
         else:
             groups["partly" if f.unknown_capabilities else "buildable"].append(f.name)
+    missing_capabilities, closest_products = _what_to_build(scored, product.id)
     return ProductCoverage(
         product=ProductRef.model_validate(product),
         total_features=len(features),
         **groups,
         report=report,
+        missing_capabilities=missing_capabilities,
+        closest_products=closest_products,
     )
+
+
+def _what_to_build(
+    scored: list[FeatureCoverage | None], product_id: uuid.UUID
+) -> tuple[list[MissingCapability], list[ClosestProduct]]:
+    """From the matches coverage() already made, never a second lookup: the
+    capabilities we lack, ranked by how many features each alone would cover,
+    and the products of ours that already have the most of what's named.
+    Needs are keyed by slug, as coverage() resolves them."""
+    gaps: dict[str, MissingCapability] = {}
+    ours: dict[uuid.UUID, tuple[ProductRef, set[str]]] = {}
+    for fc in scored:
+        if fc is None:
+            continue
+        lacking: dict[str, CapabilityNeed] = {}
+        for need in fc.capabilities:
+            key = need.match.slug if need.match else slugify(need.name)
+            if need.match and need.match.ours:
+                for p in need.match.products:
+                    if p.id != product_id:
+                        ours.setdefault(p.id, (p, set()))[1].add(key)
+            else:
+                lacking[key] = need
+        for key, need in lacking.items():
+            m = need.match
+            gap = gaps.setdefault(key, MissingCapability(
+                name=m.name if m else need.name,
+                slug=m.slug if m else None,
+                features=0,
+                only_gap=0,
+                elsewhere=[p for p in m.external_products if p.id != product_id] if m else [],
+            ))
+            gap.features += 1
+            if len(lacking) == 1:
+                gap.only_gap += 1
+    missing = sorted(gaps.values(), key=lambda g: (-g.only_gap, -g.features, g.name.lower()))
+    closest = sorted(ours.values(), key=lambda pc: (-len(pc[1]), pc[0].name.lower()))[:3]
+    return missing, [ClosestProduct(product=p, capabilities=len(caps)) for p, caps in closest]

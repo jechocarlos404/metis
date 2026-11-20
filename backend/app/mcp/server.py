@@ -250,7 +250,9 @@ TOOLS = [
             "How much of a product (ours or external) we could build from what "
             "we have: its features split into four groups that sum to the "
             "total — buildable, partly known, not described, missing a "
-            "capability. A lower bound."
+            "capability. A lower bound. Then the capabilities we lack, ranked by "
+            "how many features each alone would cover, and the three products of "
+            "ours that already have the most of what it names."
         ),
         inputSchema={
             "type": "object",

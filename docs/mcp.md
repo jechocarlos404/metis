@@ -19,9 +19,10 @@ values (`in_progress`, `ga`, slugs, ids) verbatim, and ends with an
 `Open: <path>` line naming the desktop screen.
 
 Errors come back with `isError` set, as one plain sentence and the same
-`Open:` line. An API refusal keeps its status and the API's own words
-(`Refused (404): Feature not found`); a write refusal opens the screen that can
-make the change. An argument that can't be what it claims is refused before any
+`Open:` line. An API refusal keeps its status and the API's own words (reading
+`metis://tech/postgresql` when no such technology is recorded gives
+`Refused (404): Technology not found`); a write refusal opens the screen that
+can make the change. An argument that can't be what it claims is refused before any
 request, saying what to pass and which tool lists valid ones. A setup problem
 says which service it can't reach or sign in to (the metis API or Keycloak) and
 the setting that points at it, and so does a base URL that answers but isn't
@@ -201,4 +202,5 @@ Or in `.mcp.json`:
 never contains the token itself. `claude mcp add` with the double-quoted
 header above writes the expanded token into your local config instead.
 
-A request without the bearer token gets `401 {"error": "unauthorized"}`.
+A request without the bearer token gets
+`401 {"error": "unauthorized", "message": "MCP requires a bearer token."}`.

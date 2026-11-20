@@ -34,9 +34,9 @@ and the line says so. Deleting a technology cascades its satisfactions and
 guesses, each named on its line by capability.
 
 With auth on, pass a token (--token, or METIS_TOKEN / METIS_API_TOKEN). Any
-valid token can run --dry-run; a delete needs a person's desktop session, which
-no script can get, so remove the product in the app instead (Settings, Seed
-files).
+valid token can run --dry-run; a delete needs a person signed in to the app as
+an editor or admin, and this script signs no one in, so remove the product in
+the app instead (Settings, Seed files).
 
 Usage:
     python3 unseed_instance.py metis-seed.json [--base-url http://localhost:8000] [--dry-run] [--token TOKEN]
@@ -61,9 +61,10 @@ import urllib.request
 
 
 IN_APP = (
-    "Deletes need a person's desktop session, which no script can get: remove "
-    "it in the app instead (Settings, Seed files: preview, then remove), or run "
-    "against an instance started with AUTH_ENABLED=false."
+    "Deletes need a person signed in to the app as an editor or admin, and this "
+    "script signs no one in. An editor or admin can remove it in the app "
+    "(Settings, Seed files: preview, then remove), or run this against an "
+    "instance started with AUTH_ENABLED=false."
 )
 
 
@@ -81,7 +82,12 @@ def refused(method, path, status, body, token):
         detail = body.get("detail") if isinstance(body, dict) else body
         if isinstance(detail, dict) and detail.get("error") == "human_action_required":
             sys.exit(f"error: {method} {path} returned 403: this token can read but not delete. {IN_APP}")
-        sys.exit(f"error: {method} {path} returned 403 ({detail}). {IN_APP}")
+        # The role refusal: a viewer can't remove it in the app either.
+        sys.exit(
+            f"error: {method} {path} returned 403 ({detail}): this account can't delete, "
+            "from a script or in the app; an editor or admin can. Ask one to remove it "
+            "in the app (Settings, Seed files: preview, then remove)."
+        )
 
 
 class Api:
@@ -952,7 +958,8 @@ def main():
         default=os.environ.get("METIS_TOKEN") or os.environ.get("METIS_API_TOKEN"),
         help="bearer token for an instance with auth on (default: $METIS_TOKEN, "
         "else $METIS_API_TOKEN). Any valid token can --dry-run; deletes need a "
-        "desktop session, so with auth on remove it in the app instead",
+        "person signed in to the app as an editor or admin, so with auth on "
+        "remove it in the app instead",
     )
     args = ap.parse_args()
 

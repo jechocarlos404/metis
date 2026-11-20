@@ -273,14 +273,23 @@ question would answer differently on Tuesday.
 Read-only everywhere except the desktop. A write from any other surface returns:
 
 ```
-403 { "error": "human_action_required",
-      "message": "Binding a slot is a human action.",
-      "href": "/stacks?slot=api::Auth" }
+403 { "detail": { "error": "human_action_required",
+                  "message": "Binding a slot is a human action.",
+                  "href": "/stacks?slot=9f6c1d2e-…" } }
 ```
 
 Not `401` — the caller is who they say. Not `405` — the route exists. The refusal names
 the reason and hands over the screen that can act. Surface is derived from the token's
 signed `azp`, so a service or MCP token cannot present itself as the desktop.
+
+A 403 has two shapes. That object is the surface's. A person on the desktop whose role
+can't write (a viewer) gets a plain sentence instead, and no screen would help them:
+
+```
+403 { "detail": "Requires editor or admin role" }
+```
+
+Read `detail.error` to tell them apart: it is there only on the first.
 
 Nothing in this codebase binds a slot. An agent that can bind a slot can silence a gap,
 and the gaps are the product.
@@ -407,13 +416,16 @@ as the in-app flow):
 - `plugin/skills/metis-seed-instance` loads a `metis-seed.json` into the running
   instance via the API: idempotent, never deletes. `plugin/skills/metis-unseed`
   removes what a seed file created. Against an instance with `AUTH_ENABLED=false`
-  the scripts need no token. With auth on, only a person's browser session on
-  the desktop may write, and no script can get that token (Keycloak issues it
-  only to the web app's login, which keeps it in an encrypted cookie). So with
+  the scripts need no token. With auth on, only a person signed in to the web
+  app as an editor or admin may write: Keycloak issues that token to the web
+  app's login once the person enters their password, and the app keeps it in
+  an encrypted cookie. The scripts sign no one in. So with
   auth on, the scripts' `--dry-run` works with any valid token (`--token`, or
   `METIS_TOKEN`; the read-only `metis-mcp` service account's is enough, see
   the skill's "With auth on"), and the real import or removal happens in the
-  app, in Settings → Seed files. On a 401 or 403 the scripts say so.
+  app, in Settings → Seed files. On a 401 or 403 the scripts say so; a
+  viewer hears that it can't write in the app either, and that an editor or
+  admin can.
 - `plugin/skills/metis-export` analyzes *any* repository and writes a `metis-seed.json`.
   To use it from other repos, symlink it into your global skills once per machine:
 

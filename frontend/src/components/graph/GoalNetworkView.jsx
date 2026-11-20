@@ -28,6 +28,7 @@ export function GoalNetworkView({ goals, capsByGoal, selectedId, onSelect }) {
   const nodeElsRef = React.useRef(new Map());
   const edgeElsRef = React.useRef(new Map());
   const onSelectRef = React.useRef(onSelect);
+  const canvasPickRef = React.useRef(null); // the goal last pressed on the canvas
   const hasFitRef = React.useRef(false);
   const keyRef = React.useRef(null);
   const toolbarRef = React.useRef(null);
@@ -56,7 +57,10 @@ export function GoalNetworkView({ goals, capsByGoal, selectedId, onSelect }) {
       linkStrength,
       frameInsets: () => controlInsets(keyRef.current, toolbarRef.current),
       reducedMotion: window.matchMedia("(prefers-reduced-motion: reduce)").matches,
-      onSelect: (id) => onSelectRef.current?.(id),
+      onSelect: (id) => {
+        canvasPickRef.current = id;
+        onSelectRef.current?.(id);
+      },
     });
     engineRef.current = engine;
     for (const [id, el] of nodeElsRef.current) engine.registerNode(id, el);
@@ -80,7 +84,9 @@ export function GoalNetworkView({ goals, capsByGoal, selectedId, onSelect }) {
   // A goal picked in the side list (or by keyboard) is centred, its name
   // readable; one pressed on the canvas stays under the pointer.
   useIsomorphicLayoutEffect(() => {
-    if (selectedId != null) engineRef.current?.centreOn(selectedId);
+    const pressed = canvasPickRef.current === selectedId;
+    canvasPickRef.current = null;
+    if (selectedId != null && !pressed) engineRef.current?.centreOn(selectedId);
   }, [selectedId]);
 
   const wantFocus = hoveredId ?? selectedId ?? null;

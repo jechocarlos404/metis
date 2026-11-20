@@ -783,7 +783,7 @@ function FeaturePanel({ detail, canWrite, onEdit, onGuessConfirmed, onSelect, pr
         {detail.capability_ids.length === 0 && !detail.unknown_capabilities && (
           <div style={NOTE}>No capability linked yet.</div>
         )}
-        {canWrite && <Guesses query={{ feature_id: detail.id }} title="Probably also built on" onConfirmed={onGuessConfirmed} />}
+        {canWrite && <Guesses query={{ feature_id: detail.id }} title="Guessed to be built on too" onConfirmed={onGuessConfirmed} />}
       </div>
 
       <WhySection chain={why?.chain} goals={goals} product={productById.get(productIds[0])} hasCapabilities={detail.capability_ids.length > 0} />

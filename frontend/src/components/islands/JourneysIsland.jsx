@@ -285,7 +285,8 @@ function JourneyDetail({ analysis, canWrite, onEdit, onDelete, onError }) {
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       <div style={{ ...PANEL, padding: 16, display: "flex", flexDirection: "column", gap: 8 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-          <div style={{ fontSize: "var(--text-lg)", color: "var(--text-heading)", fontWeight: "var(--weight-semibold)", flex: 1 }}>{journey.name}</div>
+          {/* A basis, not flex: 1, so on a phone the buttons wrap below the name instead of squeezing it. */}
+          <div style={{ fontSize: "var(--text-lg)", color: "var(--text-heading)", fontWeight: "var(--weight-semibold)", flex: "1 1 240px" }}>{journey.name}</div>
           {canWrite && <>
             {!confirmingDelete && <Button size="sm" variant="secondary" onClick={() => onEdit(null)}>Edit</Button>}
             <DeleteConfirm armed={confirmingDelete} onArm={() => setConfirmingDelete(true)} onCancel={() => setConfirmingDelete(false)}
@@ -438,11 +439,38 @@ function JourneyMap({ steps }) {
   const leave = () => { setHover(null); setPinned(null); };
   const tapAgain = pinned ? " · tap again to open it" : "";
 
+  // Only the ways this screen can trace: read after mount, as the island is
+  // server-rendered.
+  const [touch, setTouch] = React.useState(false);
+  React.useEffect(() => { setTouch(window.matchMedia("(hover: none)").matches); }, []);
+
   return (
     <div style={{ ...PANEL, padding: "12px 0 4px" }}>
-      <div style={{ ...CAPS, padding: "0 16px 6px" }}>
-        {count(steps.length, "step")} and the {count(placed.length, "capability", "capabilities")} they need. Point at, tap or tab to either to trace it.
-        {hiddenWords.length > 0 && ` Scroll sideways for ${andList(hiddenWords)}.`}
+      {/* Above the map, so what a tap traced shows by the steps rather than
+          below the fold. The cue holds the height and the trace lies over it,
+          so tracing never moves the map out from under a pointer or finger. */}
+      <div style={{ position: "relative", padding: "0 16px 6px", minHeight: 36, fontSize: "var(--text-xs)", lineHeight: "18px", color: "var(--text-secondary)" }}>
+        <span style={{ visibility: hover ? "hidden" : "visible" }}>
+          {count(steps.length, "step")} and the {count(placed.length, "capability", "capabilities")} they need.{" "}
+          {touch ? "Tap either to trace it." : "Point at or tab to either to trace it."}
+          {hiddenWords.length > 0 && ` Scroll sideways for ${andList(hiddenWords)}.`}
+        </span>
+        {(hoveredCap || hoveredStep) && (
+          <div style={{ position: "absolute", zIndex: 1, top: 0, left: 0, right: 0, padding: "0 16px 6px", background: "var(--surface-card)", pointerEvents: "none" }}>
+            {hoveredCap ? (
+              <span>
+                <b style={{ color: "var(--text-heading)" }}>{hoveredCap.need.match?.name ?? hoveredCap.need.name}</b>: {capInfo(hoveredCap.need)} · used by {count(hoveredCap.steps.length, "step")} here{tapAgain}
+              </span>
+            ) : (
+              <span>
+                <b style={{ color: "var(--text-heading)" }}>{hoveredStep.label}</b>: {stepWhere(hoveredStep)} · {VERDICT[stepKind(hoveredStep)].hint}
+                {verdictOf(stepKind(hoveredStep), stepMatches(hoveredStep)).elsewhere ? ` · ${NEED.elsewhere.label}` : ""}
+                {hoveredStep.note ? ` · ${hoveredStep.note}` : ""}
+                {tapAgain}
+              </span>
+            )}
+          </div>
+        )}
       </div>
       <div ref={scrollRef} style={{ overflowX: "auto" }}>
         <svg width={width} height={height} style={{ display: "block", fontFamily: "var(--font-body)" }}>
@@ -497,20 +525,7 @@ function JourneyMap({ steps }) {
         </svg>
       </div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 14, alignItems: "center", padding: "6px 16px 8px", fontSize: "var(--text-xs)", color: "var(--text-secondary)", minHeight: 22 }}>
-        {hoveredCap && (
-          <span>
-            <b style={{ color: "var(--text-heading)" }}>{hoveredCap.need.match?.name ?? hoveredCap.need.name}</b>: {capInfo(hoveredCap.need)} · used by {count(hoveredCap.steps.length, "step")} here{tapAgain}
-          </span>
-        )}
-        {hoveredStep && (
-          <span>
-            <b style={{ color: "var(--text-heading)" }}>{hoveredStep.label}</b>: {stepWhere(hoveredStep)} · {VERDICT[stepKind(hoveredStep)].hint}
-            {verdictOf(stepKind(hoveredStep), stepMatches(hoveredStep)).elsewhere ? ` · ${NEED.elsewhere.label}` : ""}
-            {hoveredStep.note ? ` · ${hoveredStep.note}` : ""}
-            {tapAgain}
-          </span>
-        )}
-        {!hover && Object.values(NEED).map((n) => (
+        {Object.values(NEED).map((n) => (
           <span key={n.label} title={n.hint}><Badge tone={n.tone}>{n.label}</Badge></span>
         ))}
       </div>

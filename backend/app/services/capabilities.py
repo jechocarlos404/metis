@@ -511,7 +511,8 @@ def _refs(ids: set[uuid.UUID], by_id: dict[uuid.UUID, Product]) -> list[ProductR
 
 async def inventory(session: AsyncSession) -> list[InventoryEntry]:
     """Everything we can already do, most-reused first, then what we only know
-    from external products: the raw material for the next product."""
+    from external products, then what is named but realized by no feature:
+    the raw material for the next product."""
     usage = await _usage(session)
     entries = [
         InventoryEntry(

@@ -470,6 +470,15 @@ async def test_check_idea_never_counts_a_near_name(api):
     assert lines[-1] == (
         "Open: /home?idea=Climb%20planner&caps=strava-import,weather-forecast,Elevaton%20data"
     )
+    # Named, but no feature anywhere realizes it: not ours, and not "external only".
+    unbuilt = await server._dispatch(
+        "check_idea", {"features": [{"name": "Plan", "capabilities": ["Route planner"]}]}
+    )
+    assert unbuilt.startswith("0/1 distinct capabilit(ies) are ours")
+    assert (
+        "  nobody has it  Route planner → route-planner (no feature realizes it) — not ours"
+        in unbuilt.splitlines()
+    )
 
     named = await server._dispatch(
         "check_idea",

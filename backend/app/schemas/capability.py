@@ -132,7 +132,8 @@ class CoverageReport(BaseModel):
     #: Distinct needs across the idea (a capability two features need counts once).
     needed: int
     existing: int
-    #: Distinct needs we have (external-only matches count as missing).
+    #: Distinct needs we have (a match that isn't ours — external only, or
+    #: realized by no feature — counts as missing).
     #: `mature`: those of ours at beta or ga — built and proven, not just named.
     mature: int
     missing: list[str]

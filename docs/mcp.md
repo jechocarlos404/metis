@@ -55,7 +55,7 @@ data for them:
 |---|---|
 | `tech_search` | Searches the technology catalog. It returns the slugs the other technology tools take. |
 | `capability_supply` | What can answer a capability, with fit, stance and ops cost, plus our features that realize it; external products' features are listed apart and never counted as ours. |
-| `tech_blast_radius` | Which products use a technology, and whether each use is required or `off_stack`. |
+| `tech_blast_radius` | Which products use a technology: in a stack slot, `required` or `optional`; `off_stack` when the product's stack never declared it; "uses it" when the product has no stack. |
 | `tech_exposure` | What is dying and whether it matters: expiring release lines, stances being abandoned, a bus factor of one. |
 | `stack_redundancy` | Capabilities a product answers more than once. They are reported, never resolved. |
 | `tech_encounters` | Who here has touched a technology, deepest and most recent first. |

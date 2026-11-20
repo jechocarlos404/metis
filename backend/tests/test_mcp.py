@@ -19,15 +19,17 @@ from app.main import create_app
 from app.mcp import render, server
 from app.mcp.client import MetisClient
 from app.mcp.server import PROMPTS, RESOURCE_TEMPLATES, RESOURCES, TOOLS, _hard_stop
-from app.models import CapabilityMaturity, Goal, GoalType, Product, WorkStatus
+from app.models import CapabilityMaturity, Goal, GoalType, Product, TechKind, WorkStatus
 from app.models.enums import Surface
 from app.schemas.capability import CapabilityCreate
 from app.schemas.envelope import Question
 from app.schemas.feature import EdgeCreate, FeatureCreate
 from app.schemas.journey import JourneyCreate, JourneyStepIn
+from app.schemas.technology import TechnologyCreate
 from app.services import capabilities as capability_service
 from app.services import features as feature_service
 from app.services import journeys as journey_service
+from app.services import technologies as tech_service
 from app.services.graph_service import FeatureGraph
 
 
@@ -119,6 +121,31 @@ def test_numbers_lead_and_open_is_last():
         lines = text.splitlines()
         assert lines[0][0].isdigit(), lines[0]
         assert lines[-1].startswith("Open: /"), lines[-1]
+
+
+def test_blast_radius_uses_stack_words_only_for_a_slot():
+    """A product with no stack isn't off anything: it just uses it, and
+    required/optional say nothing about it."""
+    text = render.tech_blast_radius(
+        envelope(
+            Question.tech_blast_radius,
+            [
+                {"product": "metis", "layer": "data", "role": "Vector index",
+                 "required": True, "off_stack": False},
+                {"product": "magpie", "layer": None, "role": None,
+                 "required": False, "off_stack": True},
+                {"product": "kida", "layer": None, "role": None,
+                 "required": False, "off_stack": False},
+            ],
+            "/tech/qdrant#blast-radius",
+        )
+    )
+    lines = text.splitlines()
+    assert lines[0].endswith(" — 1 required, 1 off_stack, 1 with no stack.")
+    assert lines[2].split() == ["metis", "data", "Vector", "index", "required"]
+    assert lines[3].endswith("off_stack (its stack never declared it)")
+    assert lines[4].endswith("uses it (the product has no stack)")
+    assert "optional" not in text
 
 
 def test_enums_are_verbatim():
@@ -578,6 +605,23 @@ def test_tied_closest_products_share_one_group():
         "Closest of our products, by how many of the 9 named capabilities each has built: "
         "7 hanko; 3 kida, magpie, steps"
     ) in render.product_score(score).splitlines()
+
+
+async def test_exposure_says_what_it_cannot_judge(api):
+    """No end-of-life date and no maintainer count: exposure can't flag it,
+    so an empty list must not read as an all-clear."""
+    _, db = api
+    async with db() as s:
+        await tech_service.create_technology(
+            s, TechnologyCreate(slug="qdrant", name="Qdrant", kind=TechKind.service)
+        )
+    text = await server._dispatch("tech_exposure", {})
+    _conventions(text)
+    assert text.startswith("0 exposed technolog(ies)")
+    assert (
+        "Unresolved — estate: 1 of 1 technologies have no lifecycle data (no end-of-life "
+        "date, no maintainer count), so only a stance can flag them"
+    ) in text.splitlines()
 
 
 async def test_own_products_are_not_scored(api):

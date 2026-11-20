@@ -101,8 +101,8 @@ TOOLS = [
         name="tech_blast_radius",
         description=(
             "What breaks if we drop this technology, and what could replace it. "
-            "required is a break; optional is an inconvenience; off_stack means "
-            "nobody declared the dependency."
+            "required is a break; optional is an inconvenience; off_stack means the "
+            "product's stack never declared it; a product with no stack just uses it."
         ),
         inputSchema={
             "type": "object",

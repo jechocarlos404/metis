@@ -85,22 +85,22 @@ def tech_blast_radius(envelope: dict) -> str:
     slug = envelope["subject"]["slug"]
     breaks = sum(1 for r in rows if r["required"])
     off = sum(1 for r in rows if r["off_stack"])
+    bare = sum(1 for r in rows if r["layer"] is None and not r["off_stack"])
     lines = [
-        f"{len(rows)} product(s) use {slug} — {breaks} required, {off} off_stack.",
+        f"{len(rows)} product(s) use {slug} — {breaks} required, {off} off_stack, "
+        f"{bare} with no stack.",
         "",
     ]
-    lines += _table(
-        [
-            [
-                r["product"],
-                r["layer"] or "—",
-                r["role"] or "—",
-                "required" if r["required"] else "optional",
-                "off_stack" if r["off_stack"] else "",
-            ]
-            for r in rows
-        ]
-    )
+
+    def use(r: dict) -> str:
+        # required/optional are stack words: only a slot says how much it's needed.
+        if r["layer"] is not None:
+            return "required" if r["required"] else "optional"
+        if r["off_stack"]:
+            return "off_stack (its stack never declared it)"
+        return "uses it (the product has no stack)"
+
+    lines += _table([[r["product"], r["layer"] or "—", r["role"] or "—", use(r)] for r in rows])
     # An agent asking this is mid-decision, so the obvious next fact rides along.
     alternatives = envelope.get("alternatives") or []
     if alternatives:

@@ -226,12 +226,25 @@ async def tech_exposure(
         for f in findings
         for reason in [_exposure_reason(f)]
     ]
+    # A short list is no all-clear for what exposure cannot date or count.
+    lifecycle = await tech_service.lifecycle(session)
+    unresolved = []
+    if lifecycle["unknown"]:
+        unresolved = [
+            Unresolved(
+                subject="estate",
+                reason=f"{lifecycle['unknown']} of {lifecycle['technologies']} "
+                "technologies have no lifecycle data (no end-of-life date, no "
+                "maintainer count), so only a stance can flag them",
+            )
+        ]
     return envelope(
         Question.tech_exposure,
         SubjectKind.estate,
         product or "estate",
         rows,
         f"/tech?view=exposure&window_days={window_days}",
+        unresolved,
     )
 
 

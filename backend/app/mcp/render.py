@@ -586,28 +586,19 @@ def feature_why(
     motivations: list[dict],
 ) -> str:
     """The chain, split by whose goal it is. A goal is the feature's own when it
-    sits under the same top goal as the feature's product (the desktop's rule);
-    any other arrived through a shared capability — reuse, not the reason this
-    feature exists — so it is labelled with its products. Each goal says which
-    capability it motivates, or which goal it is the parent of, because the
-    chain lists a goal once however many capabilities it motivates."""
+    belongs to the feature's product (the goals API's product_id, the desktop's
+    rule); any other arrived through a shared capability — reuse, not the reason
+    this feature exists — so it is labelled with its product. Each goal says
+    which capability it motivates, or which goal it is the parent of, because
+    the chain lists a goal once however many capabilities it motivates."""
     chain = why["chain"]
     parent = {g["id"]: g["parent_goal_id"] for g in goals}
-
-    def root(goal_id: str) -> str:
-        seen = set()
-        while parent.get(goal_id) and goal_id not in seen:
-            seen.add(goal_id)
-            goal_id = parent[goal_id]
-        return goal_id
-
-    owners: dict[str, list[str]] = {}
-    for p in products:
-        if p.get("goal_id"):
-            owners.setdefault(root(p["goal_id"]), []).append(p["slug"])
+    owner = {g["id"]: g["product_id"] for g in goals}
+    slugs = {p["id"]: p["slug"] for p in products}
     product = next((p for p in products if p["id"] == feature.get("product_id")), None)
     slug = product["slug"] if product else "(no product)"
-    own_root = root(product["goal_id"]) if product and product.get("goal_id") else None
+    product_id = product["id"] if product else None
+    owns_goals = product_id is not None and product_id in owner.values()
 
     capabilities = [s for s in chain if s["kind"] == "capability"]
     steps = [s for s in chain if s["kind"] == "goal"]
@@ -628,8 +619,10 @@ def feature_why(
             said.append("parent of " + ", ".join(children))
         return "; ".join(said)
 
-    own = [g for g in steps if own_root is not None and root(g["id"]) == own_root]
+    own = [g for g in steps if product_id is not None and owner.get(g["id"]) == product_id]
     other = [g for g in steps if g not in own]
+    # Only a product with a goal owns any, so this is set whenever owns_goals is.
+    goal = next((g for g in goals if product and g["id"] == product.get("goal_id")), None)
     lines = [
         f"{len(capabilities)} capabilit(ies) and {len(steps)} goal(s) above "
         f"{chain[0]['name']} ({slug}): {len(own)} of {slug}, "
@@ -638,7 +631,9 @@ def feature_why(
     ]
     lines += _table([["  " + s["relation"], s["name"]] for s in capabilities])
     lines.append("")
-    if not steps:
+    if product and product.get("external") and not owns_goals:
+        lines.append(f"{slug} is someone else's product: metis doesn't record its goals.")
+    elif not steps:
         lines.append(
             "No goal motivates any capability on this path — the why stops here. "
             "That is an answer."
@@ -646,10 +641,13 @@ def feature_why(
     elif own:
         lines.append(f"Goals of {slug} ({len(own)}):")
         lines += _table([["  " + g["display_id"], g["name"], via(g)] for g in own])
-    elif own_root is None:
+    elif not owns_goals:
         lines.append(f"{slug} has no goal of its own, so none of these is its reason.")
     else:
-        lines.append(f"No goal of {slug} motivates these capabilities.")
+        lines.append(
+            f"No goal of {slug} motivates these capabilities; its goal is "
+            f"{goal['display_id']} {goal['title']}."
+        )
     if other:
         lines.append(
             f"Goals of other products ({len(other)}) — each motivates a capability "
@@ -660,7 +658,7 @@ def feature_why(
                 [
                     "  " + g["display_id"],
                     g["name"],
-                    ", ".join(owners.get(root(g["id"]), [])) or "(no product)",
+                    slugs.get(owner.get(g["id"]), "(no product)"),
                     via(g),
                 ]
                 for g in other

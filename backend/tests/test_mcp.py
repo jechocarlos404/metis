@@ -758,6 +758,57 @@ async def test_feature_why_puts_the_products_own_goals_first(api):
     assert text.endswith(f"Open: /features?feature={feature.id}")
 
 
+async def _why_world(db):
+    """Ours on an org goal, someone else's product with no goal, and a product
+    whose goal links to none of its feature's capabilities."""
+    async with db() as s:
+        auth = await capability_service.create_capability(s, CapabilityCreate(name="User auth"))
+        og_ours = Goal(goal_type=GoalType.org, title="Plan work well")
+        og_makers = Goal(goal_type=GoalType.org, title="Grow the maker community")
+        s.add_all([og_ours, og_makers])
+        await s.flush()
+        ours = Product(name="Taskmaster", slug="taskmaster", goal_id=og_ours.id)
+        makers = Product(name="Makers", slug="makers", goal_id=og_makers.id)
+        strava = Product(name="Strava", slug="strava", external=True)
+        s.add_all([ours, makers, strava])
+        await s.commit()
+        await capability_service.add_motivation(s, auth.id, og_ours.id)
+        for name, product in (("Find athletes", strava), ("Manage your profile", makers)):
+            await feature_service.create_feature(
+                s, FeatureCreate(name=name, product_id=product.id, capability_ids=[auth.id])
+            )
+        return f"OG-{og_ours.seq:02d}", f"OG-{og_makers.seq:02d}"
+
+
+async def test_feature_why_of_someone_elses_product_claims_no_goal(api):
+    """Our goals motivate the capability a Strava feature shares; they are not
+    why Strava built it, and metis records no goal of Strava's."""
+    og_ours, _ = await _why_world(api[1])
+    text = await server._dispatch("feature_why", {"feature": "Find athletes"})
+    _conventions(text)
+    lines = text.splitlines()
+    assert lines[0] == (
+        "1 capabilit(ies) and 1 goal(s) above Find athletes (strava): "
+        "0 of strava, 1 of other products."
+    )
+    assert "strava is someone else's product: metis doesn't record its goals." in lines
+    assert "Goals of strava" not in text
+    theirs = next(line for line in lines if og_ours in line)
+    assert "taskmaster" in theirs and "motivates User auth" in theirs
+
+
+async def test_feature_why_names_the_products_goal_when_it_links_to_none(api):
+    og_ours, og_makers = await _why_world(api[1])
+    text = await server._dispatch("feature_why", {"feature": "Manage your profile"})
+    _conventions(text)
+    assert (
+        f"No goal of makers motivates these capabilities; its goal is "
+        f"{og_makers} Grow the maker community."
+    ) in text.splitlines()
+    assert "has no goal of its own" not in text
+    assert og_ours in text and "taskmaster" in text
+
+
 async def test_journeys_list_and_analysis(api):
     w = await _world(*api)
     listing = await server._dispatch("journeys", {})

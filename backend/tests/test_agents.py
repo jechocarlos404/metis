@@ -732,3 +732,37 @@ async def test_a_name_resolves_exactly_before_by_substring(db):
         assert (await _resolve(session, Product, "Website", "SPEC", Product.name)).name == "Tagomoto Website"
         with pytest.raises(ToolError, match="fits several products: `Tagomoto`, `Tagomoto Website`"):
             await _resolve(session, Product, "Tago", "SPEC", Product.name)
+
+
+async def test_why_feature_says_whose_each_goal_is(db):
+    """A Strava feature's chain reaches our goal through a shared capability;
+    the goal carries our product, not Strava's, so it doesn't read as the
+    reason Strava built it."""
+    import json
+
+    from app.agents.tools import ToolContext, why_feature
+    from app.models import Goal, GoalType
+    from app.schemas.capability import CapabilityCreate
+    from app.schemas.feature import FeatureCreate
+    from app.services import capabilities as capability_service
+    from app.services import features as feature_service
+
+    async with db() as session:
+        auth = await capability_service.create_capability(session, CapabilityCreate(name="User auth"))
+        goal = Goal(goal_type=GoalType.org, title="Plan work well")
+        session.add(goal)
+        await session.flush()
+        ours = Product(name="Taskmaster", slug="taskmaster", goal_id=goal.id)
+        strava = Product(name="Strava", slug="strava", external=True)
+        session.add_all([ours, strava])
+        await session.commit()
+        await capability_service.add_motivation(session, auth.id, goal.id)
+        await feature_service.create_feature(
+            session, FeatureCreate(name="Find athletes", product_id=strava.id, capability_ids=[auth.id])
+        )
+        out = json.loads((await why_feature(ToolContext(session=session), "Find athletes")).result)
+
+    assert out["product_id"] == str(strava.id)
+    goals = [s for s in out["chain"] if s["kind"] == "goal"]
+    assert [(g["name"], g["product_id"]) for g in goals] == [("Plan work well", str(ours.id))]
+    assert all("product_id" not in s for s in out["chain"] if s["kind"] != "goal")

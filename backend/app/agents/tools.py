@@ -25,6 +25,7 @@ from app.schemas.work import TicketCreate, TicketUpdate
 from app.services import capabilities as capability_service
 from app.services import decomposition as decomposition_service
 from app.services import features as feature_service
+from app.services import goals as goal_service
 from app.services import search as search_service
 from app.services import strategies as strategy_service
 from app.services import tickets as ticket_service
@@ -621,8 +622,16 @@ async def capability_rollup(ctx: ToolContext, capability: str) -> ToolResult:
 
 async def why_feature(ctx: ToolContext, feature: str) -> ToolResult:
     feature_obj = await _resolve(ctx.session, Feature, feature, "FTR", Feature.name)
-    chain = await capability_service.why(ctx.session, feature_obj)
-    return ToolResult(_dump(chain.model_dump(mode="json")))
+    chain = (await capability_service.why(ctx.session, feature_obj)).model_dump(mode="json")
+    # Whose each goal is (services/goals.py), so a shared capability's goals
+    # don't read as this feature's reason.
+    owners = await goal_service.owners(ctx.session)
+    for step in chain["chain"]:
+        if step["kind"] == "goal":
+            owner = owners.get(uuid.UUID(step["id"]))
+            step["product_id"] = str(owner) if owner else None
+    chain["product_id"] = str(feature_obj.product_id) if feature_obj.product_id else None
+    return ToolResult(_dump(chain))
 
 
 async def mvp_cut(ctx: ToolContext, targets: list[str]) -> ToolResult:
@@ -795,7 +804,7 @@ AGENT_TOOLS: dict[str, list[tuple[ToolDef, Any]]] = {
     "graph_agent": SHARED_TOOLS + [
         _tool("impact_query", "For a feature: which features transitively depend on it (dependents = blast radius) and what it depends on (dependencies).", {"feature": _STR}, ["feature"], impact_query),
         _tool("capability_rollup", "Derived progress for a capability: pending/in_progress/done counts over every feature realizing it or its sub-capabilities.", {"capability": _STR}, ["capability"], capability_rollup),
-        _tool("why_feature", "Provenance chain for a feature: REALIZES -> capability -> PART_OF* -> MOTIVATES -> goals up to org intent.", {"feature": _STR}, ["feature"], why_feature),
+        _tool("why_feature", "Provenance chain for a feature: REALIZES -> capability -> PART_OF* -> MOTIVATES -> goals up to org intent. Each goal's product_id is the product it belongs to (null: none); only goals whose product_id is the feature's product_id are its reason, the rest share a capability with it.", {"feature": _STR}, ["feature"], why_feature),
         _tool("topo_order", "All features ordered dependencies-first (safe build order). Fails if the graph has a cycle.", {}, [], topo_order),
         _tool("ready_set", "The work frontier: pending features whose precedence dependencies are all done.", {}, [], ready_set),
         _tool("find_cycles", "List dependency cycles in the feature graph.", {}, [], find_cycles),

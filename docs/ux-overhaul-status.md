@@ -124,6 +124,15 @@ on the Docker frontend against `metis_verify`, a copy of the real database.
 | Features graph smooth: SVG labels, shadow only on focus, labels hidden below 0.5 scale, dimming per shape | done | browser, 462 features: zoom ~29fps to 144fps, drag ~50fps to 144fps |
 | Goals Network view: goals linked by shared capabilities, side panel lists what each pair shares | done | browser: select, list hand-off, Back |
 
+## Guesses and the plugin (2026-11-20)
+
+| Item | Status | Verified |
+|---|---|---|
+| `capability_guesses`: unconfirmed feature or technology links with confidence low/medium/high, never counted, editor/admin only | done | 15 tests; browser on `metis_verify`: confirm, reject, capability page, Needs attention |
+| Seed format: `capability_guesses` on features, top-level `technologies`; loaders, export, unseed | done | real backend on `metis_verify`: load, idempotent re-load, desktop export, unseed back to start |
+| Seed skills moved to `plugin/skills/` | done | `scripts/install-skills.sh` re-run; global metis-export symlink points at the new path |
+| Claude Code plugin: MCP over SSE (token required, Host checked), 3 reuse skills, 3 read-only hooks | done | agent: `claude plugin validate --strict`, headless session connected, hook output against live data |
+
 ## Open follow-ups
 
 - A shared capability (e.g. User Authentication) pulls every goal behind it onto

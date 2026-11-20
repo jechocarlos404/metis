@@ -209,7 +209,9 @@ export default function FeaturesIsland({ canWrite = true }) {
     return activeProduct === "unattributed" ? ids.length === 0 : ids.includes(activeProduct);
   }, [activeProduct, nodeById]);
 
-  const directory = (results ?? layout.nodes).filter((n) => matchesProduct(n.id));
+  // Search picks which rows; each row reads the layout, which reloads after
+  // every write, so a saved status shows in the list as in the panel.
+  const directory = (results ? results.map((r) => nodeById.get(r.id) ?? r) : layout.nodes).filter((n) => matchesProduct(n.id));
 
   // The product filter removes other products' features from the graph and the
   // plan (fading them was invisible at real scale, so the filter looked broken).

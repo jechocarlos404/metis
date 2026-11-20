@@ -117,7 +117,7 @@ export function GoalNetworkView({ goals, capsByGoal, selectedId, onSelect }) {
                 <GoalNode key={n.id} node={n}
                   isSelected={selectedId === n.id}
                   isTabStop={selectedId ? selectedId === n.id : n.id === data.nodes[0]?.id}
-                  isDimmed={focusId != null ? focusId !== n.id && !focusNeighbors?.has(n.id) : !n.isOrg && !sharing.has(n.id)}
+                  isDimmed={focusId != null ? focusId !== n.id && !focusNeighbors?.has(n.id) : !sharing.has(n.id)}
                   onSelect={onSelect} onHoverChange={setHoveredId}
                   registerEl={ref(nodeElsRef.current, n.id, "registerNode", "unregisterNode")} />
               ))}

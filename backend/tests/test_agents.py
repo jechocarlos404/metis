@@ -696,3 +696,24 @@ def test_chat_verdict_words_are_the_product_pages():
     for prompt in AGENT_PROMPTS.values():
         assert "ga -> stable" in prompt and "Never put tool names" in prompt
     assert "never the tool name" in PROPOSALS_NOTE and "no tool names" in SYNTHESIS_PROMPT
+
+
+async def test_list_goals_says_which_goal_each_sits_under(db):
+    """A reply names a goal's parent from the tool, never from a guess (A23)."""
+    import json
+
+    from app.agents.tools import ToolContext, list_goals
+    from app.models import Goal, GoalType
+
+    async with db() as session:
+        hanko = Goal(goal_type=GoalType.org, title="Hanko")
+        other = Goal(goal_type=GoalType.org, title="Other")
+        session.add_all([hanko, other])
+        await session.flush()
+        session.add(Goal(goal_type=GoalType.product, title="Cafe owners", parent_goal_id=hanko.id))
+        await session.commit()
+        rows = json.loads((await list_goals(ToolContext(session=session))).result)
+
+    by_title = {r["title"]: r for r in rows}
+    assert by_title["Cafe owners"]["parent"] == by_title["Hanko"]["display_id"]
+    assert by_title["Hanko"]["parent"] is None and by_title["Other"]["parent"] is None

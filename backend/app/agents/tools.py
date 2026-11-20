@@ -160,10 +160,13 @@ def _dump(payload: Any) -> str:
 
 async def list_goals(ctx: ToolContext) -> ToolResult:
     goals = (await ctx.session.scalars(select(Goal).order_by(Goal.seq))).all()
+    code = {g.id: ("OG" if g.goal_type == "org" else "PG") + f"-{g.seq:02d}" for g in goals}
     return ToolResult(_dump([
         {
             "id": str(g.id),
-            "display_id": ("OG" if g.goal_type == "org" else "PG") + f"-{g.seq:02d}",
+            "display_id": code[g.id],
+            # The goal it sits under, so a reply never has to guess the tree.
+            "parent": code.get(g.parent_goal_id),
             "goal_type": str(g.goal_type),
             "title": g.title,
             "success_criteria": g.success_criteria,
@@ -756,7 +759,7 @@ SHARED_TOOLS = [
     _tool("capability_inventory", "Everything we can already do: every capability with its maturity, the products whose features realize it, and its feature count — most-reused first. Start here for 'what could we build next'.", {}, [], capability_inventory),
     _tool("product_coverage", "How much of a product idea already exists. features = [{name, capabilities: [capability names]}]. Names match exactly (by slug) — read capability_inventory first and reuse its names; unresolved needs come back with near-name candidates, never a guessed match.", {"features": {"type": "array", "items": {"type": "object", "properties": {"name": _STR, "capabilities": {"type": "array", "items": _STR, "minItems": 1}}, "required": ["name", "capabilities"]}, "minItems": 1}}, ["features"], product_coverage),
     _tool("existing_product_coverage", "How much of an existing product (typically an external one) we could build from what we already have, as the product page says it: its features in four groups that sum to the total — buildable, partly known, missing, not described — then the capabilities we don't have, most useful first, and the closest of our products. Quote its groups, counts, rankings and words; never recompute or re-rank them.", {"product": _STR}, ["product"], existing_product_coverage),
-    _tool("list_goals", "List all org and product goals with IDs, criteria, priority, status.", {}, [], list_goals),
+    _tool("list_goals", "List all org and product goals with IDs, the goal each sits under (parent), criteria, priority, status.", {}, [], list_goals),
     _tool("list_products", "List all products (Specs) with IDs, names, status, version.", {}, [], list_products),
     _tool("list_capabilities", "List the capability map (slow plane): IDs, names, parent, maturity, evidence anchors.", {}, [], list_capabilities),
     _tool("list_features", "List all features in the library with IDs, realized capability, facets, status, priority.", {}, [], list_features),

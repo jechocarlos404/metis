@@ -67,7 +67,10 @@ export default function ProductsIsland({ canWrite = true }) {
   // With nothing chosen, or a product that's gone (deleted, then Back), open
   // on the picker's first product.
   React.useEffect(() => {
-    if (products && !products.some((p) => p.id === productId)) setProductId(productOptions(products)[0]?.value ?? null);
+    if (!products || products.some((p) => p.id === productId)) return;
+    const first = productOptions(products)[0]?.value ?? null;
+    setProductId(first);
+    writeParams({ product: first }); // a reload must not ask for the one that's gone
   }, [products, productId]);
 
   const loadDetail = React.useCallback(async (id) => {

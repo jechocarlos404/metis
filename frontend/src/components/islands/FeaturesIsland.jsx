@@ -408,6 +408,8 @@ export default function FeaturesIsland({ canWrite = true }) {
       setResults((r) => r && r.filter((n) => n.id !== id));
       setSelected(null);
       setPanelOpen(false);
+      // A reload must not ask for the feature that is gone.
+      writeParams({ feature: "" });
       await load();
       setNotice(`Deleted ${name}.`);
     } catch (e) {

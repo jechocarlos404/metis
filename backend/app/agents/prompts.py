@@ -73,7 +73,7 @@ given: buildable, partly known, missing, not described; "capabilities we don't h
 most useful first"; "closest of our products". Never compute or re-rank your own. \
 "Adding it covers everything named for N of them" never means those features become \
 buildable: a feature whose capability list is incomplete is at best partly known. \
-"Missing" describes a feature; a capability we don't have is "not built yet".
+Never call a capability "missing" (that word is for features); say we don't have it.
 - State facts. Do not pad with pleasantries.
 - Use tools to read real data before answering. Never invent IDs or counts.
 """

@@ -405,8 +405,8 @@ export default function ProductsIsland({ canWrite = true }) {
         footer={
           <>
             {productDialog?.mode === "edit" && (
-              <DeleteConfirm armed={confirmingDelete} onArm={() => setConfirmingDelete(true)} onCancel={() => setConfirmingDelete(false)} onConfirm={deleteProduct} disabled={saving}
-                label="Delete" confirmLabel={"Delete product"} style={{ marginRight: "auto" }} />
+              <DeleteConfirm armed={confirmingDelete} onArm={() => setConfirmingDelete(true)} onCancel={() => setConfirmingDelete(false)} onConfirm={deleteProduct}
+                disabled={saving || features == null} label="Delete" confirmLabel={"Delete product"} style={{ marginRight: "auto" }} />
             )}
             <Button size="sm" variant="secondary" onClick={() => setProductDialog(null)}>Cancel</Button>
             <Button size="sm" variant="accent" disabled={saving || !productDialog?.name?.trim()} onClick={saveProduct}>
@@ -415,6 +415,7 @@ export default function ProductsIsland({ canWrite = true }) {
           </>
         }
       >
+        {productDialog?.mode === "edit" && confirmingDelete && <DeleteWhat product={product} features={features ?? []} />}
         {productDialog && (
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             <Input label="Name" value={productDialog.name} onChange={(e) => setProductDialog({ ...productDialog, name: e.target.value })} placeholder="PM tracker export" />
@@ -434,6 +435,26 @@ export default function ProductsIsland({ canWrite = true }) {
         </div>
       )}
     </>
+  );
+}
+
+// What deleting a product takes with it. Its features go too: left without a
+// product they would count as ours.
+function DeleteWhat({ product, features }) {
+  return (
+    <div role="note" style={{ marginBottom: 14, padding: 12, border: "1px solid var(--border-default)", borderRadius: "var(--radius-sm)", display: "flex", flexDirection: "column", gap: 8, fontSize: "var(--text-sm)", color: "var(--text-body)" }}>
+      <div>
+        {features.length > 0
+          ? <>Deleting {product.name} also deletes its {count(features.length, "feature")}:</>
+          : <>{product.name} has no features.</>}
+      </div>
+      {features.length > 0 && (
+        <ul style={{ margin: 0, paddingLeft: 18, maxHeight: 160, overflowY: "auto", display: "flex", flexDirection: "column", gap: 2 }}>
+          {features.map((f) => <li key={f.id}>{f.name}</li>)}
+        </ul>
+      )}
+      <div style={{ color: "var(--text-secondary)" }}>Anything kept only for it, such as its plan or technology stack, goes too. Capabilities and goals stay.</div>
+    </div>
   );
 }
 

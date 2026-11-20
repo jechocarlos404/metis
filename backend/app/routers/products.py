@@ -1,11 +1,11 @@
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
-from app.models import Goal, Product
+from app.models import Feature, Goal, Product
 from app.schemas.capability import CapabilityRead, ProductCoverage
 from app.schemas.product import (
     DecompositionCreate,
@@ -80,10 +80,21 @@ async def update_product(
 
 
 @router.delete("/products/{product_id}", status_code=204)
-async def delete_product(product_id: uuid.UUID, session: AsyncSession = Depends(get_db)):
+async def delete_product(
+    product_id: uuid.UUID, request: Request, session: AsyncSession = Depends(get_db)
+):
+    """Its features go with it. The foreign key alone would detach them, and a
+    feature with no product counts as ours."""
     product = await decomposition_service.get_product(session, product_id)
+    owned = Feature.product_id == product_id
+    feature_ids = (await session.scalars(select(Feature.id).where(owned))).all()
+    await session.execute(delete(Feature).where(owned))
     await session.delete(product)
     await session.commit()
+    graph = getattr(request.app.state, "graph", None)
+    if graph is not None:
+        for feature_id in feature_ids:
+            graph.remove_node(feature_id)
 
 
 @router.post("/products/{product_id}/seeded", response_model=ProductRead)

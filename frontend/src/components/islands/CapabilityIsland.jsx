@@ -254,9 +254,12 @@ export default function CapabilityIsland({ slug, canWrite = false }) {
         actions={
           canWrite && (
             <span style={{ display: "inline-flex", gap: 8, alignItems: "center" }}>
-              <Button size="sm" variant="secondary" style={{ gap: 6 }} onClick={openEdit}>
-                <Icon name="pencil" size={13} />Edit
-              </Button>
+              {/* While a delete is armed, Keep is the one way back. */}
+              {!confirmingDelete && (
+                <Button size="sm" variant="secondary" style={{ gap: 6 }} onClick={openEdit}>
+                  <Icon name="pencil" size={13} />Edit
+                </Button>
+              )}
               {confirmingDelete && children.length > 0 && (
                 <span style={{ fontSize: "var(--text-xs)", color: "var(--text-body)" }}>
                   {children.length === 1

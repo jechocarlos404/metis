@@ -3,6 +3,7 @@ import { StatusBadge } from "../../ds";
 import { createForceGraph } from "./forceGraphEngine.js";
 import { buildGoalNetwork, buildAdjacency, NODE_W, NODE_H } from "./graph-data.js";
 import { CardLabel, GraphCaption, GraphToolbar } from "./FeatureGraphView.jsx";
+import { capabilityCount } from "./goal-facts.js";
 import { count } from "../../lib/words.js";
 
 const useIsomorphicLayoutEffect = typeof window !== "undefined" ? React.useLayoutEffect : React.useEffect;
@@ -242,6 +243,9 @@ function GoalPanel({ goals, edges, capsByGoal, selectedId, onSelect }) {
     .map((e) => ({ other: byId.get(e.source === goal.id ? e.target : e.source), capabilities: e.capabilities }))
     .sort((a, b) => b.capabilities.length - a.capabilities.length || a.other.title.localeCompare(b.other.title));
   const caps = capsByGoal[goal.id] ?? [];
+  // The Goals list's count, word for word (goal-facts.js): an org goal may link
+  // nothing itself and still reach capabilities through its product goals.
+  const counted = capabilityCount(goal, goals, capsByGoal);
 
   return (
     <aside className="graph-goal-panel" style={panel} aria-label="Selected goal">
@@ -264,7 +268,9 @@ function GoalPanel({ goals, edges, capsByGoal, selectedId, onSelect }) {
         <div style={head}>Shares capabilities with</div>
         {shares.length === 0 ? (
           <div style={{ color: "var(--text-secondary)" }}>
-            {caps.length === 0 ? "No capabilities linked, so nothing to share." : "No other goal uses its capabilities."}
+            {counted.direct > 0 ? "No other goal uses its capabilities."
+              : counted.total > 0 ? "Nothing directly: its product goals link its capabilities. Pick one to see what it shares."
+              : "No capabilities linked, so nothing to share."}
           </div>
         ) : (
           shares.map(({ other, capabilities }) => (
@@ -284,18 +290,19 @@ function GoalPanel({ goals, edges, capsByGoal, selectedId, onSelect }) {
         )}
       </div>
 
-      {caps.length > 0 && (
+      {counted.total > 0 && (
         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          {/* "directly" as on the Goals list, which also counts an org goal's product goals. */}
-          <div style={head}>{count(caps.length, "capability", "capabilities")} linked{children.length > 0 ? " directly" : ""}</div>
-          <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>
-            {caps.map((c, i) => (
-              <React.Fragment key={c.id}>
-                {i > 0 && ", "}
-                <a href={`/capabilities/${c.slug}`}>{c.name}</a>
-              </React.Fragment>
-            ))}
-          </div>
+          <div style={head}>{counted.text}</div>
+          {caps.length > 0 && (
+            <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>
+              {caps.map((c, i) => (
+                <React.Fragment key={c.id}>
+                  {i > 0 && ", "}
+                  <a href={`/capabilities/${c.slug}`}>{c.name}</a>
+                </React.Fragment>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </aside>

@@ -2,7 +2,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { deleteEffects, ownedTrees } from "../src/components/graph/goal-facts.js";
+import { capabilityCount, deleteEffects, ownedTrees } from "../src/components/graph/goal-facts.js";
 
 const goal = (id, extra = {}) => ({ id, display_id: id, title: `${id} title`, parent_goal_id: null, product_id: null, ...extra });
 
@@ -24,6 +24,20 @@ test("a goal's delete names every capability link, product and child goal it rem
 test("a goal nothing links to deletes alone", () => {
   const goals = [goal("PG-4")];
   assert.deepEqual(deleteEffects(goals[0], goals, {}, []), { capabilities: [], products: [], children: [] });
+});
+
+test("one capability count for the Goals list and the network panel, two parts when a goal has product goals (C19, C31)", () => {
+  const goals = [goal("OG-42"), goal("PG-43", { parent_goal_id: "OG-42" }), goal("PG-44", { parent_goal_id: "OG-42" }), goal("OG-39"), goal("PG-9")];
+  const caps = (...ids) => ids.map((id) => ({ id, name: id }));
+  const capsByGoal = { "PG-43": caps("a", "b", "c"), "PG-44": caps("c", "d"), "OG-39": caps("a"), "PG-9": caps("x", "y") };
+  // OG-42 links nothing itself; its product goals reach 4 distinct capabilities.
+  assert.deepEqual(capabilityCount(goals[0], goals, capsByGoal), { direct: 0, total: 4, text: "0 capabilities linked directly · 4 with its product goals" });
+  // No product goals: one part, no "directly".
+  assert.deepEqual(capabilityCount(goals[3], goals, capsByGoal), { direct: 1, total: 1, text: "1 capability linked" });
+  assert.equal(capabilityCount(goals[4], goals, capsByGoal).text, "2 capabilities linked");
+  // Product goals that add nothing new: the second part is left out.
+  const same = { "OG-42": caps("a"), "PG-43": caps("a") };
+  assert.equal(capabilityCount(goals[0], goals, same).text, "1 capability linked directly");
 });
 
 test("a product's Goals tab draws the tree it owns, whichever goal in it the product points at (A34)", () => {

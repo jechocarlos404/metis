@@ -5,7 +5,7 @@ import { api } from "../../lib/api.js";
 import { readParam, useParamRestore, writeParams } from "../../lib/url-state.js";
 import { GoalNetworkView } from "../graph/GoalNetworkView.jsx";
 import { NEED, PRIORITY_HINT, andList, count, needKey, statusLabel } from "../../lib/words.js";
-import { deleteEffects } from "../graph/goal-facts.js";
+import { capabilityCount, deleteEffects } from "../graph/goal-facts.js";
 
 const EMPTY_DRAFT = { goal_type: "product", parent_goal_id: "", title: "", description: "", success_criteria: "", priority: "3", status: "pending" };
 
@@ -70,16 +70,6 @@ export default function GoalsIsland({ canWrite = true }) {
   const draftParent = draft.goal_type === "product" ? orgs.find((o) => o.id === draft.parent_goal_id) : null;
   const draftOwner = draftParent ? productById[draftParent.product_id] : null;
 
-  // An org goal's own links, the count the Network panel shows, then the
-  // distinct capabilities across it and its product goals when that is more.
-  const orgCapabilityCount = (org) => {
-    const direct = (capsByGoal[org.id] ?? []).length;
-    const children = productGoals.filter((g) => g.parent_goal_id === org.id);
-    if (children.length === 0) return `${count(direct, "capability", "capabilities")} linked`;
-    const ids = new Set((capsByGoal[org.id] ?? []).map((c) => c.id));
-    for (const g of children) for (const c of capsByGoal[g.id] ?? []) ids.add(c.id);
-    return `${count(direct, "capability", "capabilities")} linked directly${ids.size > direct ? ` · ${ids.size} with its product goals` : ""}`;
-  };
 
   const openNew = () => {
     setDraft({ ...EMPTY_DRAFT, goal_type: orgs.length === 0 ? "org" : "product" });
@@ -266,7 +256,8 @@ export default function GoalsIsland({ canWrite = true }) {
                     )}
                     {org.description && <div style={{ fontSize: "var(--text-sm)", color: "var(--aegean-4)", marginTop: 4 }}>{org.description}</div>}
                     {org.success_criteria && <div style={{ fontSize: "var(--text-xs)", color: "var(--aegean-4)", marginTop: 2 }}>Success: {org.success_criteria}</div>}
-                    <div style={{ fontSize: "var(--text-xs)", color: "var(--aegean-4)", marginTop: 4 }}>{orgCapabilityCount(org)}</div>
+                    {/* The same count the Network panel shows (goal-facts.js). */}
+                    <div style={{ fontSize: "var(--text-xs)", color: "var(--aegean-4)", marginTop: 4 }}>{capabilityCount(org, goals, capsByGoal).text}</div>
                   </div>
                   <StatusBadge status={org.status} />
                   {canWrite && (

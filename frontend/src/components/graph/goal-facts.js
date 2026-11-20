@@ -4,6 +4,24 @@
 //   goals:      /api/goals rows ({ id, parent_goal_id, product_id, ... })
 //   capsByGoal: { goalId: [{ id, name }] }, the goal's own capability links
 
+import { count } from "../../lib/words.js";
+
+/**
+ * A goal's capability count, worded the same on the Goals list and in the
+ * network panel. A goal with product goals under it also counts the distinct
+ * capabilities across them, when that is more than its own links.
+ */
+export function capabilityCount(goal, goals, capsByGoal) {
+  const own = capsByGoal[goal.id] ?? [];
+  const children = goals.filter((g) => g.parent_goal_id === goal.id);
+  const linked = count(own.length, "capability", "capabilities");
+  if (children.length === 0) return { direct: own.length, total: own.length, text: `${linked} linked` };
+  const ids = new Set(own.map((c) => c.id));
+  for (const g of children) for (const c of capsByGoal[g.id] ?? []) ids.add(c.id);
+  const more = ids.size > own.length ? ` · ${ids.size} with its product goals` : "";
+  return { direct: own.length, total: ids.size, text: `${linked} linked directly${more}` };
+}
+
 /**
  * What deleting a goal does to other rows (the goals table's foreign keys):
  * its capability links go (motivations, ON DELETE CASCADE), products that

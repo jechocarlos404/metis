@@ -5,20 +5,18 @@ import { MaturityBadge } from "../shared/coverage.jsx";
 import { Guesses } from "../shared/Guesses.jsx";
 import { api } from "../../lib/api.js";
 import { readParam, writeParams } from "../../lib/url-state.js";
-import { MATURITY, count } from "../../lib/words.js";
+import { MATURITY, NEED, count, needKey } from "../../lib/words.js";
 
 // Health finding kinds this page shows, in plain words, and where each links.
 const FINDINGS = {
   empty_intent: { label: "Goal with no capabilities", tone: "neutral", hint: "This product goal links to no capability" },
   unmotivated_capability: { label: "No goal explains it", tone: "danger", hint: "No goal links to it or to anything under it" },
-  aspirational_gap: { label: "Wanted but nothing builds it", tone: "warn", hint: "None of our features builds it yet" },
+  aspirational_gap: { label: NEED.none.label, tone: NEED.none.tone, hint: "No feature builds it yet" },
   unlinked_feature: { label: "Feature with no capability", tone: "warn", hint: "It can't count toward reuse or coverage until it has one" },
   stale_map: { label: "Map may be out of date", tone: "warn", hint: "Not imported from its seed file in 30 days, or ever" },
 };
-const FINDING_FILTERS = [
-  { value: "", label: "All findings" },
-  ...Object.entries(FINDINGS).map(([value, f]) => ({ value, label: f.label })),
-];
+// "never imported from a seed file." → "Never imported from a seed file."
+const sentence = (text) => text.charAt(0).toUpperCase() + text.slice(1);
 const VIEWS = [
   { value: "tree", label: "Tree" },
   { value: "reused", label: "Most reused" },
@@ -27,12 +25,13 @@ const VIEWS = [
 
 const CAPS_HEADER = {
   fontFamily: "var(--font-mono)",
-  fontSize: 10,
+  fontSize: "var(--text-2xs)",
   letterSpacing: "var(--tracking-caps)",
   textTransform: "uppercase",
   color: "var(--text-secondary)",
 };
-const COLUMNS = "1fr 110px 150px 100px";
+const COLUMNS = "minmax(180px, 1fr) 110px 150px 100px";
+const TABLE_MIN = 620; // the columns above, their gaps and the row padding
 
 // Inventory entries → depth-first rows, siblings in creation order.
 function treeRows(entries) {
@@ -67,6 +66,8 @@ export default function CapabilitiesIsland({ canWrite = true }) {
   const [saving, setSaving] = React.useState(false);
   const [dialogError, setDialogError] = React.useState(null);
   const [deleted, setDeleted] = React.useState(null); // name a capability page just deleted
+  const [guessCount, setGuessCount] = React.useState(0); // guesses still waiting for a decision
+  const [near, setNear] = React.useState(null); // the typed name's exact match and near names
 
   React.useEffect(() => {
     // The capability page sends you here after a delete; say so once.
@@ -75,10 +76,11 @@ export default function CapabilitiesIsland({ canWrite = true }) {
       setDeleted(name);
       writeParams({ deleted: "" });
     }
-    Promise.all([api("/capabilities/inventory"), api("/capabilities/health")])
-      .then(([inv, health]) => {
+    Promise.all([api("/capabilities/inventory"), api("/capabilities/health"), canWrite ? api("/guesses") : []])
+      .then(([inv, health, guesses]) => {
         setInventory(inv);
         setFindings(health.filter((f) => FINDINGS[f.kind]));
+        setGuessCount(guesses.length);
       })
       .catch((e) => setError(String(e.message)));
   }, []);
@@ -105,9 +107,45 @@ export default function CapabilitiesIsland({ canWrite = true }) {
     return rows.filter((c) => keep.has(c.id));
   }, [view, rows, byId, q, inventory]);
 
-  const shownFindings = findings.filter(
-    (f) => (!findingFilter || f.kind === findingFilter) && (!q || f.subject_name.toLowerCase().includes(q)),
+  // One row per thing: a capability can need attention for two reasons.
+  const groups = React.useMemo(() => {
+    const bySubject = new Map();
+    for (const f of findings) {
+      if (!bySubject.has(f.subject_id)) bySubject.set(f.subject_id, { ...f, kinds: [] });
+      bySubject.get(f.subject_id).kinds.push(f);
+    }
+    return [...bySubject.values()];
+  }, [findings]);
+  const hasKind = (g, kind) => g.kinds.some((f) => f.kind === kind);
+  const shownGroups = groups.filter(
+    (g) => (!findingFilter || hasKind(g, findingFilter)) && (!q || g.subject_name.toLowerCase().includes(q)),
   );
+  const attentionTotal = groups.length + guessCount;
+  const filterOptions = [
+    { value: "", label: `All (${attentionTotal})` },
+    ...Object.entries(FINDINGS).map(([value, f]) => ({ value, label: `${f.label} (${groups.filter((g) => hasKind(g, value)).length})` })),
+    ...(canWrite ? [{ value: "guesses", label: `Guessed links to review (${guessCount})` }] : []),
+  ];
+  const ours = all.filter((c) => c.ours).length;
+
+  // Near names for the name being typed, so a duplicate is caught before it's made.
+  React.useEffect(() => {
+    const name = draft.name.trim();
+    if (!dialogOpen || name.length < 3) {
+      setNear(null);
+      return undefined;
+    }
+    let live = true;
+    const t = setTimeout(() => {
+      api("/capabilities/coverage", { method: "POST", body: { features: [{ name: "new capability", capabilities: [name] }] } })
+        .then((r) => {
+          const need = r.features[0]?.capabilities[0];
+          if (live) setNear(need ? { exact: need.match, candidates: need.candidates } : null);
+        })
+        .catch(() => { if (live) setNear(null); });
+    }, 300);
+    return () => { live = false; clearTimeout(t); };
+  }, [draft.name, dialogOpen]);
 
   const openNew = () => {
     setDraft(EMPTY_DRAFT);
@@ -148,7 +186,7 @@ export default function CapabilitiesIsland({ canWrite = true }) {
     <>
       <PageHeader
         title="Capabilities"
-        meta={inventory ? count(all.length, "capability", "capabilities") : "loading"}
+        meta={inventory ? `${count(all.length, "capability", "capabilities")} · ${ours} ours` : "loading"}
         actions={
           canWrite && (
             <Button size="sm" variant="accent" style={{ gap: 6 }} onClick={openNew}>
@@ -162,7 +200,7 @@ export default function CapabilitiesIsland({ canWrite = true }) {
       <div style={{ flex: 1, overflowY: "auto", padding: 20, display: "flex", flexDirection: "column", gap: 12, minHeight: 0 }}>
         <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
           <input type="search" value={find} onChange={(e) => setFind(e.target.value)}
-            placeholder={`Find among ${all.length || ""} capabilities`} aria-label="Find a capability"
+            placeholder={all.length ? `Find among ${count(all.length, "capability", "capabilities")}` : "Find a capability"} aria-label="Find a capability"
             style={{ flex: "1 1 240px", height: 32, padding: "0 10px", fontSize: "var(--text-sm)", fontFamily: "var(--font-body)", color: "var(--text-body)", background: "var(--surface-card)", border: "1px solid var(--border-control)", borderRadius: "var(--radius-sm)" }} />
           <div role="group" aria-label="View" style={{ display: "inline-flex", border: "1px solid var(--border-control)", borderRadius: "var(--radius-sm)", overflow: "hidden" }}>
             {VIEWS.map((v, i) => (
@@ -171,24 +209,29 @@ export default function CapabilitiesIsland({ canWrite = true }) {
                   borderLeft: i ? "1px solid var(--border-control)" : "none",
                   background: view === v.value ? "var(--accent-wash)" : "var(--surface-card)",
                   color: view === v.value ? "var(--text-accent)" : "var(--text-body)" }}>
-                {v.label}{v.value === "attention" && inventory ? ` · ${findings.length}` : ""}
+                {v.label}{v.value === "attention" && inventory ? ` · ${attentionTotal}` : ""}
               </button>
             ))}
           </div>
-          {view === "attention" && findings.length > 0 && (
+          {view === "attention" && attentionTotal > 0 && (
             <div style={{ minWidth: 220 }}>
-              <Select aria-label="Filter findings" value={findingFilter} onChange={(e) => setFindingFilter(e.target.value)} options={FINDING_FILTERS} />
+              <Select aria-label="Filter findings" value={findingFilter} onChange={(e) => setFindingFilter(e.target.value)} options={filterOptions} />
             </div>
           )}
         </div>
 
         {view === "attention" ? (
           <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-            <FindingList findings={shownFindings} total={findings.length} byId={byId} loaded={inventory != null} />
-            {canWrite && <Guesses query={{}} name="both" title="Guessed links to review" />}
+            {findingFilter !== "guesses" && !(groups.length === 0 && guessCount > 0) && (
+              <FindingList groups={shownGroups} total={groups.length} byId={byId} loaded={inventory != null} />
+            )}
+            {canWrite && (!findingFilter || findingFilter === "guesses") && (
+              <Guesses query={{}} name="both" title="Guessed links to review" onCount={setGuessCount} />
+            )}
           </div>
         ) : (
-          <div style={{ background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", overflow: "hidden" }}>
+          <div style={{ background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", overflowX: "auto" }}>
+           <div style={{ minWidth: TABLE_MIN }}>
             <div style={{ display: "grid", gridTemplateColumns: COLUMNS, gap: 12, padding: "8px 16px", borderBottom: "1px solid var(--border-hairline)", ...CAPS_HEADER }}>
               <span>Capability</span><span>Maturity</span><span>Products</span><span>Our features</span>
             </div>
@@ -205,6 +248,7 @@ export default function CapabilitiesIsland({ canWrite = true }) {
                   : error ? "Couldn't load capabilities." : "Loading capabilities…"}
               </div>
             )}
+           </div>
           </div>
         )}
       </div>
@@ -215,6 +259,7 @@ export default function CapabilitiesIsland({ canWrite = true }) {
         onClose={() => setDialogOpen(false)}
         footer={
           <>
+            {!draft.name.trim() && <span style={{ marginRight: "auto", alignSelf: "center", fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>Give it a name to create it.</span>}
             <Button size="sm" variant="secondary" onClick={() => setDialogOpen(false)}>Cancel</Button>
             <Button size="sm" variant="accent" disabled={saving || !draft.name.trim()} onClick={create}>Create capability</Button>
           </>
@@ -223,7 +268,24 @@ export default function CapabilitiesIsland({ canWrite = true }) {
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
           {dialogError && <div role="alert" style={{ fontSize: "var(--text-sm)", color: "var(--danger-fg)" }}>{dialogError}</div>}
           <Input label="Name" hint="A noun phrase, e.g. Route planning" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
-          <Input label="Description" value={draft.description} onChange={(e) => setDraft({ ...draft, description: e.target.value })} />
+          {near?.exact && (
+            <div role="status" style={{ fontSize: "var(--text-xs)", color: "var(--text-body)" }}>
+              Already exists: <a href={`/capabilities/${near.exact.slug}`}>{near.exact.name}</a>. Open it instead.
+            </div>
+          )}
+          {!near?.exact && near?.candidates?.length > 0 && (
+            <div role="status" style={{ fontSize: "var(--text-xs)", color: "var(--text-body)" }}>
+              Similar names in use:{" "}
+              {near.candidates.map((c, i) => (
+                <React.Fragment key={c.id}>{i > 0 && ", "}<a href={`/capabilities/${c.slug}`}>{c.name}</a></React.Fragment>
+              ))}. If one is the same thing, open it instead.
+            </div>
+          )}
+          <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            <span style={{ fontSize: "var(--text-xs)", fontWeight: "var(--weight-medium)", color: "var(--text-heading)" }}>Description</span>
+            <textarea rows={3} value={draft.description} onChange={(e) => setDraft({ ...draft, description: e.target.value })}
+              style={{ padding: "8px 10px", fontSize: "var(--text-sm)", fontFamily: "var(--font-body)", color: "var(--text-heading)", background: "var(--surface-card)", border: "1px solid var(--border-control)", borderRadius: "var(--radius-sm)", resize: "vertical" }} />
+          </label>
           <Select label="Part of" value={draft.parentId} onChange={(e) => setDraft({ ...draft, parentId: e.target.value })} options={parentOptions} />
           <Select label="Maturity" value={draft.maturity} onChange={(e) => setDraft({ ...draft, maturity: e.target.value })}
             options={Object.entries(MATURITY).map(([value, label]) => ({ value, label }))} />
@@ -243,7 +305,7 @@ function CapabilityRow({ c, last }) {
         <Icon name="layers" size={13} style={{ color: "var(--text-secondary)", flex: "none" }} />
         <span style={{ color: "var(--text-heading)", fontWeight: "var(--weight-medium)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.name}</span>
       </span>
-      <span><MaturityBadge maturity={c.maturity} /></span>
+      <span>{c.ours ? <MaturityBadge maturity={c.maturity} /> : <span title={NEED[needKey(c)].hint}><Badge tone={NEED[needKey(c)].tone}>{NEED[needKey(c)].label}</Badge></span>}</span>
       <span style={{ display: "flex", gap: 8, alignItems: "baseline", minWidth: 0 }}>
         <span title={c.products.map((p) => p.name).join(", ") || undefined} style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--text-heading)" }}>
           {c.products.length}
@@ -259,7 +321,7 @@ function CapabilityRow({ c, last }) {
   );
 }
 
-function FindingList({ findings, total, byId, loaded }) {
+function FindingList({ groups: findings, total, byId, loaded }) {
   const box = { background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", overflow: "hidden" };
   const note = { padding: 16, fontSize: "var(--text-sm)", color: "var(--text-secondary)" };
   if (!loaded) return <div style={box}><div style={note}>Loading…</div></div>;
@@ -268,7 +330,6 @@ function FindingList({ findings, total, byId, loaded }) {
   return (
     <div style={box}>
       {findings.map((f, i) => {
-        const kind = FINDINGS[f.kind];
         const capability = byId.get(f.subject_id);
         const href = f.kind === "empty_intent" ? `/goals?goal=${f.subject_id}`
           : f.kind === "unlinked_feature" ? `/features?feature=${f.subject_id}`
@@ -280,9 +341,11 @@ function FindingList({ findings, total, byId, loaded }) {
           <Tag key={`${f.kind}-${f.subject_id}`} href={href ?? undefined}
             style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "10px 16px", textDecoration: "none", color: "inherit",
               borderBottom: i < findings.length - 1 ? "1px solid var(--border-hairline)" : "none" }}>
-            <Badge tone={kind.tone}>{kind.label}</Badge>
+            {f.kinds.map((k) => <Badge key={k.kind} tone={FINDINGS[k.kind].tone}>{FINDINGS[k.kind].label}</Badge>)}
             <span style={{ fontSize: "var(--text-sm)", fontWeight: "var(--weight-medium)", color: "var(--text-heading)" }}>{label}</span>
-            <span style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>{kind.hint}</span>
+            <span style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>
+              {f.kinds.map((k) => (k.kind === "stale_map" ? sentence(k.detail) : FINDINGS[k.kind].hint)).join(" · ")}
+            </span>
           </Tag>
         );
       })}

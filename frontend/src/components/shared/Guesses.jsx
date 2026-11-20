@@ -59,7 +59,7 @@ export function Guesses({ query, name = "capability", title = "Guesses", onConfi
   }, [needProducts]);
 
   const open = rows.filter((g) => !done[g.id]).length;
-  React.useEffect(() => { onCount?.(open); }, [open]);
+  React.useEffect(() => { if (rows.length) onCount?.(open); }, [open, rows.length]);
 
   if (rows.length === 0 && !error) return null;
   return (

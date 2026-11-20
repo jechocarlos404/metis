@@ -4,13 +4,15 @@ import { Button, Dialog, Icon, IconButton, Input, PriorityBadge, Select, StatusB
 import { api } from "../../lib/api.js";
 import { readParam, useParamRestore, writeParams } from "../../lib/url-state.js";
 import { GoalNetworkView } from "../graph/GoalNetworkView.jsx";
-import { NEED, PRIORITY_HINT, count, needKey, statusLabel } from "../../lib/words.js";
+import { NEED, PRIORITY_HINT, andList, count, needKey, statusLabel } from "../../lib/words.js";
+import { deleteEffects } from "../graph/goal-facts.js";
 
 const EMPTY_DRAFT = { goal_type: "product", parent_goal_id: "", title: "", description: "", success_criteria: "", priority: "3", status: "pending" };
 
 export default function GoalsIsland({ canWrite = true }) {
   const [goals, setGoals] = React.useState(null); // null until the first load finishes
-  const [productById, setProductById] = React.useState({});
+  const [products, setProducts] = React.useState([]);
+  const productById = React.useMemo(() => Object.fromEntries(products.map((p) => [p.id, p])), [products]);
   const [capsByGoal, setCapsByGoal] = React.useState({});
   const [highlight, setHighlight] = React.useState(null); // ?goal=<id>, scrolled to once loaded
   const [view, setView] = React.useState("list"); // ?view=network, read after mount (the server has no URL)
@@ -24,7 +26,7 @@ export default function GoalsIsland({ canWrite = true }) {
   const [scrollTo, setScrollTo] = React.useState(null); // a goal to bring into view once rendered
 
   const load = React.useCallback(async () => {
-    const [goalList, products, motivations, capabilities] = await Promise.all([
+    const [goalList, productList, motivations, capabilities] = await Promise.all([
       api("/goals"),
       api("/products"),
       api("/motivations"),
@@ -39,8 +41,9 @@ export default function GoalsIsland({ canWrite = true }) {
     }
     setCapsByGoal(caps);
     setGoals(goalList);
-    // Each goal says which product it belongs to (the goals API's product_id).
-    setProductById(Object.fromEntries(products.map((p) => [p.id, p])));
+    // Each goal says which product it belongs to (the goals API's product_id);
+    // a delete also needs which products have a goal as theirs (goal_id).
+    setProducts(productList);
   }, []);
 
   React.useEffect(() => {
@@ -142,15 +145,27 @@ export default function GoalsIsland({ canWrite = true }) {
     }
   };
 
+  // Arming reloads, so the note names what the delete removes now, not at page load.
+  const armDelete = () => {
+    setConfirmingDelete(true);
+    load().catch((e) => setError(String(e.message)));
+  };
+
   const remove = async () => {
     setSaving(true);
     setError(null);
     try {
       const gone = dialog.goal;
+      const { capabilities, products: left, children } = deleteEffects(gone, goals, capsByGoal, products);
       await api(`/goals/${gone.id}`, { method: "DELETE" });
       setDialog(null);
       await load();
-      setNotice({ tone: "ok", title: `Deleted ${gone.display_id}`, detail: gone.title });
+      const did = [
+        capabilities.length > 0 && `Unlinked ${andList(capabilities.map((c) => c.name))}.`,
+        left.length > 0 && `${andList(left.map((p) => p.name))} ${left.length === 1 ? "has" : "have"} no goal now.`,
+        children.length > 0 && `${andList(children.map((g) => g.display_id))} ${children.length === 1 ? "is" : "are"} no longer under an org goal.`,
+      ].filter(Boolean);
+      setNotice({ tone: "ok", title: `Deleted ${gone.display_id}`, detail: [gone.title, ...did].join(" ") });
     } catch (e) {
       setError(String(e.message));
       setConfirmingDelete(false);
@@ -295,16 +310,22 @@ export default function GoalsIsland({ canWrite = true }) {
         footer={
           <>
             {dialog?.mode === "edit" && (
-              <DeleteConfirm armed={confirmingDelete} onArm={() => setConfirmingDelete(true)} onCancel={() => setConfirmingDelete(false)} onConfirm={remove} disabled={saving}
+              <DeleteConfirm armed={confirmingDelete} onArm={armDelete} onCancel={() => setConfirmingDelete(false)} onConfirm={remove} disabled={saving}
                 label="Delete" confirmLabel={"Delete goal"} style={{ marginRight: "auto" }} />
             )}
-            <Button size="sm" variant="secondary" onClick={() => setDialog(null)}>Cancel</Button>
-            <Button size="sm" variant="accent" disabled={saving || !draft.title.trim() || needsParent} onClick={save}>
-              {dialog?.mode === "new" ? "Create goal" : "Save"}
-            </Button>
+            {/* While a delete is armed, Keep is the one way back: Cancel would do the same, and Save is another act. */}
+            {!confirmingDelete && <>
+              <Button size="sm" variant="secondary" onClick={() => setDialog(null)}>Cancel</Button>
+              <Button size="sm" variant="accent" disabled={saving || !draft.title.trim() || needsParent} onClick={save}>
+                {dialog?.mode === "new" ? "Create goal" : "Save"}
+              </Button>
+            </>}
           </>
         }
       >
+        {dialog?.mode === "edit" && confirmingDelete && (
+          <DeleteWhat goal={dialog.goal} effects={deleteEffects(dialog.goal, goals ?? [], capsByGoal, products)} />
+        )}
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
           {error && (
             <div role="alert" style={{ fontSize: "var(--text-sm)", color: "var(--danger-fg)" }}>{error}</div>
@@ -367,6 +388,29 @@ export default function GoalsIsland({ canWrite = true }) {
         </div>
       </Dialog>
     </>
+  );
+}
+
+// Shown while a delete is armed: every row the delete removes or changes, by name.
+function DeleteWhat({ goal, effects: { capabilities, products, children } }) {
+  const list = { margin: 0, paddingLeft: 18, maxHeight: 160, overflowY: "auto", display: "flex", flexDirection: "column", gap: 2 };
+  const nothing = capabilities.length === 0 && products.length === 0 && children.length === 0;
+  return (
+    <div role="note" style={{ marginBottom: 14, padding: 12, border: "1px solid var(--border-default)", borderRadius: "var(--radius-sm)", display: "flex", flexDirection: "column", gap: 8, fontSize: "var(--text-sm)", color: "var(--text-body)" }}>
+      {nothing && <div>No capability, product or goal is linked to {goal.display_id}, so the delete removes only the goal.</div>}
+      {capabilities.length > 0 && <>
+        <div>Deleting {goal.display_id} also removes its links to {count(capabilities.length, "capability", "capabilities")}:</div>
+        <ul style={list}>{capabilities.map((c) => <li key={c.id}>{c.name}</li>)}</ul>
+      </>}
+      {products.length > 0 && (
+        <div>{andList(products.map((p) => p.name))} {products.length === 1 ? "has" : "have"} it as {products.length === 1 ? "its" : "their"} goal, and will have none.</div>
+      )}
+      {children.length > 0 && <>
+        <div>{children.length === 1 ? "This product goal stays" : `These ${children.length} product goals stay`}, no longer under an org goal:</div>
+        <ul style={list}>{children.map((g) => <li key={g.id}>{g.display_id} {g.title}</li>)}</ul>
+      </>}
+      {!nothing && <div style={{ color: "var(--text-secondary)" }}>The capabilities, products and other goals stay.</div>}
+    </div>
   );
 }
 

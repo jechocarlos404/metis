@@ -5,8 +5,13 @@ export const prerender = false;
 import { authorizeUrl, clientId, pkceChallenge, randomState, redirectUri } from "../../lib/oidc.js";
 import { writeOidcState } from "../../lib/session.js";
 
+// A path on this site only. `//host` and `/\host` leave it, and browsers drop
+// tabs and newlines before resolving, so `/<tab>/host` does too.
+const LOCAL_PATH = /^\/(?![/\\])[^\x00-\x1f\x7f]*$/;
+
 export async function GET({ url, cookies, redirect }) {
-  const returnTo = url.searchParams.get("returnTo") || "/";
+  const asked = url.searchParams.get("returnTo");
+  const returnTo = asked && LOCAL_PATH.test(asked) ? asked : "/";
   const state = randomState();
   const { verifier, challenge } = await pkceChallenge();
   await writeOidcState(cookies, { state, verifier, returnTo });

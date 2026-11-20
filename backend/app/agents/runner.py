@@ -304,6 +304,11 @@ async def _propose(sessionmaker, message_id, call: ToolCallEvent) -> tuple[str, 
                 arguments = await proposal_service.pin(session, message_id, call.name, call.arguments)
             except ToolError as e:
                 return json.dumps({"error": f"Not proposed: {e}"}), False
+            except Exception:
+                # Model output is untrusted: whatever it was, this one change
+                # is refused and the rest of the reply goes on.
+                log.exception("Pinning %s on reply %s failed", call.name, message_id)
+                return json.dumps({"error": "Not proposed: its references couldn't be read."}), False
             session.add(ChatProposal(message_id=message_id, tool_name=call.name, arguments=arguments))
             await session.commit()
     return json.dumps({

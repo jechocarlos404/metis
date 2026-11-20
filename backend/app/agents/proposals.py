@@ -98,7 +98,7 @@ async def _find(session, kind, ref: str, earlier: list[dict], exact_only: bool):
         return str(found.id)
     except ValueError:
         pass
-    code = re.fullmatch(rf"{prefix}-?0*(\d+)", ref, re.IGNORECASE)
+    code = re.fullmatch(rf"{prefix}-?0*(\d{{1,18}})", ref, re.IGNORECASE)  # fits a BIGINT seq
     if code and not exact_only:
         found = await session.scalar(select(model).where(model.seq == int(code.group(1))))
         if found is not None:
@@ -288,6 +288,22 @@ async def reject(sessionmaker, proposal_id: uuid.UUID):
         return await _claim(session, proposal_id, "rejected")
 
 
+def _outcome(status: str, outcome: str) -> str | None:
+    """The line the card shows under a decided change: why it failed, or the
+    code or name an applied change made. A link or edge says nothing the
+    card doesn't already say, and its tool output is raw (MOTIVATES, BLOCKS)."""
+    from app.agents.runner import summarize_result
+
+    if status != "applied":
+        return summarize_result(outcome)
+    try:
+        data = json.loads(outcome)
+    except (TypeError, ValueError):
+        return None
+    names = isinstance(data, dict) and any(data.get(k) for k in ("display_id", "name", "title"))
+    return summarize_result(outcome) if names else None
+
+
 async def approve(sessionmaker, graph, proposal_id: uuid.UUID):
     from app.models import ChatMessage
 
@@ -309,15 +325,13 @@ async def approve(sessionmaker, graph, proposal_id: uuid.UUID):
             await session.rollback()
             status, outcome = "failed", json.dumps({"error": "internal error while applying this change"})
 
-    from app.agents.runner import summarize_result
-
     async with sessionmaker() as session:
         # One commit: a later change can't be claimed between "applied" and
         # receiving the ID this one created.
         if status == "applied":
             await _hand_on(session, proposal, outcome)
         await session.execute(
-            update(ChatProposal).where(ChatProposal.id == proposal_id).values(status=status, result=summarize_result(outcome))
+            update(ChatProposal).where(ChatProposal.id == proposal_id).values(status=status, result=_outcome(status, outcome))
         )
         await session.commit()
         return await session.get(ChatProposal, proposal_id)

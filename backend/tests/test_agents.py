@@ -245,7 +245,7 @@ def test_step_summaries_read_like_a_log():
     assert summarize_result('[{"a": 1}, {"a": 2}]') == "2 results"
     assert summarize_result('{"error": "no such product"}') == "error: no such product"
     assert summarize_result('{"id": "x", "name": "Route Planning"}') == "Route Planning"
-    # An approved link's outcome shows on the card: no UUID in it.
+    # A step's summary carries no UUID.
     assert summarize_result('{"edge_id": "bc55de64-3d5a-4934-b404-b0945c6e2492", "kind": "BLOCKS"}') == "kind: BLOCKS"
     assert summarize_result('{"product": "Strava", "total_features": 25, "buildable": [], "report": {}}') == (
         "product: Strava · total features: 25 · buildable: 0"
@@ -542,6 +542,59 @@ async def test_sr2_malformed_prd_documents_never_break_proposing_or_reading(db):
     cards = response.json()[-1]["proposals"]
     assert len(cards) == 3 + len(MALFORMED_DOCUMENTS) + 1
     assert cards[-1]["named_arguments"]["src"] == "Gone"
+
+
+@pytest.mark.asyncio
+async def test_sr2_a_reference_that_cant_be_read_refuses_one_change_not_the_reply(db, monkeypatch):
+    """A code too long for any row, or anything unexpected while pinning,
+    refuses that change; the reply and its other changes go on."""
+    import app.agents.runner as runner
+
+    reply, provider = await _propose_turn(
+        db, "feature_manager",
+        ("update_feature", {"feature": "FTR-" + "9" * 30, "priority": 2}),
+        ("create_capability", {"name": "Search"}),
+    )
+    assert reply.status == "done"
+    assert [s["status"] for s in reply.tool_calls] == ["failed", "proposed"]
+    assert [p.tool_name for p in reply.proposals] == ["create_capability"]
+
+    async def boom(*args, **kwargs):
+        raise RuntimeError("asyncpg: value out of range")
+
+    monkeypatch.setattr(runner.proposal_service, "pin", boom)
+    reply, provider = await _propose_turn(db, "feature_manager", ("create_capability", {"name": "Search"}))
+    assert reply.status == "done" and reply.proposals == []
+    (step,) = reply.tool_calls
+    assert step["status"] == "failed" and "Not proposed" in step["summary"] and "asyncpg" not in step["summary"]
+
+
+@pytest.mark.asyncio
+async def test_an_applied_link_shows_no_raw_value_on_the_card(db):
+    """A5: under an applied goal link or feature link the card adds nothing
+    raw (MOTIVATES, DEPENDS_ON); a creation still shows what it made."""
+    from app.models import Goal
+    from app.schemas.capability import CapabilityCreate
+    from app.schemas.feature import FeatureCreate
+    from app.services import capabilities as capability_service
+    from app.services import features as feature_service
+
+    async with db() as session:
+        goal = Goal(goal_type="product", title="Go")
+        session.add(goal)
+        await session.commit()
+        cap = await capability_service.create_capability(session, CapabilityCreate(name="Maps"))
+        for name in ("A", "B"):
+            await feature_service.create_feature(session, FeatureCreate(name=name, capability_ids=[cap.id]))
+    reply, _ = await _propose_turn(
+        db, "feature_manager",
+        ("create_capability", {"name": "Pins"}),
+        ("motivate_capability", {"capability": "Maps", "goal": "Go"}),
+        ("link_features", {"src": "A", "dst": "B", "kind": "DEPENDS_ON"}),
+    )
+    decided = await proposals.approve_all(db, GRAPH, reply.id)
+    assert [p.status for p in decided] == ["applied", "applied", "applied"]
+    assert [p.result for p in decided] == ["Pins", None, None]
 
 
 @pytest.mark.asyncio

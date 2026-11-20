@@ -1,7 +1,7 @@
 import React from "react";
 import { Icon, IconButton } from "../../ds";
 import { createForceGraph } from "./forceGraphEngine.js";
-import { buildFeatureGraph, buildAdjacency, edgeStyle, nodeAccentVar, wrapLabel, NODE_W, NODE_H, NODE_COLLIDE_R } from "./graph-data.js";
+import { buildFeatureGraph, buildAdjacency, edgeStyle, nodeAccentVar, wrapLabel, NODE_W, NODE_H } from "./graph-data.js";
 import { EDGE, LAYER, statusLabel } from "../../lib/words.js";
 import { Term } from "../shared/Term.jsx";
 
@@ -51,9 +51,17 @@ export function FeatureGraphView({ layout, selectedId, onSelect, impactIds, cutS
       svgEl: svgRef.current,
       viewportEl: viewportRef.current,
       nodeSize: { width: NODE_W, height: NODE_H },
-      nodeRadius: () => NODE_COLLIDE_R,
+      // The server already places each product on a tidy grid (200 x 96 per
+      // card, dependencies left). Let that grid lead: strong anchors, faint
+      // repulsion and lines, card-shaped collision, a quick settle. Free
+      // forces spread big products until they fit too small to read.
+      collideRect: { width: NODE_W + 16, height: NODE_H + 16 },
+      chargeStrength: -20,
+      anchorStrengthX: 0.5,
+      anchorStrengthY: 0.5,
+      alphaDecay: 0.06,
       linkDistance: (e) => edgeStyle(e.kind).distance,
-      linkStrength: (e) => edgeStyle(e.kind).strength,
+      linkStrength: (e) => edgeStyle(e.kind).strength * 0.1,
       reducedMotion,
       onSelect: (id) => onSelectRef.current && onSelectRef.current(id),
       onPinChange: (id, isPinned) => {
@@ -84,6 +92,7 @@ export function FeatureGraphView({ layout, selectedId, onSelect, impactIds, cutS
     if (!hasFitRef.current && graphData.nodes.length) {
       hasFitRef.current = true;
       engineRef.current?.fitToView(0);
+      engineRef.current?.fitWhenSettled(); // the first fit sees unspread nodes
     }
   }, [graphData]);
 
@@ -92,12 +101,15 @@ export function FeatureGraphView({ layout, selectedId, onSelect, impactIds, cutS
   useIsomorphicLayoutEffect(() => {
     if (lastFitKey.current === fitKey) return;
     lastFitKey.current = fitKey;
-    engineRef.current?.fitToView();
+    engineRef.current?.fitWhenSettled();
   }, [fitKey]);
 
   // With a cut overlay active, tier coloring owns the canvas — selection no
   // longer dims non-neighbors (hover still focuses transiently).
-  const focusId = hoveredId ?? (cutStates != null ? null : selectedId) ?? null;
+  const wantFocus = hoveredId ?? (cutStates != null ? null : selectedId) ?? null;
+  // Fade the rest only when the focused card has relationships to show;
+  // fading everything around a loner just makes the graph hard to read.
+  const focusId = wantFocus != null && adjacency.get(wantFocus)?.size ? wantFocus : null;
   const focusNeighbors = focusId ? adjacency.get(focusId) : null;
 
   return (

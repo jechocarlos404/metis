@@ -24,6 +24,37 @@ import { select } from "d3-selection";
 import { zoom as d3zoom, zoomIdentity } from "d3-zoom";
 import { drag as d3drag } from "d3-drag";
 
+// Keeps card-shaped nodes from overlapping. A circle wide enough for a card
+// also pushes rows far apart vertically; this pushes each overlapping pair
+// apart along the axis that overlaps least. O(n^2), fine for one product.
+function forceRectCollide(width, height, strength = 0.7) {
+  let nodes = [];
+  function force() {
+    for (let i = 0; i < nodes.length; i++) {
+      const a = nodes[i];
+      for (let j = i + 1; j < nodes.length; j++) {
+        const b = nodes[j];
+        const dx = b.x + b.vx - (a.x + a.vx);
+        const dy = b.y + b.vy - (a.y + a.vy);
+        const ox = width - Math.abs(dx);
+        const oy = height - Math.abs(dy);
+        if (ox <= 0 || oy <= 0) continue;
+        if (ox < oy) {
+          const push = (dx < 0 ? -1 : 1) * ox * strength / 2;
+          a.vx -= push;
+          b.vx += push;
+        } else {
+          const push = (dy < 0 ? -1 : 1) * oy * strength / 2;
+          a.vy -= push;
+          b.vy += push;
+        }
+      }
+    }
+  }
+  force.initialize = (n) => { nodes = n; };
+  return force;
+}
+
 const DEFAULTS = {
   nodeSize: { width: 148, height: 56 },
   nodeRadius: () => 76,
@@ -78,7 +109,9 @@ export function createForceGraph(opts) {
         .strength(o.linkStrength)
     )
     .force("charge", forceManyBody().strength(o.chargeStrength).distanceMax(o.chargeMaxDistance))
-    .force("collide", forceCollide().radius(o.nodeRadius).strength(0.8).iterations(2))
+    .force("collide", o.collideRect
+      ? forceRectCollide(o.collideRect.width, o.collideRect.height)
+      : forceCollide().radius(o.nodeRadius).strength(0.8).iterations(2))
     .force("anchorX", forceX((d) => d.anchorX).strength(o.anchorStrengthX))
     .force("anchorY", forceY((d) => d.anchorY).strength(o.anchorStrengthY))
     .stop(); // we drive every tick ourselves below — letting d3's own timer run too would double-step physics
@@ -98,6 +131,9 @@ export function createForceGraph(opts) {
   // from the same rAF loop that drives physics so there's a single clock
   // driving every visual change instead of a second, independent one.
   let transformAnimation = null;
+  // Set by fitWhenSettled(): frame the nodes once the layout stops moving.
+  // A pan or zoom by the user cancels it, so a late fit never yanks the view.
+  let fitPending = false;
 
   let currentTransform = zoomIdentity;
 
@@ -105,7 +141,10 @@ export function createForceGraph(opts) {
   const zoomBehavior = d3zoom()
     .scaleExtent(o.scaleExtent)
     .on("zoom", (event) => {
-      if (event.sourceEvent) transformAnimation = null; // a real gesture always wins over a running tween
+      if (event.sourceEvent) {
+        transformAnimation = null; // a real gesture always wins over a running tween
+        fitPending = false;
+      }
       currentTransform = event.transform;
       viewportEl.setAttribute("transform", currentTransform.toString());
       // Below this scale labels are under 6px: unreadable, and costly to redraw.
@@ -278,6 +317,10 @@ export function createForceGraph(opts) {
     }
     for (const id of edgeEls.keys()) paintEdge(id);
 
+    if (fitPending && settled && draggingId == null) {
+      fitPending = false;
+      fitToView();
+    }
     if (!settled || draggingId != null || transformAnimation) {
       rafHandle = requestAnimationFrame(frame);
     }
@@ -319,6 +362,11 @@ export function createForceGraph(opts) {
     const y = from.y + (to.y - from.y) * e;
     zoomBehavior.transform(select(svgEl), zoomIdentity.translate(x, y).scale(k));
     if (p >= 1) transformAnimation = null;
+  }
+
+  function fitWhenSettled() {
+    fitPending = true;
+    ensureLoopRunning();
   }
 
   function fitToView(duration = 450) {
@@ -452,6 +500,7 @@ export function createForceGraph(opts) {
     unregisterEdge,
     update,
     fitToView,
+    fitWhenSettled,
     zoomBy,
     setReducedMotion,
     destroy,

@@ -146,27 +146,35 @@ export default function FeaturesIsland({ canWrite = true }) {
   const nodeById = React.useMemo(() => new Map(layout.nodes.map((n) => [n.id, n])), [layout]);
   const productById = React.useMemo(() => new Map(products.map((p) => [p.id, p])), [products]);
 
+  // The graph never draws every product at once: hundreds of cards are
+  // unreadable and slow. With no product picked it shows the open feature's
+  // product, else the first product. Derived, never written to the URL, so
+  // Back is not trapped and an explicit pick always wins.
+  const graphProduct = productFilter
+    || (nodeById.has(selected) ? nodeById.get(selected).product_ids[0] ?? "unattributed" : productOptions(products)[0]?.value ?? "");
+  const activeProduct = tab === "graph" ? graphProduct : productFilter;
+
   // A feature's product is its own (features.product_id); search results lack
   // it, so always read it off the layout node.
   const matchesProduct = React.useCallback((id) => {
-    if (!productFilter) return true;
+    if (!activeProduct) return true;
     const ids = nodeById.get(id)?.product_ids ?? [];
-    return productFilter === "unattributed" ? ids.length === 0 : ids.includes(productFilter);
-  }, [productFilter, nodeById]);
+    return activeProduct === "unattributed" ? ids.length === 0 : ids.includes(activeProduct);
+  }, [activeProduct, nodeById]);
 
   const directory = (results ?? layout.nodes).filter((n) => matchesProduct(n.id));
 
   // The product filter removes other products' features from the graph and the
   // plan (fading them was invisible at real scale, so the filter looked broken).
   const visibleLayout = React.useMemo(() => {
-    if (!productFilter) return layout;
+    if (!activeProduct) return layout;
     const keep = new Set(layout.nodes.filter((n) => matchesProduct(n.id)).map((n) => n.id));
     return {
       ...layout,
       nodes: layout.nodes.filter((n) => keep.has(n.id)),
       edges: layout.edges.filter((e) => keep.has(e.src) && keep.has(e.dst)),
     };
-  }, [productFilter, layout, matchesProduct]);
+  }, [activeProduct, layout, matchesProduct]);
   // Org goals the selected feature's own products sit under.
   const ownGoalRoots = React.useMemo(() => {
     const roots = new Set();
@@ -178,10 +186,10 @@ export default function FeaturesIsland({ canWrite = true }) {
     }
     return roots;
   }, [detail, nodeById, productById, goalParent]);
-  const visibleReady = productFilter ? ready.filter((f) => matchesProduct(f.id)) : ready;
-  const visibleTopo = productFilter && topoOrder ? topoOrder.filter((f) => matchesProduct(f.id)) : topoOrder;
+  const visibleReady = activeProduct ? ready.filter((f) => matchesProduct(f.id)) : ready;
+  const visibleTopo = activeProduct && topoOrder ? topoOrder.filter((f) => matchesProduct(f.id)) : topoOrder;
   // A cycle anywhere stops the build order, so show every cycle when it does.
-  const visibleCycles = productFilter && topoError !== "cycle" ? cycles.filter((c) => c.some((f) => matchesProduct(f.id))) : cycles;
+  const visibleCycles = activeProduct && topoError !== "cycle" ? cycles.filter((c) => c.some((f) => matchesProduct(f.id))) : cycles;
 
   const runImpact = async () => {
     if (!selected) return;
@@ -349,19 +357,19 @@ export default function FeaturesIsland({ canWrite = true }) {
   };
 
   const noFeatures = loaded && layout.nodes.length === 0;
-  const filteredProduct = productById.get(productFilter);
+  const filteredProduct = productById.get(activeProduct);
   const cutTargetOptions = visibleLayout.nodes.filter((n) => !n.external);
 
   return (
     <>
       <PageHeader
         title="Features"
-        meta={`${count(visibleLayout.nodes.length, "feature")} · ${visibleReady.length} ready to start${productFilter ? ` · filtered from ${layout.nodes.length}` : ""}`}
+        meta={`${count(visibleLayout.nodes.length, "feature")} · ${visibleReady.length} ready to start${activeProduct ? ` · filtered from ${layout.nodes.length}` : ""}`}
         actions={
           <>
             {products.length > 0 && (
-              <Select value={productFilter} onChange={(e) => changeProduct(e.target.value)} style={{ width: 200 }}
-                options={[{ value: "", label: "All products" },
+              <Select value={activeProduct} onChange={(e) => changeProduct(e.target.value)} style={{ width: 200 }}
+                options={[...(tab === "graph" ? [] : [{ value: "", label: "All products" }]),
                   ...productOptions(products),
                   { value: "unattributed", label: "No product" }]} />
             )}
@@ -395,7 +403,7 @@ export default function FeaturesIsland({ canWrite = true }) {
       <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
         {tab === "graph" ? (
           <div style={{ flex: 1, position: "relative", margin: 20, background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", overflow: "hidden", minWidth: 0 }}>
-            <FeatureGraphView layout={visibleLayout} fitKey={productFilter} selectedId={selected} onSelect={selectFeature} impactIds={impactIds} cutStates={cutStates} />
+            <FeatureGraphView layout={visibleLayout} fitKey={activeProduct} selectedId={selected} onSelect={selectFeature} impactIds={impactIds} cutStates={cutStates} />
             {cutStates && (
               <div style={{ position: "absolute", bottom: 10, right: 10, display: "flex", alignItems: "center", gap: 8, padding: "6px 8px 6px 12px", background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-sm)", boxShadow: "var(--shadow-card)", fontSize: "var(--text-xs)", color: "var(--text-body)" }}>
                 Smallest version that reaches {nodeById.get(cutTarget)?.name ?? "the target"}

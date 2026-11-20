@@ -112,16 +112,27 @@ export const VERDICT = {
   unknown: { label: "not described", tone: "neutral", hint: "nobody has named the capabilities it needs yet" },
 };
 
-/** Where one capability need stands against the inventory. */
+/** Where one capability stands against the inventory. "Ours" takes a
+ *  finished (done) feature: planned and in-progress work isn't having it.
+ *  "missing" is never a capability's word: it is a feature's or a step's. */
 export const NEED = {
-  ours: { label: "ours", tone: "ok", hint: "one of our features realizes it" },
+  ours: { label: "ours", tone: "ok", hint: "a finished feature of one of our products realizes it" },
   elsewhere: { label: "only elsewhere", tone: "warn", hint: "only products we don't own have it, so it isn't ours" },
-  none: { label: "missing", tone: "danger", hint: "no product in metis has it" },
+  none: { label: "not built yet", tone: "danger", hint: "no finished feature in metis realizes it" },
 };
 
 /** The NEED key for a capability match or inventory entry (null: no match).
  *  `ours` false covers two cases; external_products tells them apart. */
 export const needKey = (c) => (c?.ours ? "ours" : c?.external_products?.length ? "elsewhere" : "none");
+
+/** For a "missing" feature or step: the NEED key every capability it lacks
+ *  shares ("elsewhere" when each is known from a product we don't own, "none"
+ *  when none is), or null for a mix. Takes the needs' matches (null for an
+ *  unmatched name). Shown beside "missing", it says why. */
+export function lackingKey(matches) {
+  const keys = new Set(matches.map(needKey).filter((k) => k !== "ours"));
+  return keys.size === 1 ? [...keys][0] : null;
+}
 
 /** One-line headline for a coverage report, the same wording everywhere. */
 export function coverageHeadline(report) {

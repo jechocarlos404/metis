@@ -1,10 +1,14 @@
 import asyncio
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, HTTPException
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app.auth import TokenVerifier, enforce_rbac, require_admin, require_editor
+from app.auth.deps import _is_read
 from app.config import get_settings
 from app.db import init_db, make_engine
 from app.llm.registry import ProviderRegistry
@@ -55,9 +59,63 @@ async def lifespan(app: FastAPI):
     await engine.dispose()
 
 
+#: Request bodies over these are refused with 413 before they are parsed. The
+#: reads-by-POST (coverage, recommend, mvp-cut) are open to viewers and the MCP
+#: token, and their near-name search costs time per byte, so they get a small
+#: cap; a real idea or a seed file's new names fit in a few KB. Writes need an
+#: editor on the desktop and send one row each (the largest stored value in a
+#: full instance is about 3 KB), so their cap only stops a runaway.
+MAX_READ_BODY = 64_000
+MAX_BODY = 1_000_000
+
+
+class BodyLimit:
+    """Counts what arrives, not only the declared length: the Astro proxy
+    streams bodies without a content-length."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+        limit = MAX_READ_BODY if _is_read("POST", scope["path"]) else MAX_BODY
+        too_large = f"Request body is over {limit} bytes."
+        declared = dict(scope["headers"]).get(b"content-length", b"")
+        if declared.isdigit() and int(declared) > limit:
+            response = JSONResponse({"detail": too_large}, status_code=413)
+            return await response(scope, receive, send)
+        seen = 0
+
+        async def counted():
+            nonlocal seen
+            message = await receive()
+            if message["type"] == "http.request":
+                seen += len(message.get("body", b""))
+                if seen > limit:
+                    raise HTTPException(413, too_large)
+            return message
+
+        await self.app(scope, counted, send)
+
+
+async def validation_error(request, exc: RequestValidationError) -> JSONResponse:
+    """`detail` is a sentence here like everywhere else, not FastAPI's list,
+    which stays one key over under `errors` for a client that wants it."""
+    errors = jsonable_encoder(exc.errors())
+    said = "; ".join(
+        f"{'.'.join(str(part) for part in e.get('loc', []))}: {e.get('msg', '')}"
+        for e in errors
+    )
+    return JSONResponse({"detail": said, "errors": errors}, status_code=422)
+
+
 def create_app() -> FastAPI:
     settings = get_settings()
     app = FastAPI(title="Metis API", version="0.1.0", lifespan=lifespan)
+    app.add_exception_handler(RequestValidationError, validation_error)
+    # Added before CORS, so CORS wraps it and a 413 still carries its headers.
+    app.add_middleware(BodyLimit)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[o.strip() for o in settings.cors_origins.split(",")],

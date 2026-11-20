@@ -98,10 +98,24 @@ surface, so writes work exactly as they do in the real app (see
 A fresh instance is empty: metis holds only real data, loaded from seed files
 exported from actual repositories (`metis-export`, then `metis-seed-instance`).
 There is no demo data, and nothing a repo only describes — plans, specs, or code
-it ships without running — is recorded as existing. The schema is `create_all` on boot — after pulling a
-schema change, reset the dev volume (`docker compose down -v`). Realm import only
-runs on a fresh Keycloak data directory; to re-import users/roles, recreate the
-Keycloak container without a persisted volume (compose already does that).
+it ships without running — is recorded as existing. So once you have loaded seed
+files, the `pgdata` volume holds the only copy of that work: never reset it
+(`docker compose down -v` deletes it). Back it up before anything risky, and restore
+the same way:
+
+```sh
+docker compose exec -T postgres pg_dump -U metis -Fc metis > metis-$(date +%F).dump
+docker compose exec -T postgres pg_restore -U metis -d metis --clean --if-exists < metis-YYYY-MM-DD.dump
+```
+
+There are no migrations. On boot the backend runs `create_all`, which adds missing
+tables but never a column to a table that already exists; each column added since
+has its own idempotent `add column if not exists` step in `backend/app/db.py`. If a
+change you pull adds a column without such a step, add the step (or run the
+`alter table` by hand) rather than resetting the volume.
+
+Realm import only runs on a fresh Keycloak data directory; to re-import users/roles,
+recreate the Keycloak container without a persisted volume (compose already does that).
 
 The app runs with zero LLM keys — chat replies with a clear "provider not configured"
 notice, and everything else works. Add any subset of provider credentials to `.env`
@@ -144,13 +158,17 @@ capability says nothing about whose feature this is.
 A product can be someone else's (`external`): you know its features as a user and
 map them to the capabilities they need, declaring `unknown_capabilities` where you
 can't tell. External products show what exists in the world; they never count as what
-*we* can do — coverage of an idea counts only capabilities our own features realize. `GET /api/products/{id}/coverage` scores an existing product the same way: which of
-its features we could build from what we have — a lower bound, since a feature with
+*we* can do — a capability is ours only when a finished (`done`) feature of one of
+our own products realizes it, and coverage of an idea counts only those.
+`GET /api/products/{id}/coverage` scores someone else's product the same way (the
+desktop and MCP score only external products: an own product's features are what make
+its capabilities ours): which of its features we could build from what we have — a lower bound, since a feature with
 unknown capabilities never counts as buildable. Every feature lands in exactly one
 group: `buildable`, `partly` (every *named* capability is ours, but the list is
 incomplete), `missing` (needs a capability that isn't ours) or `not_described` (no
 capability named yet). `missing_capabilities` ranks what's missing by how many
-features it would complete, and `closest_products` names our nearest products.
+features it would complete, and `closest_products` names the three of our products
+that have built the most of what it names (a tie at third place is kept whole).
 
 **Journeys** (`/journeys`, `/api/journeys`) are ordered paths of features a person moves
 through — inside one product or across several, ours or external. A step can also be one
@@ -318,9 +336,9 @@ tool list: [docs/mcp.md](docs/mcp.md). It calls the same **HTTP API** a browser
 does — not the services in-process — so a chat transcript and an API log line up, and
 the write boundary is inherited rather than re-implemented.
 
-Sixteen tools. Eight answer inventory questions: `products`, `capability_inventory`,
-`check_idea`, `product_score`, `capability`, `feature_why`, `journeys`, `ready_features`.
-The other eight: the six `question` keys, plus `tech_search` (navigation — everything else
+Seventeen tools. Nine answer inventory questions: `products`, `capability_inventory`,
+`check_idea`, `product_score`, `capability`, `feature_why`, `journeys`, `ready_features`,
+`recheck`. The other eight: the six `question` keys, plus `tech_search` (navigation — everything else
 takes a slug it returns) and `propose_binding` (a hand-off that persists nothing).
 Four resources: `metis://ontology/model`, `metis://policy/adoptions`, and the templated
 `metis://tech/{slug}` and `metis://stacks/{product}`. Three prompts.
@@ -336,8 +354,9 @@ The server refuses to start SSE without `MCP_SSE_TOKEN`: it holds an API token, 
 open port would lend it to anyone who can reach the address.
 
 **Claude Code plugin.** [`plugin/`](plugin/README.md) brings this server to a coding
-session in any repo, with skills that check for reuse before building
-(`metis-check-idea`, `metis-find-reuse`, `metis-what-next`) and read-only hooks: a
+session in any repo, with eight skills (among them `metis-check-idea`,
+`metis-find-reuse` and `metis-what-next`, which check for reuse before building)
+and read-only hooks: a
 product brief at session start, a one-line nudge when a prompt names a capability another
 product already has, and a reminder to re-export the seed file after code changes. The
 repo root is its marketplace:
@@ -374,8 +393,8 @@ Metis supports both **in-app** and **skill-driven** seed round-trips (seed file 
 
 ### Claude Code skills
 
-The metis Claude Code plugin (`plugin/`) ships three skills for seeding an
-instance from real codebases (using the same seed format and identity rules
+The metis Claude Code plugin (`plugin/`) ships eight skills (all listed in
+[plugin/README.md](plugin/README.md)); these three seed an instance from real codebases (using the same seed format and identity rules
 as the in-app flow):
 
 - `plugin/skills/metis-seed-instance` loads a `metis-seed.json` into the running
@@ -419,18 +438,24 @@ All optional — see `.env.example`:
 | `OLLAMA_BASE_URL` | Ollama; compose default reaches host Ollama at `host.docker.internal:11434` |
 | `AUTH_ENABLED` | `false` makes every request an admin on the desktop surface — scripts only |
 | `METIS_MCP_SSE_TOKEN` | Required for the MCP server's SSE mode |
+| `METIS_MCP_CLIENT_SECRET` | The `metis-mcp` Keycloak client's secret, which the MCP server signs in with (dev default `dev-mcp-secret`) |
 | `ANTHROPIC_MODELS` etc. | Override the model dropdowns (comma-separated) |
 
 ## Development
 
 ```sh
-# database
-docker compose up -d postgres
+# settings, once: compose and the backend below both read this file
+cp .env.example .env
 
-# backend (Python 3.11+)
+# database, and Keycloak: the backend checks every token against it and the
+# frontend signs in through it (or set AUTH_ENABLED=false in .env for scripts)
+docker compose up -d postgres keycloak
+
+# backend (Python 3.11+). Settings come from the environment or a .env in the
+# current directory, so point it at the root one.
 cd backend
 python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
-.venv/bin/uvicorn app.main:app --reload --port 8000
+.venv/bin/uvicorn app.main:app --reload --port 8000 --env-file ../.env
 
 # tests (uses a metis_test database on the compose postgres)
 .venv/bin/python -m pytest
@@ -462,6 +487,6 @@ backend/
   app/ontology/    model.md — served to the UI, the API and MCP from one file
 frontend/          Astro app: pages, React islands, design system (ds/), API proxy
 docs/              ontology design record (divergence, mental model, graph spec)
-plugin/skills/     metis-export, metis-seed-instance, metis-unseed (Claude Code plugin)
+plugin/            Claude Code plugin: MCP wiring, hooks, eight skills (see its README)
 docker-compose.yml
 ```

@@ -125,7 +125,8 @@ class RealizationRow(BaseModel):
 
 class BlastRadiusRow(BaseModel):
     """`required: true` is a break, `false` is an inconvenience — never
-    collapsed into a count or a score. `off_stack` means nobody signed off."""
+    collapsed into a count or a score. `off_stack` means the product's stack
+    never declared it; a product with no stack (no `layer`) just uses it."""
 
     product: str
     layer: str | None

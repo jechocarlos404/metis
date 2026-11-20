@@ -19,15 +19,17 @@ from app.main import create_app
 from app.mcp import render, server
 from app.mcp.client import MetisClient
 from app.mcp.server import PROMPTS, RESOURCE_TEMPLATES, RESOURCES, TOOLS, _hard_stop
-from app.models import CapabilityMaturity, Goal, GoalType, Product, WorkStatus
+from app.models import CapabilityMaturity, Goal, GoalType, Product, TechKind, WorkStatus
 from app.models.enums import Surface
 from app.schemas.capability import CapabilityCreate
 from app.schemas.envelope import Question
 from app.schemas.feature import EdgeCreate, FeatureCreate
 from app.schemas.journey import JourneyCreate, JourneyStepIn
+from app.schemas.technology import TechnologyCreate
 from app.services import capabilities as capability_service
 from app.services import features as feature_service
 from app.services import journeys as journey_service
+from app.services import technologies as tech_service
 from app.services.graph_service import FeatureGraph
 
 
@@ -121,6 +123,31 @@ def test_numbers_lead_and_open_is_last():
         assert lines[-1].startswith("Open: /"), lines[-1]
 
 
+def test_blast_radius_uses_stack_words_only_for_a_slot():
+    """A product with no stack isn't off anything: it just uses it, and
+    required/optional say nothing about it."""
+    text = render.tech_blast_radius(
+        envelope(
+            Question.tech_blast_radius,
+            [
+                {"product": "metis", "layer": "data", "role": "Vector index",
+                 "required": True, "off_stack": False},
+                {"product": "magpie", "layer": None, "role": None,
+                 "required": False, "off_stack": True},
+                {"product": "kida", "layer": None, "role": None,
+                 "required": False, "off_stack": False},
+            ],
+            "/tech/qdrant#blast-radius",
+        )
+    )
+    lines = text.splitlines()
+    assert lines[0].endswith(" — 1 required, 1 off_stack, 1 with no stack.")
+    assert lines[2].split() == ["metis", "data", "Vector", "index", "required"]
+    assert lines[3].endswith("off_stack (its stack never declared it)")
+    assert lines[4].endswith("uses it (the product has no stack)")
+    assert "optional" not in text
+
+
 def test_enums_are_verbatim():
     """`workaround`, not "partial support". A paraphrase is where the
     vocabulary drifts."""
@@ -141,6 +168,26 @@ def test_bound_offer_is_marked_in_place_not_filtered():
     text = render.capability_supply(SUPPLY)
     assert "qdrant" in text
     assert "← bound in metis::data::Vector index" in text
+
+
+def test_build_side_counts_only_our_features():
+    """An external product's feature is set apart, never counted as ours, so
+    the build side agrees with `capability`'s count of our features."""
+    text = render.capability_supply(
+        {**SUPPLY, "realizations": [
+            {"feature": "Spec similarity", "product": "metis", "external": False,
+             "status": "in_progress", "tickets": 4},
+            {"feature": "Find similar routes", "product": "komoot", "external": True,
+             "status": "done", "tickets": 0},
+        ]}
+    )
+    lines = text.splitlines()
+    assert "Build side — 1 feature(s) of ours realize it:" in lines
+    ours = lines.index("Build side — 1 feature(s) of ours realize it:")
+    assert lines[ours + 1].startswith("Spec similarity")
+    theirs = lines.index("External products — 1 feature(s), not ours:")
+    assert lines[theirs + 1].split() == ["Find", "similar", "routes", "done", "komoot"]
+    assert text.endswith("Open: /capabilities/semantic-search")
 
 
 def test_exposure_prints_as_of():
@@ -231,9 +278,24 @@ def test_a_refused_write_is_rendered_with_its_href():
     text = render.api_error(403, {"detail": {
         "error": "human_action_required",
         "message": "Binding a slot is a human action.",
-        "href": "/stacks?slot=api::Auth"}})
+        "href": "/stacks?slot=api::Auth"}}, "/stacks")
     assert "human_action_required" in text
     assert text.endswith("Open: /stacks?slot=api::Auth")
+
+
+@pytest.mark.parametrize(
+    "body,said",
+    [
+        ({"detail": "Feature not found"}, "Feature not found"),
+        ({"detail": [{"loc": ["path", "feature_id"], "msg": "Input should be a valid UUID"}]},
+         "path.feature_id: Input should be a valid UUID"),
+        ("<html>Bad Gateway</html>", "<html>Bad Gateway</html>"),
+    ],
+)
+def test_any_other_refusal_is_a_sentence_and_opens_the_tools_screen(body, said):
+    """No dict repr, and the Open: line is there like on every answer."""
+    text = render.api_error(404, body, "/features")
+    assert text.splitlines() == [f"Refused (404): {said}", "Open: /features"]
 
 
 @pytest.mark.parametrize(
@@ -427,19 +489,26 @@ async def test_products_lists_ours_and_external(api):
     assert rows == {"can-i-climb": "2026-11-01T12:00:00Z", "rival": "never"}
 
 
+def row(text, slug):
+    return next(line for line in text.splitlines() if line.startswith(slug + " "))
+
+
 async def test_inventory_is_most_reused_first_and_filters_in_order(api):
     await _world(*api)
     text = await server._dispatch("capability_inventory", {})
     _conventions(text)
     # A capability no feature realizes isn't ours, and nobody else has it either.
-    assert text.startswith(
-        "5 capabilit(ies): 3 ours, 1 known only from external products, "
-        "1 that nobody has yet"
-    )
+    assert text.startswith("5 capabilit(ies): 3 ours, 1 external only, 1 not built yet")
     rows = [line.split()[0] for line in text.splitlines()[2:7]]
     assert rows[-2:] == ["weather-forecast", "route-planner"]
     assert "external only — not ours" in text
-    assert "nobody has it — not ours" in text
+    assert "not built yet — not ours" in text
+    # Maturity only for what is ours; route-planner is planned and unbuilt.
+    assert row(text, "route-planner").split()[3] == "—"
+    assert row(text, "strava-import").split()[3] == "ga"
+    # Slug and exact name both: a seed file reuses a capability by its name.
+    route = next(line for line in text.splitlines() if line.startswith("route-planner"))
+    assert route.split("  ")[0:1] == ["route-planner"] and '"Route planner"' in route
 
     text = await server._dispatch("capability_inventory", {"q": "data"})
     assert text.startswith("1 of 5 capabilit(ies) match 'data'")
@@ -464,7 +533,7 @@ async def test_check_idea_never_counts_a_near_name(api):
     assert any(line.strip().startswith("ours") and "strava-import (ga" in line for line in lines)
     assert any(line.strip().startswith("external only") and "rival" in line for line in lines)
     miss = next(i for i, line in enumerate(lines) if line.strip() == "no match       Elevaton data")
-    assert "near names, unconfirmed: elevation-data" in lines[miss + 1]
+    assert 'near names, unconfirmed: elevation-data "Elevation data"' in lines[miss + 1]
     assert "Not ours (2): Weather forecast, Elevaton data" in text
     # Home's idea check, pre-filled: matched needs by slug, the rest as typed.
     assert lines[-1] == (
@@ -476,7 +545,8 @@ async def test_check_idea_never_counts_a_near_name(api):
     )
     assert unbuilt.startswith("0/1 distinct capabilit(ies) are ours")
     assert (
-        "  nobody has it  Route planner → route-planner (no feature realizes it) — not ours"
+        "  not built yet  Route planner → route-planner "
+        "(no finished feature realizes it) — not ours"
         in unbuilt.splitlines()
     )
 
@@ -507,16 +577,63 @@ async def test_product_score_groups_sum_to_the_total(api):
     assert "Not ours (1), most useful first." in text
     assert "  weather-forecast  needed by 1  only_gap 1  elsewhere: none" in text.splitlines()
     assert (
-        "Closest of our products, by how many of the 2 named capabilities each has: "
-        "can-i-climb 1"
+        "Closest of our products, by how many of the 2 named capabilities each has built: "
+        "1 can-i-climb"
     ) in text
     assert "Lower bound" in text
     assert text.endswith(f"Open: /products?product={w['rival'].id}")
-    by_id = await server._dispatch("product_score", {"product": str(w["climb"].id)})
-    assert by_id.startswith("2/2 feature(s) of can-i-climb buildable")
+    by_id = await server._dispatch("product_score", {"product": str(w["rival"].id)})
+    assert by_id.startswith("0/3 feature(s) of rival buildable")
     assert (await server._dispatch("product_score", {"product": "Rival"})).startswith(
         "0 products have id or slug 'Rival'"
     )
+
+
+def test_tied_closest_products_share_one_group():
+    """Ties at the cut are kept whole, so more than three can come back."""
+    score = {
+        "product": {"id": "p", "slug": "strava"}, "total_features": 1,
+        "buildable": [], "partly": [], "not_described": [], "missing": ["Kudos"],
+        "missing_incomplete": [], "missing_capabilities": [],
+        "report": {"existing": 2, "needed": 9, "mature": 1},
+        "closest_products": [
+            {"product": {"slug": s}, "capabilities": n}
+            for s, n in (("hanko", 7), ("kida", 3), ("magpie", 3), ("steps", 3))
+        ],
+    }
+    assert (
+        "Closest of our products, by how many of the 9 named capabilities each has built: "
+        "7 hanko; 3 kida, magpie, steps"
+    ) in render.product_score(score).splitlines()
+
+
+async def test_exposure_says_what_it_cannot_judge(api):
+    """No end-of-life date and no maintainer count: exposure can't flag it,
+    so an empty list must not read as an all-clear."""
+    _, db = api
+    async with db() as s:
+        await tech_service.create_technology(
+            s, TechnologyCreate(slug="qdrant", name="Qdrant", kind=TechKind.service)
+        )
+    text = await server._dispatch("tech_exposure", {})
+    _conventions(text)
+    assert text.startswith("0 exposed technolog(ies)")
+    assert (
+        "Unresolved — estate: 1 of 1 technologies have no lifecycle data (no end-of-life "
+        "date, no maintainer count), so only a stance can flag them"
+    ) in text.splitlines()
+
+
+async def test_own_products_are_not_scored(api):
+    """As on the desktop: an own product's features make its capabilities ours,
+    so its score would only measure itself."""
+    w = await _world(*api)
+    for value in ("can-i-climb", str(w["climb"].id)):
+        text = await server._dispatch("product_score", {"product": value})
+        _conventions(text)
+        assert text.startswith("0 features scored: can-i-climb is ours")
+        assert "buildable" not in text
+        assert text.endswith(f"Open: /products?product={w['climb'].id}")
 
 
 async def test_capability_says_who_why_and_how_far(api):
@@ -524,7 +641,8 @@ async def test_capability_says_who_why_and_how_far(api):
     text = await server._dispatch("capability", {"slug": "strava-import"})
     _conventions(text)
     assert text.startswith(
-        "2 feature(s) of ours realize strava-import across 1 product(s); maturity ga."
+        "2 feature(s) of ours, at any status, realize strava-import across 1 product(s); "
+        "maturity ga."
     )
     assert "Rollup: 2 total — 1 pending, 0 in_progress, 1 done." in text
     assert "Our products: can-i-climb" in text
@@ -533,7 +651,11 @@ async def test_capability_says_who_why_and_how_far(api):
     assert "Evidence (2 path(s), as exported): app/strava/sync.py, app/strava/oauth.py" in text
 
     weather = await server._dispatch("capability", {"slug": "weather-forecast"})
-    assert "Known only from external products" in weather
+    assert "Not ours: no finished feature of ours realizes it." in weather
+    # Maturity describes our implementation: none shown for what isn't ours.
+    assert weather.startswith(
+        "0 feature(s) of ours, at any status, realize weather-forecast across 0 product(s)."
+    )
     assert "External products that have it: rival" in weather
     assert "No goal motivates it directly" in weather
 
@@ -548,8 +670,76 @@ async def test_feature_why_walks_up_to_the_goal(api):
     w = await _world(*api)
     text = await server._dispatch("feature_why", {"feature": str(w["forecast"].id)})
     _conventions(text)
-    assert text.startswith("1 capabilit(ies) and 1 goal(s) above Show ride history.")
-    assert "REALIZES" in text and "MOTIVATES" in text and "PG-" in text
+    assert text.startswith(
+        "1 capabilit(ies) and 1 goal(s) above Show ride history (can-i-climb): "
+        "0 of can-i-climb, 1 of other products."
+    )
+    assert "REALIZES" in text and "PG-" in text and "motivates Strava import" in text
+    # can-i-climb has no goal, so no goal is called its own.
+    assert "can-i-climb has no goal of its own" in text
+    # By exact name too, as recheck takes it.
+    assert await server._dispatch("feature_why", {"feature": "Show ride history"}) == text
+
+
+async def test_feature_why_puts_the_products_own_goals_first(api):
+    """A shared capability brings in other products' goals: they are labelled
+    with their product, never shown as this feature's reason. Each goal says
+    what it motivates, even one the chain met first as a parent."""
+    app, db = api
+    async with db() as s:
+        def cap(name):
+            return capability_service.create_capability(s, CapabilityCreate(name=name))
+
+        strava, physics = await cap("Strava import"), await cap("Physics model")
+        og_climb = Goal(goal_type=GoalType.org, title="Riders know before they ride")
+        og_saddle = Goal(goal_type=GoalType.org, title="Every bike ready")
+        s.add_all([og_climb, og_saddle])
+        await s.flush()
+        pg_climb = Goal(
+            goal_type=GoalType.product, title="Trust the estimate", parent_goal_id=og_climb.id
+        )
+        pg_saddle = Goal(
+            goal_type=GoalType.product, title="Plan the ride", parent_goal_id=og_saddle.id
+        )
+        s.add_all([pg_climb, pg_saddle])
+        await s.flush()
+        climb = Product(name="Can I Climb", slug="can-i-climb", goal_id=pg_climb.id)
+        saddle = Product(name="Saddlebag", slug="saddlebag", goal_id=og_saddle.id)
+        s.add_all([climb, saddle])
+        await s.commit()
+        for cap, goal in ((strava, pg_climb), (strava, pg_saddle), (physics, og_saddle)):
+            await capability_service.add_motivation(s, cap.id, goal.id)
+        feature = await feature_service.create_feature(
+            s, FeatureCreate(name="Estimate climb power", product_id=climb.id,
+                             capability_ids=[strava.id, physics.id]),
+        )
+        ids = {g.title: f"{'OG' if g.goal_type == GoalType.org else 'PG'}-{g.seq:02d}"
+               for g in (og_climb, og_saddle, pg_climb, pg_saddle)}
+
+    text = await server._dispatch("feature_why", {"feature": "Estimate climb power"})
+    _conventions(text)
+    lines = text.splitlines()
+    assert lines[0] == (
+        "2 capabilit(ies) and 4 goal(s) above Estimate climb power (can-i-climb): "
+        "2 of can-i-climb, 2 of other products."
+    )
+    own = lines.index("Goals of can-i-climb (2):")
+    other = next(
+        i for i, line in enumerate(lines) if line.startswith("Goals of other products (2)")
+    )
+    assert own < other
+    mine = " ".join(lines[own + 1:other])
+    assert ids["Trust the estimate"] in mine and "motivates Strava import" in mine
+    assert ids["Riders know before they ride"] in mine
+    assert f"parent of {ids['Trust the estimate']}" in mine
+    theirs = lines[other + 1:-2]
+    saddle_og = next(line for line in theirs if ids["Every bike ready"] in line)
+    # Met first as a parent, it still says what it motivates directly.
+    assert "saddlebag" in saddle_og
+    assert f"motivates Physics model; parent of {ids['Plan the ride']}" in saddle_og
+    saddle_pg = next(line for line in theirs if ids["Plan the ride"] in line)
+    assert "saddlebag" in saddle_pg and "motivates Strava import" in saddle_pg
+    assert text.endswith(f"Open: /features?feature={feature.id}")
 
 
 async def test_journeys_list_and_analysis(api):
@@ -565,7 +755,19 @@ async def test_journeys_list_and_analysis(api):
         "1 live today."
     )
     assert "Check wind needs, not ours: Weather forecast" in text
+    # The exact name works like the id; anything else lists nothing and says so.
+    assert await server._dispatch("journeys", {"journey": "Plan a climb"}) == text
+    missing = await server._dispatch("journeys", {"journey": "onboarding"})
+    _conventions(missing)
+    assert missing.startswith("0 journeys are named 'onboarding'. Matching is exact")
 
+
+async def test_capability_takes_a_name_as_check_idea_does(api):
+    """check_idea resolves "User-Authentication" to its slug; so does capability."""
+    await _world(*api)
+    by_slug = await server._dispatch("capability", {"slug": "strava-import"})
+    for value in ("Strava import", "Strava-Import", "STRAVA IMPORT"):
+        assert await server._dispatch("capability", {"slug": value}) == by_slug
 
 async def test_ready_features_filters_by_product(api):
     await _world(*api)
@@ -614,18 +816,29 @@ async def test_recheck_by_exact_name_or_id(api):
 
 
 @pytest.mark.parametrize(
-    "name,args",
+    "name,args,hostile",
     [
-        ("feature_why", {"feature": "../../admin/llm"}),
-        ("journeys", {"journey": "x/../../users"}),
-        ("capability", {"slug": "../users"}),
+        ("feature_why", {"feature": "../../admin/llm"}, "../../admin/llm"),
+        ("journeys", {"journey": "x/../../users"}, "x/../../users"),
+        ("capability", {"slug": "../users"}, "../users"),
+        ("capability_supply", {"capability": "../../admin"}, "../../admin"),
     ],
 )
-async def test_inventory_tools_take_ids_only_in_the_shape_of_ids(name, args):
-    """Ids go into request paths, so the same guard as slugs applies — and it
-    fires before any request is made."""
-    with pytest.raises(ValueError):
-        await server._dispatch(name, args)
+async def test_names_never_reach_a_request_path(api, monkeypatch, name, args, hostile):
+    """Ids and slugs go into request paths, so only something shaped like one
+    gets there. A name is matched in memory or travels as a query parameter —
+    a hostile one finds nothing, and walks nowhere."""
+    await _world(*api)
+    paths = []
+    real = server.client._send
+
+    async def spy(method, path, **kwargs):
+        paths.append(path)
+        return await real(method, path, **kwargs)
+
+    monkeypatch.setattr(server.client, "_send", spy)
+    await server.call_tool(name, args)
+    assert paths and not any(hostile in p or ".." in p for p in paths), paths
 
 
 async def test_an_api_refusal_is_rendered_not_raised(api):
@@ -634,8 +847,85 @@ async def test_an_api_refusal_is_rendered_not_raised(api):
     result = await server.call_tool(
         "feature_why", {"feature": "16ce952e-44cd-4317-9176-b3c7de518d9f"}
     )
-    text = result[0].text if isinstance(result, list) else result.content[0].text
-    assert text.startswith("Refused (404)")
+    assert result.isError
+    assert result.content[0].text.splitlines() == [
+        "Refused (404): Feature not found",
+        "Open: /features",
+    ]
+
+
+@pytest.mark.parametrize(
+    "name,args,said,href",
+    [
+        ("propose_binding", {"slot": "db", "tech": "qdrant", "rationale": "x"},
+         "Not a slot id: 'db'. Slot ids are UUIDs; the metis://stacks/{product} "
+         "resource lists a product's slots.", "/stacks"),
+        ("tech_blast_radius", {"tech": "Qdrant"},
+         "Not a technology slug: 'Qdrant'. Slugs are lowercase letters, digits and "
+         "dashes; tech_search lists them.", "/tech"),
+        ("capability", {"slug": "!!!"},
+         "Not a capability slug or name: '!!!'. capability_inventory lists them.",
+         "/capabilities"),
+    ],
+)
+async def test_a_bad_input_is_an_error_that_says_what_to_pass(api, name, args, said, href):
+    result = await server.call_tool(name, args)
+    assert result.isError
+    assert result.content[0].text.splitlines() == [said, f"Open: {href}"]
+
+
+async def test_an_unreachable_backend_says_which_and_the_setting(api, monkeypatch):
+    """Not httpx's "All connection attempts failed": which service, and the
+    setting that points at it."""
+    import httpx
+
+    def refuse(request):
+        raise httpx.ConnectError("All connection attempts failed", request=request)
+
+    client = server.client
+    monkeypatch.setattr(client, "_http", httpx.AsyncClient(transport=httpx.MockTransport(refuse)))
+    result = await server.call_tool("products", {})
+    assert result.isError
+    first, last = result.content[0].text.splitlines()
+    assert first.startswith("Cannot reach the metis API at http://test")
+    assert "MCP_API_BASE_URL" in first
+    assert last == "Open: /products"
+
+    # Auth on: the token request comes first, so a refused secret is named
+    # as that, not as a raw 401 from some URL.
+    def keycloak(request):
+        return httpx.Response(401, json={"error": "unauthorized_client",
+                                         "error_description": "Invalid client credentials"})
+
+    monkeypatch.setattr(client, "_http", httpx.AsyncClient(transport=httpx.MockTransport(keycloak)))
+    monkeypatch.setattr(client, "_settings", Settings(auth_enabled=True))
+    monkeypatch.setattr(client, "_token", None)
+    result = await server.call_tool("products", {})
+    assert result.isError
+    text = result.content[0].text
+    assert text.startswith(
+        "Keycloak refused to sign this server in as metis-mcp "
+        "(401: Invalid client credentials). Check KEYCLOAK_MCP_CLIENT_SECRET"
+    )
+
+
+async def test_an_auth_off_server_against_an_auth_on_api_says_so(api, monkeypatch):
+    import httpx
+
+    def wants_token(request):
+        return httpx.Response(401, json={"detail": "Not authenticated"})
+
+    monkeypatch.setattr(
+        server.client, "_http", httpx.AsyncClient(transport=httpx.MockTransport(wants_token))
+    )
+    result = await server.call_tool("products", {})
+    assert result.isError
+    assert result.content[0].text.splitlines() == [
+        "Refused (401): Not authenticated",
+        "This server sent no token (its AUTH_ENABLED is false), and the API wants one: "
+        "set AUTH_ENABLED=true for this server as well.",
+        "Open: /products",
+    ]
 
 
 @pytest.mark.parametrize("path", ["/api/stacks/metis/recommend", "/api/capabilities/coverage"])

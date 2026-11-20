@@ -61,14 +61,20 @@ def capability_supply(envelope: dict) -> str:
         ]
     )
     realizations = envelope.get("realizations") or []
-    if realizations:
-        lines += ["", f"Build side — {len(realizations)} feature(s) realize it:"]
+    # An external product's feature is known, never our build side.
+    ours = [f for f in realizations if not f.get("external")]
+    theirs = [f for f in realizations if f.get("external")]
+    if ours:
+        lines += ["", f"Build side — {len(ours)} feature(s) of ours realize it:"]
         lines += _table(
             [
                 [f["feature"], f["status"], f"{f['tickets']} ticket(s)", f["product"] or ""]
-                for f in realizations
+                for f in ours
             ]
         )
+    if theirs:
+        lines += ["", f"External products — {len(theirs)} feature(s), not ours:"]
+        lines += _table([[f["feature"], f["status"], f["product"] or ""] for f in theirs])
     if rows:
         lines.append("")
     return _tail(envelope, lines)
@@ -79,22 +85,22 @@ def tech_blast_radius(envelope: dict) -> str:
     slug = envelope["subject"]["slug"]
     breaks = sum(1 for r in rows if r["required"])
     off = sum(1 for r in rows if r["off_stack"])
+    bare = sum(1 for r in rows if r["layer"] is None and not r["off_stack"])
     lines = [
-        f"{len(rows)} product(s) use {slug} — {breaks} required, {off} off_stack.",
+        f"{len(rows)} product(s) use {slug} — {breaks} required, {off} off_stack, "
+        f"{bare} with no stack.",
         "",
     ]
-    lines += _table(
-        [
-            [
-                r["product"],
-                r["layer"] or "—",
-                r["role"] or "—",
-                "required" if r["required"] else "optional",
-                "off_stack" if r["off_stack"] else "",
-            ]
-            for r in rows
-        ]
-    )
+
+    def use(r: dict) -> str:
+        # required/optional are stack words: only a slot says how much it's needed.
+        if r["layer"] is not None:
+            return "required" if r["required"] else "optional"
+        if r["off_stack"]:
+            return "off_stack (its stack never declared it)"
+        return "uses it (the product has no stack)"
+
+    lines += _table([[r["product"], r["layer"] or "—", r["role"] or "—", use(r)] for r in rows])
     # An agent asking this is mid-decision, so the obvious next fact rides along.
     alternatives = envelope.get("alternatives") or []
     if alternatives:
@@ -226,19 +232,38 @@ def blocked(reason: str, rule_id: str, href: str) -> str:
     return "\n".join([f"Stop — {reason}", f"Rule: {rule_id}", f"Open: {href}"])
 
 
-def api_error(status: int, body: Any) -> str:
+def api_error(status: int, body: Any, href: str, hint: str | None = None) -> str:
     """A refusal from the API, rendered rather than swallowed. The 403 already
-    carries the screen that can act; pass it through verbatim."""
-    if isinstance(body, dict) and isinstance(body.get("detail"), dict):
-        detail = body["detail"]
-        return "\n".join(
-            [
-                f"Refused ({status}): {detail.get('error', 'error')}",
-                detail.get("message", ""),
-                f"Open: {detail.get('href', '/')}",
-            ]
+    carries the screen that can act; pass it through verbatim. Anything else
+    opens the screen of the tool's own subject."""
+    detail = body.get("detail", body) if isinstance(body, dict) else body
+    if isinstance(detail, dict):
+        lines = [f"Refused ({status}): {detail.get('error', 'error')}"]
+        lines += [detail["message"]] if detail.get("message") else []
+        href = detail.get("href") or href
+    else:
+        lines = [f"Refused ({status}): {_said(detail)}"]
+    if hint:
+        lines.append(hint)
+    return _end(lines, href)
+
+
+def _said(detail: Any) -> str:
+    """The API's own words, on one line. FastAPI's validation errors arrive as
+    a list; each keeps its location and message."""
+    if isinstance(detail, list):
+        return "; ".join(
+            f"{'.'.join(str(part) for part in e.get('loc', []))}: {e.get('msg', '')}"
+            for e in detail
+            if isinstance(e, dict)
         )
-    return f"Refused ({status}): {body}"
+    return " ".join(str(detail).split())[:300]
+
+
+def error(message: str, href: str) -> str:
+    """An input this server refused before asking, or a setup it cannot get
+    past: one sentence saying what to change, then the screen as always."""
+    return _end([message], href)
 
 
 # ---- inventory: what exists, and what we could build from it ----
@@ -255,18 +280,16 @@ def _end(lines: list[str], href: str) -> str:
     return "\n".join(lines)
 
 
-def _not_ours(c: dict) -> str:
-    """`ours` false means one of two things; external_products tells which."""
+def _standing(c: dict) -> str:
+    """Maturity describes our implementation, so it shows only when ours.
+    `ours` false means one of two things; external_products tells which."""
     if c["ours"]:
-        return ""
-    return ", external only" if c["external_products"] else ", nobody has it"
+        return c["maturity"]
+    return "external only" if c["external_products"] else "not built yet"
 
 
 def _candidates(candidates: list[dict]) -> str:
-    return ", ".join(
-        f"{c['slug']} ({c['maturity']}{_not_ours(c)})"
-        for c in candidates
-    )
+    return ", ".join(f"{c['slug']} \"{c['name']}\" ({_standing(c)})" for c in candidates)
 
 
 def products(rows: list[dict]) -> str:
@@ -308,23 +331,27 @@ def capability_inventory(rows: list[dict], query: str | None, limit: int = 50) -
         else f"{total} capabilit(ies)"
     )
     lines = [
-        f"{head}: {in_use} ours, {outside} known only from external products, "
-        f"{unbuilt} that nobody has yet; showing {len(shown)}.",
+        f"{head}: {in_use} ours, {outside} external only, "
+        f"{unbuilt} not built yet; showing {len(shown)}.",
         "",
     ]
+    # The exact name rides along: a seed file reuses a capability by its name.
+    # Maturity describes our implementation, so it shows only when ours; the
+    # feature count and our products are our work on it at any status.
     lines += _table(
         [
             [
                 r["slug"],
-                r["maturity"],
+                f'"{r["name"]}"',
+                r["maturity"] if r["ours"] else "—",
                 f"{r['features']} feature(s)",
-                f"ours in: {_names(r['products'])}" if r["products"] else "ours in: —",
+                f"our products: {_names(r['products'])}" if r["products"] else "our products: —",
                 f"external: {_names(r['external_products'])}" if r["external_products"] else "",
                 ""
                 if r["ours"]
                 else "external only — not ours"
                 if r["external_products"]
-                else "nobody has it — not ours",
+                else "not built yet — not ours",
             ]
             for r in shown
         ]
@@ -348,12 +375,12 @@ def _need(need: dict) -> list[str]:
     if match and match["external_products"]:
         return [
             f"  external only  {need['name']} → {match['slug']} "
-            f"(only in {_names(match['external_products'])}) — exists, not ours"
+            f"(external: {_names(match['external_products'])}) — exists, not ours"
         ]
     if match:
         return [
-            f"  nobody has it  {need['name']} → {match['slug']} "
-            "(no feature realizes it) — not ours"
+            f"  not built yet  {need['name']} → {match['slug']} "
+            "(no finished feature realizes it) — not ours"
         ]
     lines = [f"  no match       {need['name']}"]
     if need["candidates"]:
@@ -452,10 +479,14 @@ def product_score(score: dict) -> str:
             )
         closest = score["closest_products"]
         if closest:
+            # A tie is kept whole, so products with the same count share one group.
+            tied: dict[int, list[str]] = {}
+            for c in closest:
+                tied.setdefault(c["capabilities"], []).append(c["product"]["slug"])
             lines.append(
                 f"Closest of our products, by how many of the {report['needed']} named "
-                "capabilities each has: "
-                + ", ".join(f"{c['product']['slug']} {c['capabilities']}" for c in closest)
+                "capabilities each has built: "
+                + "; ".join(f"{n} {', '.join(slugs)}" for n, slugs in tied.items())
             )
     else:
         lines.append("No capability is named on any of its features, so nothing can be scored.")
@@ -473,6 +504,19 @@ def no_product(value: str) -> str:
     )
 
 
+def own_product(product: dict) -> str:
+    """Our own products are not scored, as on the desktop: a product's own
+    features are what make its capabilities ours, so the score measures itself."""
+    return _end(
+        [
+            f"0 features scored: {product['slug']} is ours, and product_score scores "
+            "only external products. For one of ours, ready_features says what can "
+            "start next and recheck what a change touches.",
+        ],
+        f"/products?product={product['id']}",
+    )
+
+
 def capability(
     entry: dict, features: list[dict], goals: list[dict], rollup: dict, products: list[dict]
 ) -> str:
@@ -480,14 +524,19 @@ def capability(
     capability's submap — the same set the rollup counts."""
     slug = entry["slug"]
     by_id = {p["id"]: p["slug"] for p in products}
+    # The count is our work on it at any status; whether it is ours takes a
+    # finished one. Maturity describes our implementation, so only when ours.
+    maturity = f"; maturity {entry['maturity']}" if entry["ours"] else ""
     lines = [
-        f"{entry['features']} feature(s) of ours realize {slug} across "
-        f"{len(entry['products'])} product(s); maturity {entry['maturity']}.",
+        f"{entry['features']} feature(s) of ours, at any status, realize {slug} across "
+        f"{len(entry['products'])} product(s){maturity}.",
     ]
     if not entry["ours"] and entry["external_products"]:
-        lines.append("Known only from external products: it exists, we don't have it.")
+        lines.append(
+            "Not ours: no finished feature of ours realizes it. External products have it."
+        )
     elif not entry["ours"]:
-        lines.append("Nobody has it yet: no feature realizes it, so it isn't ours.")
+        lines.append("Not built yet: no finished feature realizes it, so it isn't ours.")
     description = entry.get("description")
     lines.append(entry["name"] + (f" — {description}" if description else ""))
     lines += [
@@ -529,24 +578,93 @@ def no_capability(slug: str, candidates: list[dict]) -> str:
     return _end(lines, "/capabilities")
 
 
-def feature_why(why: dict) -> str:
+def feature_why(
+    why: dict,
+    feature: dict,
+    products: list[dict],
+    goals: list[dict],
+    motivations: list[dict],
+) -> str:
+    """The chain, split by whose goal it is. A goal is the feature's own when it
+    sits under the same top goal as the feature's product (the desktop's rule);
+    any other arrived through a shared capability — reuse, not the reason this
+    feature exists — so it is labelled with its products. Each goal says which
+    capability it motivates, or which goal it is the parent of, because the
+    chain lists a goal once however many capabilities it motivates."""
     chain = why["chain"]
-    capabilities = sum(1 for s in chain if s["kind"] == "capability")
-    goals = sum(1 for s in chain if s["kind"] == "goal")
+    parent = {g["id"]: g["parent_goal_id"] for g in goals}
+
+    def root(goal_id: str) -> str:
+        seen = set()
+        while parent.get(goal_id) and goal_id not in seen:
+            seen.add(goal_id)
+            goal_id = parent[goal_id]
+        return goal_id
+
+    owners: dict[str, list[str]] = {}
+    for p in products:
+        if p.get("goal_id"):
+            owners.setdefault(root(p["goal_id"]), []).append(p["slug"])
+    product = next((p for p in products if p["id"] == feature.get("product_id")), None)
+    slug = product["slug"] if product else "(no product)"
+    own_root = root(product["goal_id"]) if product and product.get("goal_id") else None
+
+    capabilities = [s for s in chain if s["kind"] == "capability"]
+    steps = [s for s in chain if s["kind"] == "goal"]
+    order = [s["id"] for s in capabilities]
+    names = {s["id"]: s["name"] for s in capabilities}
+    motivates: dict[str, list[str]] = {}
+    for m in motivations:
+        if m["capability_id"] in names:
+            motivates.setdefault(m["goal_id"], []).append(m["capability_id"])
+
+    def via(step: dict) -> str:
+        said = []
+        motivated = sorted(motivates.get(step["id"], []), key=order.index)
+        if motivated:
+            said.append("motivates " + ", ".join(names[c] for c in motivated))
+        children = [g["display_id"] for g in steps if parent.get(g["id"]) == step["id"]]
+        if children:
+            said.append("parent of " + ", ".join(children))
+        return "; ".join(said)
+
+    own = [g for g in steps if own_root is not None and root(g["id"]) == own_root]
+    other = [g for g in steps if g not in own]
     lines = [
-        f"{capabilities} capabilit(ies) and {goals} goal(s) above {chain[0]['name']}.",
+        f"{len(capabilities)} capabilit(ies) and {len(steps)} goal(s) above "
+        f"{chain[0]['name']} ({slug}): {len(own)} of {slug}, "
+        f"{len(other)} of other products.",
         "",
     ]
-    lines += _table(
-        [
-            [s["relation"] or "—", s["kind"], s.get("display_id") or "", s["name"]]
-            for s in chain[1:]
-        ]
-    )
-    if not goals:
+    lines += _table([["  " + s["relation"], s["name"]] for s in capabilities])
+    lines.append("")
+    if not steps:
         lines.append(
             "No goal motivates any capability on this path — the why stops here. "
             "That is an answer."
+        )
+    elif own:
+        lines.append(f"Goals of {slug} ({len(own)}):")
+        lines += _table([["  " + g["display_id"], g["name"], via(g)] for g in own])
+    elif own_root is None:
+        lines.append(f"{slug} has no goal of its own, so none of these is its reason.")
+    else:
+        lines.append(f"No goal of {slug} motivates these capabilities.")
+    if other:
+        lines.append(
+            f"Goals of other products ({len(other)}) — each motivates a capability "
+            "this feature shares, not this feature:"
+        )
+        lines += _table(
+            [
+                [
+                    "  " + g["display_id"],
+                    g["name"],
+                    ", ".join(owners.get(root(g["id"]), [])) or "(no product)",
+                    via(g),
+                ]
+                for g in other
+            ]
         )
     lines.append("")
     return _end(lines, f"/features?feature={why['feature_id']}")
@@ -730,3 +848,19 @@ def no_feature(value: str, named: list[dict], products: list[dict]) -> str:
     )
     lines.append("")
     return _end(lines, "/features")
+
+
+def no_journey(value: str, named: list[dict]) -> str:
+    """The same rule as features: an id or the exact name, never a near one."""
+    if not named:
+        return _end(
+            [
+                f"0 journeys are named {value!r}. Matching is exact: pass an id or the "
+                "exact name; journeys with no argument lists them."
+            ],
+            "/journeys",
+        )
+    lines = [f"{len(named)} journeys are named {value!r}. Pass one id:", ""]
+    lines += _table([["  " + j["name"], j["persona"] or "—", j["id"]] for j in named])
+    lines.append("")
+    return _end(lines, "/journeys")

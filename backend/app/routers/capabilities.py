@@ -90,7 +90,9 @@ async def rollup(capability_id: uuid.UUID, session: AsyncSession = Depends(get_d
 async def impact(
     capability_id: uuid.UUID, request: Request, session: AsyncSession = Depends(get_db)
 ):
-    """Blast radius at capability resolution, over the coupling projection."""
+    """Blast radius at capability resolution. Dependents are the other
+    capabilities of the features that need this capability's features, through
+    links of links; dependencies, those of what its features need."""
     graph = get_graph(request)
     if graph is None:
         raise HTTPException(503, "Graph not initialized")
@@ -109,6 +111,9 @@ async def impact(
 
 @router.get("/{capability_id}/motivations", response_model=list[GoalRead])
 async def motivations(capability_id: uuid.UUID, session: AsyncSession = Depends(get_db)):
+    # 404 like /scope and /rollup: an empty list must mean "no goal motivates
+    # it", never "no such capability".
+    await capability_service.get_capability(session, capability_id)
     return await capability_service.motivating_goals(session, capability_id)
 
 

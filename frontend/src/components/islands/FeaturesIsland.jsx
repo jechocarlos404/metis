@@ -76,6 +76,7 @@ export default function FeaturesIsland({ canWrite = true }) {
   const [saving, setSaving] = React.useState(false);
   const [confirmingDelete, setConfirmingDelete] = React.useState(false);
   const [error, setError] = React.useState(null);
+  const [notice, setNotice] = React.useState(null); // what the last write did, said in place
   const [cutTarget, setCutTarget] = React.useState("");
   const [cut, setCut] = React.useState(null);
   const [cutError, setCutError] = React.useState(null);
@@ -295,6 +296,7 @@ export default function FeaturesIsland({ canWrite = true }) {
     setDraft((d) => ({ ...EMPTY_DRAFT, productId: activeProduct ? onScreen : d.productId }));
     setConfirmingDelete(false);
     setError(null);
+    setNotice(null);
     setDialog({ mode: "new" });
   };
 
@@ -312,6 +314,7 @@ export default function FeaturesIsland({ canWrite = true }) {
     });
     setConfirmingDelete(false);
     setError(null);
+    setNotice(null);
     setDialog({ mode: "edit" });
   };
 
@@ -350,13 +353,28 @@ export default function FeaturesIsland({ canWrite = true }) {
         setDraft((d) => ({ ...EMPTY_DRAFT, productId: d.productId }));
         await load();
         selectFeature(created.id);
+        const product = productById.get(created.product_id);
+        setNotice(`Created ${created.name}${product ? ` in ${product.name}` : ""}.`);
       } else {
+        // Said in place afterwards, as capabilities and goals do.
+        const was = new Set(detail.capability_ids);
+        const changes = [
+          body.name !== detail.name && `renamed from ${detail.name}`,
+          draft.status !== detail.status && `status now ${statusLabel(draft.status)}`,
+          body.priority !== (detail.priority ?? null) && `priority now ${priorityLabel(body.priority)}`,
+          body.product_id !== (detail.product_id ?? null) && `product now ${productById.get(body.product_id)?.name ?? "none"}`,
+          (body.capability_ids.length !== was.size || body.capability_ids.some((id) => !was.has(id))) && "capabilities updated",
+          body.unknown_capabilities !== detail.unknown_capabilities && "capabilities updated",
+          draft.layer !== (detail.facets?.layer ?? "service") && `layer now ${plain(LAYER, draft.layer)}`,
+          body.description !== (detail.description ?? null) && "description updated",
+        ].filter(Boolean);
         await api(`/features/${detail.id}`, {
           method: "PATCH",
           body: { ...body, facets: { ...detail.facets, layer: draft.layer }, status: draft.status },
         });
         await load();
         await refreshDetail(detail.id);
+        setNotice(changes.length ? `Saved ${body.name}: ${[...new Set(changes)].join(", ")}.` : `Saved ${body.name}. Nothing changed.`);
       }
       setDialog(null);
     } catch (e) {
@@ -369,12 +387,14 @@ export default function FeaturesIsland({ canWrite = true }) {
   const removeFeature = async () => {
     setSaving(true);
     setError(null);
+    const name = detail.name; // detail clears with the selection
     try {
       await api(`/features/${detail.id}`, { method: "DELETE" });
       setDialog(null);
       setSelected(null);
       setPanelOpen(false);
       await load();
+      setNotice(`Deleted ${name}.`);
     } catch (e) {
       setError(String(e.message));
       setConfirmingDelete(false);
@@ -458,6 +478,7 @@ export default function FeaturesIsland({ canWrite = true }) {
         <Tabs tabs={[{ value: "directory", label: "Directory", count: directory.length }, { value: "graph", label: "Graph" }, ...(canPlan ? [{ value: "plan", label: "Plan" }] : [])]} value={shownTab} onChange={changeTab} />
       </div>
       {error && !dialog && <div role="alert" style={{ padding: "8px 24px", fontSize: "var(--text-sm)", color: "var(--danger-fg)" }}>{error}</div>}
+      {notice && !error && <div role="status" style={{ padding: "8px 24px 0", fontSize: "var(--text-sm)", color: "var(--ok-fg)" }}>{notice}</div>}
 
       {noFeatures ? (
         <div style={{ margin: 20, padding: 24, background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", display: "flex", flexDirection: "column", gap: 10, alignItems: "flex-start" }}>

@@ -1,0 +1,12 @@
+{
+  "name": "metis",
+  "owner": { "name": "jechocarlos404", "url": "https://jechocarlos.dev" },
+  "description": "The metis plugin for Claude Code.",
+  "plugins": [
+    {
+      "name": "metis",
+      "source": "./plugin",
+      "description": "Read-only metis MCP server, reuse skills, and product-aware hooks."
+    }
+  ]
+}

@@ -3,6 +3,7 @@ import { PageHeader } from "../shell/PageHeader.jsx";
 import { Badge, Button, DeleteConfirm, Dialog, Icon, Input, Select } from "../../ds";
 import { MaturityBadge } from "../shared/coverage.jsx";
 import { Term } from "../shared/Term.jsx";
+import { Guesses } from "../shared/Guesses.jsx";
 import { api } from "../../lib/api.js";
 import { FIT, MATURITY, count, plain, statusLabel } from "../../lib/words.js";
 import { FIT_TONE, STANCE_TONE } from "../../lib/ontology.js";
@@ -267,6 +268,7 @@ export default function CapabilityIsland({ slug, canWrite = false }) {
           ) : (
             ours.map((g) => <ProductGroup key={g.product?.id ?? "none"} group={g} slugByName={slugByName} external={false} />)
           )}
+          {canWrite && <Guesses query={{ capability_id: cap.id }} name="subject" title="Features and technologies that probably use it" onConfirmed={() => load()} />}
           {theirs.length > 0 && (
             <div style={{ display: "flex", flexDirection: "column", gap: 10, borderTop: "1px solid var(--border-hairline)", paddingTop: 10 }}>
               <div style={SUBHEAD}>Also in products we don't own (not counted)</div>

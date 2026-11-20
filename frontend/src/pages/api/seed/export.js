@@ -78,6 +78,26 @@ export async function GET({ request, locals }) {
     return body;
   }
 
+  // Guesses are editor/admin only and the technology plane may be empty or
+  // absent on an older instance: a refusal there means "none", not a failure.
+  async function optional(route) {
+    try {
+      return await api(route);
+    } catch {
+      return null;
+    }
+  }
+
+  async function allTechnologies() {
+    const rows = [];
+    for (let offset = 0; ; offset += 200) {
+      const page = await optional(`/api/tech?limit=200&offset=${offset}`);
+      if (!page) return rows;
+      rows.push(...page.rows);
+      if (offset + 200 >= page.total || page.rows.length === 0) return rows;
+    }
+  }
+
   try {
     const [product, productsGoals, capabilityTree, features, edges, decompositions, bundles] = await Promise.all([
       api(`/api/products/${productId}`),
@@ -88,6 +108,13 @@ export async function GET({ request, locals }) {
       api(`/api/products/${productId}/decompositions`),
       api(`/api/products/${productId}/bundles`),
     ]);
+    const [guessRows, usage, satisfactions, technologies] = await Promise.all([
+      optional("/api/guesses"),
+      optional(`/api/stacks/usage?product_id=${productId}`),
+      optional("/api/tech/satisfactions"),
+      allTechnologies(),
+    ]);
+    const guesses = guessRows || [];
 
     const goals = productsGoals;
     const goalById = new Map(goals.map((goal) => [goal.id, goal]));
@@ -105,12 +132,20 @@ export async function GET({ request, locals }) {
       linkedGoals.map((goal) => ({ capability_id, goal_id: goal.id })),
     );
     const includedFeatures = features.filter((feature) => feature.product_id === productId);
+    const includedFeatureIds = new Set(includedFeatures.map((feature) => feature.id));
+    // A feature's guesses, minus any its confirmed links already cover.
+    const guessesOf = new Map();
+    for (const guess of guesses) {
+      const feature = includedFeatures.find((f) => f.id === guess.feature_id);
+      if (!feature || (feature.capability_ids || []).includes(guess.capability_id)) continue;
+      guessesOf.set(feature.id, [...(guessesOf.get(feature.id) || []), guess]);
+    }
     const includedCapabilityIds = withAncestors(capabilityList, [
       ...includedFeatures.flatMap((feature) => feature.capability_ids || []),
+      ...[...guessesOf.values()].flat().map((guess) => guess.capability_id),
       ...bundles.map((capability) => capability.id),
     ]);
     const includedCapabilities = capabilityList.filter((capability) => includedCapabilityIds.has(capability.id));
-    const includedFeatureIds = new Set(includedFeatures.map((feature) => feature.id));
     const includedEdges = edges.filter(
       (edge) => includedFeatureIds.has(edge.src_id) && includedFeatureIds.has(edge.dst_id),
     );
@@ -130,6 +165,38 @@ export async function GET({ request, locals }) {
 
     const latestDecomposition = decompositions[0]?.document;
     const productRef = `prod-${slug(product.display_id || product.name)}`;
+
+    // The technologies this product uses, each with its links to capabilities
+    // already in the file: confirmed satisfactions, then guesses.
+    const usedTechIds = new Set((usage || []).map((row) => row.tech_id));
+    const includedTechs = technologies.filter((tech) => usedTechIds.has(tech.id));
+    const techEntries = includedTechs.map((tech, i) => {
+      const confirmed = (satisfactions || []).filter(
+        (s) => s.tech_id === tech.id && includedCapabilityIds.has(s.capability_id),
+      );
+      const confirmedIds = new Set(confirmed.map((s) => s.capability_id));
+      const guessed = guesses.filter(
+        (g) => g.tech_id === tech.id && includedCapabilityIds.has(g.capability_id) && !confirmedIds.has(g.capability_id),
+      );
+      const satisfies = [
+        ...confirmed.map((s) => ({ capability_ref: capRef.get(s.capability_id), fit: s.fit })),
+        ...guessed.map((g) => ({
+          capability_ref: capRef.get(g.capability_id),
+          ...(g.fit ? { fit: g.fit } : {}),
+          confidence: g.confidence,
+          ...(g.basis ? { basis: g.basis } : {}),
+        })),
+      ];
+      return {
+        ref: `tech-${slug(tech.slug)}-${i + 1}`,
+        name: tech.name,
+        slug: tech.slug,
+        kind: tech.kind,
+        ...(tech.layer ? { layer: tech.layer } : {}),
+        products: [productRef],
+        ...(satisfies.length > 0 ? { satisfies } : {}),
+      };
+    });
 
     const doc = {
       format: "metis-seed/v1",
@@ -164,6 +231,15 @@ export async function GET({ request, locals }) {
         ref: featureRef.get(feature.id),
         capability_refs: (feature.capability_ids || []).map((id) => capRef.get(id)),
         ...(feature.unknown_capabilities ? { unknown_capabilities: true } : {}),
+        ...(guessesOf.has(feature.id)
+          ? {
+              capability_guesses: guessesOf.get(feature.id).map((guess) => ({
+                capability_ref: capRef.get(guess.capability_id),
+                confidence: guess.confidence,
+                ...(guess.basis ? { basis: guess.basis } : {}),
+              })),
+            }
+          : {}),
         product_ref: productRef,
         name: feature.name,
         description: feature.description,
@@ -211,6 +287,7 @@ export async function GET({ request, locals }) {
             : null,
         },
       ],
+      ...(techEntries.length > 0 ? { technologies: techEntries } : {}),
     };
 
     const filename = `${slug(product.name)}.metis-seed.json`;

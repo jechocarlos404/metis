@@ -317,11 +317,23 @@ Tools return **text, not JSON** — an agent quotes text back to a user but para
 JSON, and paraphrase is where `workaround` quietly becomes "partial support."
 
 ```sh
-docker compose --profile mcp up mcp     # SSE on the compose network, port 8001
+docker compose --profile mcp up -d mcp  # SSE on 127.0.0.1:8001
 ```
 
-The server refuses to start SSE without `MCP_SSE_TOKEN` — it holds an API token, and an
+The server refuses to start SSE without `MCP_SSE_TOKEN`: it holds an API token, and an
 open port would lend it to anyone who can reach the address.
+
+**Claude Code plugin.** [`plugin/`](plugin/README.md) brings this server to a coding
+session in any repo, with skills that check for reuse before building
+(`metis-check-idea`, `metis-find-reuse`, `metis-next-work`) and read-only hooks: a
+product brief at session start, a one-line nudge when a prompt names a capability another
+product already has, and a reminder to re-export the seed file after code changes. The
+repo root is its marketplace:
+
+```
+/plugin marketplace add /path/to/metis
+/plugin install metis@metis
+```
 
 ### LLM providers
 
@@ -333,7 +345,7 @@ DB-backed and editable in Settings → AI models.
 ## Seed workflows
 
 Metis supports both **in-app** and **skill-driven** seed round-trips (seed file format:
-`skills/metis-export/references/seed-format.md`):
+`backend/app/ontology/seed-format.md`):
 
 - In the **Products** page, admins/editors can:
   - **Export seed**: download the selected Spec as a `metis-seed/v1` JSON file,
@@ -346,14 +358,15 @@ Metis supports both **in-app** and **skill-driven** seed round-trips (seed file 
 
 ### Claude Code skills
 
-The repo ships a two-skill pipeline for seeding an instance from real codebases
-(using the same seed format and add-only semantics as the in-app flow):
+The metis Claude Code plugin (`plugin/`) ships three skills for seeding an
+instance from real codebases (using the same seed format and add-only semantics
+as the in-app flow):
 
-- `.claude/skills/metis-seed-instance` loads a `metis-seed.json` into the running
-  instance via the API — idempotent, add-only. Auto-available in this repo.
-  With auth enabled, either use a browser session through the UI, set
+- `plugin/skills/metis-seed-instance` loads a `metis-seed.json` into the running
+  instance via the API: idempotent, add-only. `plugin/skills/metis-unseed`
+  removes what a seed file created. With auth enabled, either use a browser session through the UI, set
   `AUTH_ENABLED=false`, or pass a bearer token.
-- `skills/metis-export` analyzes *any* repository and writes a `metis-seed.json`.
+- `plugin/skills/metis-export` analyzes *any* repository and writes a `metis-seed.json`.
   To use it from other repos, symlink it into your global skills once per machine:
 
   ```sh
@@ -427,6 +440,6 @@ backend/
   app/ontology/    model.md — served to the UI, the API and MCP from one file
 frontend/          Astro app: pages, React islands, design system (ds/), API proxy
 docs/              ontology design record (divergence, mental model, graph spec)
-skills/            metis-export (portable); .claude/skills/ for in-repo skills
+plugin/skills/     metis-export, metis-seed-instance, metis-unseed (Claude Code plugin)
 docker-compose.yml
 ```

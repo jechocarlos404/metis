@@ -13,8 +13,9 @@ already exists. Its ticket pipeline
 (`Goal → Spec → Capability map + Feature graph → PRD → Tickets`) is secondary.
 
 This skill turns the repository you're standing in into a `metis-seed/v1` JSON
-file that the `metis-seed-instance` skill (in the metis repo) loads into the running
-instance.
+file that the `metis-seed-instance` skill (in the same metis plugin) loads into the
+running instance. Paths below such as `references/` and `scripts/` are relative to
+this skill's own directory, the one holding this SKILL.md.
 
 Read `references/seed-format.md` before writing the file — it is the canonical
 format and ontology spec. The rules that shape everything you extract:
@@ -34,6 +35,17 @@ format and ontology spec. The rules that shape everything you extract:
   is wrong. Only for an external product (someone else's, described from the
   outside with `"external": true`) may a feature set `"unknown_capabilities": true`
   and list just the capabilities you can name.
+- **Guess only what you cannot see, and mark it.** A link is a guess when nothing
+  confirms it: no access to the code behind it, no confirmation from the user,
+  nothing on the product's site or docs that states it. It goes in the feature's
+  `capability_guesses` (never in `capability_refs`), naming one exact capability
+  `ref` from the file, with a `confidence` and a one-sentence `basis`: `high` for
+  strong public evidence such as a docs page naming the behaviour, `medium` when
+  the behaviour is described but not shown, `low` when it is only plausible from
+  the product's category. A feature known only by guesses sets
+  `unknown_capabilities: true`. Metis shows guesses to editors and admins only and
+  never counts them until a person confirms them. In your own repo, trace the
+  code instead of guessing.
 - **Only what exists.** Export what the code actually does: features a user can
   reach today (`done`), or ones whose code exists but isn't reachable yet
   (`in_progress`). Never a feature or capability that only a README, spec, roadmap
@@ -81,25 +93,31 @@ format and ontology spec. The rules that shape everything you extract:
 6. **Wire the edges.** Only real technical dependencies — "the API client must
    exist before the sync job" — not thematic similarity. Sparse and true beats
    dense and speculative.
-7. **Write the product.** Exactly one product for the project (name, summary).
+7. **List the technologies.** The languages, frameworks, runtimes, services and
+   key libraries named by lockfiles, package manifests, Dockerfiles or compose
+   files go in `technologies`, each with `products` set to this product's ref
+   (skip dev-only tooling). Use the exact `kind` and `layer` values from the
+   format. A `satisfies` entry without `confidence` says the capability's code is
+   built on that technology: write it only when you saw that in the code. An
+   inferred link carries a `confidence` and becomes a guess.
+8. **Write the product.** Exactly one product for the project (name, summary).
    Optionally add a `decomposition` (PRD) if there's a concrete spec-worthy
    initiative: epics pin capabilities, stories pin features, tickets are sized for
    one Claude session with `context_budget` `S` or `M` — metis rejects `L`
    tickets at PRD approval, so split them.
-8. **Write and validate.** Write `metis-seed.json` at the repo root (or where
-   the user asks), then:
+9. **Write and validate.** Write `metis-seed.json` at the repo root (or where
+   the user asks), then run this skill's validator on it:
 
    ```sh
-   python3 ~/.claude/skills/metis-export/scripts/validate_seed.py metis-seed.json
+   python3 <this skill's directory>/scripts/validate_seed.py metis-seed.json
    ```
 
    Fix every error; the loader runs the same checks and will refuse the file.
-9. **Hand off.** Show the user a compact summary (counts per collection, the
-   capability map as a bullet tree marking which capabilities were reused from the
-   inventory and which are new) and tell them: load it from the metis repo with the
-   `metis-seed-instance` skill —
-   `python3 .claude/skills/metis-seed-instance/scripts/seed_instance.py <path> --dry-run`
-   then without `--dry-run`.
+10. **Hand off.** Show the user a compact summary (counts per collection, guesses
+   by confidence, the capability map as a bullet tree marking which capabilities
+   were reused from the inventory and which are new) and tell them how to load it:
+   in metis, on the Products page choose "Import a seed file", or use the
+   `metis-seed-instance` skill (dry-run first).
 
 ## Judgment calls
 

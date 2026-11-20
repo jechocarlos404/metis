@@ -85,15 +85,19 @@ services:
       KEYCLOAK_REALM: metis
       KEYCLOAK_MCP_CLIENT: metis-mcp
       KEYCLOAK_MCP_CLIENT_SECRET: ${METIS_MCP_CLIENT_SECRET:-dev-mcp-secret}
-      # Callers must present this. The server refuses to start SSE without it,
-      # because this process holds an API token and an open port would lend it
-      # to anyone who can reach the address.
-      MCP_SSE_TOKEN: ${METIS_MCP_SSE_TOKEN:-dev-mcp-sse-token}
+      # Callers must present this. There is no default: without it the server
+      # refuses to start SSE, because this process holds an API token and an
+      # open port would lend it to anyone who can reach the address. Generate
+      # one into .env: echo "METIS_MCP_SSE_TOKEN=$(openssl rand -hex 32)" >> .env
+      # (Empty rather than ${VAR:?}, which would fail `docker compose up`
+      # without the mcp profile too.)
+      MCP_SSE_TOKEN: ${METIS_MCP_SSE_TOKEN:-}
       AUTH_ENABLED: ${AUTH_ENABLED:-true}
-    # Reachable on the compose network only. Publish deliberately, with a real
-    # MCP_SSE_TOKEN, if something outside needs it.
-    expose:
-      - "8001"
+    # Published on loopback only, for agents on this machine (the Claude Code
+    # plugin in plugin/). The server also rejects any Host header but
+    # localhost, 127.0.0.1 and mcp, which stops DNS rebinding from a browser.
+    ports:
+      - "127.0.0.1:8001:8001"
     depends_on:
       backend:
         condition: service_healthy

@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """Seed a running metis instance from a metis-seed JSON file (format v1).
 
-Stdlib only — no dependencies. Idempotent and add-only: existing entities are
+Stdlib only, no dependencies. Idempotent and add-only: existing entities are
 matched (goals by type+title; capabilities and products by name; features by
-(product, name);
-edges by src+dst+kind; motivations by pair) and reused rather than duplicated,
-so re-running the same file is safe. Nothing is ever updated or deleted.
+(product, name); technologies by slug; edges by src+dst+kind; motivations,
+product technologies and satisfactions by pair) and reused rather than
+duplicated, so re-running the same file is safe. Nothing is deleted; the one
+update is a guess's confidence and basis when the same guess already exists.
 
 Usage:
     python3 seed_instance.py metis-seed.json [--base-url http://localhost:8000] [--dry-run]
@@ -13,22 +14,44 @@ Usage:
 
 import argparse
 import json
+import re
 import sys
 import urllib.error
 import urllib.request
+
+# ---------------------------------------------------------------------------
+# Validation: keep everything from GOAL_TYPES through validate() identical to
+# ../../metis-export/scripts/validate_seed.py
+# ---------------------------------------------------------------------------
 
 GOAL_TYPES = {"org", "product"}
 WORK_STATUSES = {"pending", "in_progress", "done"}
 MATURITIES = {"planned", "alpha", "beta", "ga", "deprecated", "retired"}
 EDGE_KINDS = {"DEPENDS_ON", "BLOCKS", "RELATES_TO"}
 CONTEXT_BUDGETS = {"S", "M", "L"}
+CONFIDENCES = {"low", "medium", "high"}
+TECH_KINDS = {"language", "framework", "library", "runtime", "service", "model", "protocol"}
+TECH_LAYERS = {"data", "api", "web", "agent", "infra", "ops"}
+TECH_FITS = {"native", "partial", "workaround"}
 
-DRY_PREFIX = "dry-run:"
+
+def slugify(value):
+    """The backend's slug rule: lowercase kebab, '' when nothing survives."""
+    return re.sub(r"[^a-z0-9]+", "-", value.strip().lower()).strip("-")
 
 
-# ---------------------------------------------------------------------------
-# Validation — keep in sync with skills/metis-export/scripts/validate_seed.py
-# ---------------------------------------------------------------------------
+def tech_slug(tech):
+    """A technology's identity: its explicit slug, else one derived from its name."""
+    if tech.get("slug") is not None:
+        return tech["slug"]
+    return slugify(tech["name"]) if isinstance(tech.get("name"), str) else ""
+
+
+def _check_guess(errors, where, item):
+    if item.get("confidence") not in CONFIDENCES:
+        errors.append(f"{where}: confidence must be one of {sorted(CONFIDENCES)}")
+    if item.get("basis") is not None and not isinstance(item["basis"], str):
+        errors.append(f"{where}: basis must be a string")
 
 
 def _check_priority(errors, where, item):
@@ -162,11 +185,82 @@ def validate(doc):
                     errors.append(f"{where}: capability ref {ref!r} does not match a capability")
             if len(set(map(str, refs))) != len(refs):
                 errors.append(f"{where}: capability_refs lists a capability twice")
+        guesses = f.get("capability_guesses")
+        if guesses is not None and not isinstance(guesses, list):
+            errors.append(f"{where}: capability_guesses must be a list")
+        elif guesses:
+            confirmed = set(map(str, refs)) if isinstance(refs, list) else set()
+            guessed = set()
+            for j, g in enumerate(guesses):
+                gwhere = f"{where}.capability_guesses[{j}]"
+                if not isinstance(g, dict):
+                    errors.append(f"{gwhere}: must be an object")
+                    continue
+                ref = g.get("capability_ref")
+                if not isinstance(ref, str) or ref not in cap_refs:
+                    errors.append(f"{gwhere}: capability_ref {ref!r} does not match a capability")
+                elif ref in confirmed:
+                    errors.append(f"{gwhere}: {ref!r} is also in capability_refs "
+                                  "(a link is confirmed or guessed, not both)")
+                elif ref in guessed:
+                    errors.append(f"{gwhere}: {ref!r} is guessed twice")
+                guessed.add(ref)
+                _check_guess(errors, gwhere, g)
         if f.get("product_ref") is not None and f["product_ref"] not in prod_refs:
             errors.append(f"{where}: unknown product_ref {f['product_ref']!r}")
         _check_priority(errors, where, f)
         _check_status(errors, where, f)
         _check_facets(errors, where, f)
+
+    check_refs("technologies")
+    seen_slugs = set()
+    for i, t in enumerate(doc.get("technologies") or []):
+        where = f"technologies[{i}] ({t.get('ref')})"
+        if not isinstance(t.get("name"), str) or not t["name"]:
+            errors.append(f"{where}: 'name' is required")
+        slug = tech_slug(t)
+        if not isinstance(slug, str) or not slug:
+            errors.append(f"{where}: slug must be a non-empty string "
+                          "(give one when the name yields none)")
+        elif slug in seen_slugs:
+            errors.append(f"{where}: duplicate technology slug {slug!r}")
+        else:
+            seen_slugs.add(slug)
+        if t.get("kind") not in TECH_KINDS:
+            errors.append(f"{where}: kind must be one of {sorted(TECH_KINDS)}")
+        if t.get("layer") is not None and t["layer"] not in TECH_LAYERS:
+            errors.append(f"{where}: layer must be one of {sorted(TECH_LAYERS)}")
+        products = t.get("products")
+        if products is not None and (
+            not isinstance(products, list)
+            or any(not isinstance(ref, str) or ref not in prod_refs for ref in products)
+        ):
+            errors.append(f"{where}: products must be product refs")
+        satisfies = t.get("satisfies")
+        if satisfies is not None and not isinstance(satisfies, list):
+            errors.append(f"{where}: satisfies must be a list")
+            continue
+        linked = set()
+        for j, s in enumerate(satisfies or []):
+            swhere = f"{where}.satisfies[{j}]"
+            if not isinstance(s, dict):
+                errors.append(f"{swhere}: must be an object")
+                continue
+            ref = s.get("capability_ref")
+            if not isinstance(ref, str) or ref not in cap_refs:
+                errors.append(f"{swhere}: capability_ref {ref!r} does not match a capability")
+            elif ref in linked:
+                errors.append(f"{swhere}: {ref!r} is listed twice")
+            linked.add(ref)
+            if s.get("confidence") is None:  # confirmed: observed in code
+                if s.get("fit") not in TECH_FITS:
+                    errors.append(f"{swhere}: fit must be one of {sorted(TECH_FITS)}")
+                if s.get("basis") is not None and not isinstance(s["basis"], str):
+                    errors.append(f"{swhere}: basis must be a string")
+            else:  # a guess
+                _check_guess(errors, swhere, s)
+                if s.get("fit") is not None and s["fit"] not in TECH_FITS:
+                    errors.append(f"{swhere}: fit must be one of {sorted(TECH_FITS)}")
 
     seen_edges = set()
     precedence = {}  # feature ref -> set of feature refs it depends on
@@ -270,6 +364,8 @@ def validate(doc):
 # Loading
 # ---------------------------------------------------------------------------
 
+DRY_PREFIX = "dry-run:"
+
 
 def prune(payload):
     return {k: v for k, v in payload.items() if v is not None}
@@ -324,8 +420,16 @@ class Api:
             sys.exit(f"error: GET {path} returned {status}: {body}")
         return body
 
+    def get_optional(self, path):
+        """For endpoints an older instance may not have yet: absent reads as []."""
+        status, body = self.request("GET", path)
+        return body if status == 200 else []
+
     def post(self, path, payload):
         return self.request("POST", path, payload)
+
+    def put(self, path, payload):
+        return self.request("PUT", path, payload)
 
 
 class Loader:
@@ -340,6 +444,9 @@ class Loader:
         self.cap_ids = {}
         self.feat_ids = {}
         self.prod_ids = {}
+        self.tech_ids = {}
+        self.feat_caps = {}  # feature ref -> capability ids it realizes (confirmed)
+        self._guesses = None
 
     def note(self, collection, action):
         self.counts[(collection, action)] = self.counts.get((collection, action), 0) + 1
@@ -431,15 +538,17 @@ class Loader:
         # are — the seeder never rewrites a row. Identity is (product, name):
         # features belong to their product, so another product's "Sign in" is
         # a different feature, not a reuse.
-        existing = {
-            (f.get("product_id"), f["name"]): f["id"] for f in self.api.get("/api/features")
-        }
+        instance = self.api.get("/api/features")
+        existing = {(f.get("product_id"), f["name"]): f["id"] for f in instance}
+        caps_of = {f["id"]: set(f.get("capability_ids") or []) for f in instance}
         for f in self.doc.get("features") or []:
             key = (self.prod_ids.get(f.get("product_ref")), f["name"])
             if key in existing:
                 self.feat_ids[f["ref"]] = existing[key]
+                self.feat_caps[f["ref"]] = caps_of.get(existing[key], set())
                 self.note("features", "reused")
                 continue
+            self.feat_caps[f["ref"]] = {self.cap_ids[r] for r in feature_capability_refs(f)}
             self.feat_ids[f["ref"]] = self.create(
                 "features",
                 "/api/features",
@@ -456,6 +565,159 @@ class Loader:
                 },
                 f["name"],
             )
+
+    def guesses(self):
+        """Guesses already in the instance, keyed by their (capability, feature
+        or tech) pair. An instance without the guesses endpoint has none."""
+        if self._guesses is None:
+            self._guesses = {
+                (g["capability_id"], g.get("feature_id") or g.get("tech_id")): g
+                for g in self.api.get_optional("/api/guesses")
+            }
+        return self._guesses
+
+    def post_guess(self, payload, label):
+        """Create or update one guess. The endpoint is idempotent per pair, so
+        a re-import updates confidence and basis instead of stacking rows."""
+        other = payload.get("feature_id") or payload.get("tech_id")
+        current = self.guesses().get((payload["capability_id"], other))
+        exists = current is not None
+        if exists and all(current.get(k) == payload.get(k) for k in ("confidence", "basis", "fit")):
+            self.note("guesses", "reused")
+            return
+        if self.dry_run or str(other).startswith(DRY_PREFIX):
+            self.note("guesses", "would update" if exists else "would create")
+            return
+        status, body = self.api.post("/api/guesses", prune(payload))
+        if status in (200, 201):
+            self.note("guesses", "updated" if exists else "created")
+        else:
+            self.warnings.append(f"guess {label} rejected ({status}): {body}")
+            self.note("guesses", "rejected")
+
+    def load_feature_guesses(self):
+        # Reused features get their guesses too: guesses arrive gradually, on
+        # each product's next export, mostly for features metis already has.
+        for f in self.doc.get("features") or []:
+            fid = self.feat_ids[f["ref"]]
+            for g in f.get("capability_guesses") or []:
+                cap_id = self.cap_ids[g["capability_ref"]]
+                label = f"{f['ref']} ~> {g['capability_ref']}"
+                if cap_id in self.feat_caps.get(f["ref"], set()):
+                    self.notes.append(f"guess {label} skipped: the link is already confirmed")
+                    self.note("guesses", "skipped")
+                    continue
+                self.post_guess(
+                    {
+                        "capability_id": cap_id,
+                        "feature_id": fid,
+                        "confidence": g["confidence"],
+                        "basis": g.get("basis"),
+                    },
+                    label,
+                )
+
+    def all_technologies(self):
+        rows, offset = [], 0
+        while True:
+            page = self.api.get(f"/api/tech?limit=200&offset={offset}")
+            rows.extend(page["rows"])
+            offset += 200
+            if offset >= page["total"] or not page["rows"]:
+                return rows
+
+    def load_technologies(self):
+        techs = self.doc.get("technologies") or []
+        if not techs:
+            return
+        existing = {t["slug"]: t["id"] for t in self.all_technologies()}
+        for t in techs:
+            slug = tech_slug(t)
+            if slug in existing:
+                self.tech_ids[t["ref"]] = existing[slug]
+                self.note("technologies", "reused")
+                continue
+            self.tech_ids[t["ref"]] = self.create(
+                "technologies",
+                "/api/tech",
+                {"slug": slug, "name": t["name"], "kind": t["kind"], "layer": t.get("layer")},
+                t["name"],
+            )
+
+        # Observed usage. PUT resets an existing row's slot binding, so pairs
+        # already recorded are left alone.
+        usage = {}
+        for t in techs:
+            tid = self.tech_ids[t["ref"]]
+            for prod_ref in t.get("products") or []:
+                pid = self.prod_ids[prod_ref]
+                if str(pid).startswith(DRY_PREFIX) or str(tid).startswith(DRY_PREFIX):
+                    self.note("tech_usage", "would create")
+                    continue
+                if pid not in usage:
+                    usage[pid] = {
+                        u["tech_id"] for u in self.api.get(f"/api/stacks/usage?product_id={pid}")
+                    }
+                if tid in usage[pid]:
+                    self.note("tech_usage", "reused")
+                elif self.dry_run:
+                    self.note("tech_usage", "would create")
+                else:
+                    status, body = self.api.put(
+                        f"/api/stacks/usage?product_id={pid}", {"tech_id": tid}
+                    )
+                    if status not in (200, 201):
+                        sys.exit(f"error: usage {t['ref']} by {prod_ref} returned {status}: {body}")
+                    usage[pid].add(tid)
+                    self.note("tech_usage", "created")
+
+        confirmed = {
+            (s["tech_id"], s["capability_id"]) for s in self.api.get("/api/tech/satisfactions")
+        }
+        for t in techs:
+            tid = self.tech_ids[t["ref"]]
+            for s in t.get("satisfies") or []:
+                cap_id = self.cap_ids[s["capability_ref"]]
+                label = f"{t['ref']} satisfies {s['capability_ref']}"
+                if s.get("confidence") is not None:
+                    if (tid, cap_id) in confirmed:
+                        self.notes.append(f"guess {label} skipped: the link is already confirmed")
+                        self.note("guesses", "skipped")
+                        continue
+                    self.post_guess(
+                        {
+                            "capability_id": cap_id,
+                            "tech_id": tid,
+                            "confidence": s["confidence"],
+                            "basis": s.get("basis"),
+                            "fit": s.get("fit"),
+                        },
+                        label,
+                    )
+                    continue
+                if (tid, cap_id) in confirmed:
+                    self.note("satisfactions", "reused")
+                    continue
+                if self.dry_run:
+                    self.note("satisfactions", "would create")
+                    continue
+                status, body = self.api.post(
+                    "/api/tech/satisfactions",
+                    prune(
+                        {
+                            "tech_id": tid,
+                            "capability_id": cap_id,
+                            "fit": s["fit"],
+                            "notes": s.get("basis"),
+                        }
+                    ),
+                )
+                if status == 201:
+                    self.note("satisfactions", "created")
+                elif status == 409:
+                    self.note("satisfactions", "reused")
+                else:
+                    sys.exit(f"error: satisfaction {label} returned {status}: {body}")
 
     def load_edges(self):
         existing = {
@@ -603,6 +865,10 @@ class Loader:
             "products",
             "bundles",
             "decompositions",
+            "technologies",
+            "tech_usage",
+            "satisfactions",
+            "guesses",
         ]
         for collection in order:
             actions = {a: n for (c, a), n in self.counts.items() if c == collection}
@@ -656,7 +922,9 @@ def main():
     loader.load_motivations()
     loader.load_product_rows()
     loader.load_features()
+    loader.load_feature_guesses()
     loader.load_edges()
+    loader.load_technologies()
     loader.load_products()
 
     print(("dry run — nothing written" if args.dry_run else "seed complete") + ":")

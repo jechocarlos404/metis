@@ -5,6 +5,7 @@ from app.auth.deps import (
     enforce_rbac,
     human_action,
     require_admin,
+    require_editor,
 )
 from app.auth.jwt import Principal, TokenVerifier, surface_from_azp
 
@@ -17,5 +18,6 @@ __all__ = [
     "enforce_rbac",
     "human_action",
     "require_admin",
+    "require_editor",
     "surface_from_azp",
 ]

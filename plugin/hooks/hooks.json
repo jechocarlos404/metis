@@ -1,0 +1,41 @@
+{
+  "description": "Read-only metis hooks: a product brief at session start, a reuse nudge when a prompt names a known capability, and a once-per-session reminder to re-export the seed file after code changes. Each is silent when metis is unreachable or the repo is not a known product.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3",
+            "args": ["-I", "${CLAUDE_PLUGIN_ROOT}/hooks/metis_hooks.py", "session-start"],
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3",
+            "args": ["-I", "${CLAUDE_PLUGIN_ROOT}/hooks/metis_hooks.py", "user-prompt"],
+            "timeout": 8
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3",
+            "args": ["-I", "${CLAUDE_PLUGIN_ROOT}/hooks/metis_hooks.py", "stop"],
+            "timeout": 8
+          }
+        ]
+      }
+    ]
+  }
+}

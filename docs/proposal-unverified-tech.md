@@ -38,9 +38,19 @@ Stacks until data exists.
 4. **UI:** a "Confirm" / "Not right" pair on each unverified row of the
    capability page's Build or buy section. Confirming is a desktop write.
 
-## Questions for the owner
+## Owner answers (2026-11-20)
 
-- Is "observed usage is real, inferred satisfaction is unverified" the line you
-  meant by "adjacent parts"?
-- Should unverified rows appear for viewers, or only editors?
-- Run exports for all 17 products once this exists, or only on the next re-seed?
+- **What counts as a guess.** A link is inferred when nothing confirms it: no
+  access to the feature itself, no confirmation from the user that it exists,
+  no access to the codebase, nothing on the marketing site. Metis then says
+  only "this feature is most likely built from these capabilities, confidence
+  low / medium / high". So the rule covers feature-to-capability links
+  (`feature_capabilities`) as well as technology-to-capability links
+  (`tech_satisfactions`), not only the technology plane.
+- **Who sees guesses.** Editors and admins. Viewers see confirmed links only.
+- **When.** Gradually, as each product is next exported and re-seeded. No bulk
+  re-export.
+- **Postgres 19 graph features.** Asked 2026-11-20. Postgres 19 shipped on
+  2026-11-19, but its release notes do not include SQL/PGQ (`GRAPH_TABLE`),
+  so there are no built-in graph queries to adopt. The repo runs
+  `postgres:16-alpine` and keeps graph walks in Python.

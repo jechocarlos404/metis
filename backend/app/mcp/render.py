@@ -433,6 +433,11 @@ def capability(
         f"Our products: {_names(entry['products']) or '—'}",
         f"External products that have it: {_names(entry['external_products']) or '—'}",
     ]
+    anchors = entry.get("evidence_anchors") or []
+    if anchors:
+        # Paths as an export recorded them, relative to the exporting repo's
+        # root. They belong to the capability, not to any one product.
+        lines.append(f"Evidence ({len(anchors)} path(s), as exported): {', '.join(anchors)}")
     if features:
         lines += ["", f"Our features ({len(features)}):"]
         lines += _table(

@@ -27,6 +27,8 @@ export function Tabs({ tabs = [], value, onChange, style }) {
             onClick={() => onChange && onChange(tab.value)}
             onFocus={(e) => reveal(strip.current, e.currentTarget)}
             style={{
+              // A tab keeps its label on one line; a strip too wide scrolls instead.
+              flex: "none", whiteSpace: "nowrap",
               padding: "8px 14px", fontSize: "var(--text-sm)", background: "none", border: "none",
               borderBottom: "2px solid " + (active ? "var(--accent)" : "transparent"),
               marginBottom: "-1px", cursor: "pointer",

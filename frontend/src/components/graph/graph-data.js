@@ -314,14 +314,13 @@ export function capabilityHubs(features, capabilityById) {
 
 /**
  * Hubs for Group by goal: feature -> its capabilities -> the goals they
- * motivate. Only goals under `ownRoot` (the product goal's top goal) count,
- * the same rule as the feature panel's Why: another product's goal reaches a
- * feature through a shared capability, which is reuse, not motivation. With
- * no `ownRoot` every goal counts.
+ * motivate. Only goals the product owns count (`product_id` from /api/goals,
+ * the one ownership rule), the same rule as the feature panel's Why: another
+ * product's goal reaches a feature through a shared capability, which is
+ * reuse, not motivation. With no `ownProductId` every goal counts.
  */
-export function goalHubs(features, motivations, goals, ownRoot) {
+export function goalHubs(features, motivations, goals, ownProductId) {
   const goalById = new Map(goals.map((g) => [g.id, g]));
-  const goalParent = new Map(goals.map((g) => [g.id, g.parent_goal_id]));
   const goalsByCap = new Map();
   for (const m of motivations) {
     if (!goalsByCap.has(m.capability_id)) goalsByCap.set(m.capability_id, new Set());
@@ -334,7 +333,7 @@ export function goalHubs(features, motivations, goals, ownRoot) {
     for (const cid of f.capability_ids ?? []) {
       for (const gid of goalsByCap.get(cid) ?? []) {
         const g = goalById.get(gid);
-        if (!g || (ownRoot && goalRoot(goalParent, gid) !== ownRoot)) continue;
+        if (!g || (ownProductId && g.product_id !== ownProductId)) continue;
         const id = `goal:${gid}`;
         ids.add(id);
         const org = g.goal_type === "org";

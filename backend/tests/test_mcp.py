@@ -1048,7 +1048,7 @@ async def test_sdk_and_resource_errors_end_with_an_open_line(api):
 
     read = server.server.request_handlers[types.ReadResourceRequest]
     for uri, said, href in [
-        ("metis://tech/postgresql", "Refused (404): Technology `postgresql` not found", "/tech"),
+        ("metis://tech/postgresql", "Refused (404): Technology not found", "/tech"),
         ("metis://tech/Bad", "Not a slug: 'Bad'. Slugs are lowercase letters, digits and dashes.", "/tech"),
         ("metis://stacks/nobody", "No product 'nobody' in metis. The products tool lists their slugs.", "/stacks"),
     ]:

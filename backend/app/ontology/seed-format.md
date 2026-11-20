@@ -311,9 +311,10 @@ satisfies. A technology is shared across products, like a capability.
   file's value: exporting again after a feature ships marks it `done`. This can
   overwrite a value someone set by hand in metis (a file that states `true`
   reopens an `unknown_capabilities` flag someone cleared), so the dry run lists
-  every overwrite per feature, for example
-  `feature "Export a PRD": status in_progress → done; description changed`,
-  and the import reports the same. A field the file leaves out is left alone,
+  every overwrite per feature with the old and new value, long text trimmed
+  to where it differs, for example
+  `feature "Export a PRD": status in_progress → done; description "Exports a PRD." → "Exports a PRD as Markdown."`
+  (the app shows the status in plain words), and the import reports the same. A field the file leaves out is left alone,
   and the feature's name, priority, priority rationale and facets never change:
   a file that only adds links (a gaps file, say) should leave out `status` and
   `description`. Its `capability_guesses` are still loaded, so a product's next

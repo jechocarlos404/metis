@@ -173,7 +173,7 @@ describe("capability identity is the slug", () => {
     assert.deepEqual(body.counts.capabilities, { reused: 1 });
     assert.equal(metis.requests.filter((r) => r.method === "POST" && r.path === "/api/capabilities").length, 0);
     assert.equal(metis.capabilities.length, 1);
-    assert.ok(body.notes.includes('capability "Keyword search" is the existing "Keyword Search" (slug keyword-search); reused as it is'));
+    assert.ok(body.notes.includes('capability "Keyword search" is the existing "Keyword Search"; reused as it is'));
   });
 
   test("a renamed capability, whose slug kept its old name, is found by its current name", async () => {
@@ -233,7 +233,7 @@ describe("capability identity is the slug", () => {
     const { status, body } = await importSeed(doc, { dryRun: false });
     assert.equal(status, 200);
     assert.deepEqual(body.counts.capabilities, { reused: 2 });
-    assert.ok(body.notes.includes('capability "Vector search" is the existing "Vector Search" (slug vector-search); reused as it is'));
+    assert.ok(body.notes.includes('capability "Vector search" is the existing "Vector Search"; reused as it is'));
   });
 
   test("the dry run names each capability it would create, with the nearest existing names", async () => {
@@ -252,7 +252,7 @@ describe("a product's own seed is the authority on its features", () => {
     const { body } = await importSeed(seed());
     assert.equal(body.dryRun, true);
     assert.deepEqual(body.counts.features, { reused: 1, "would update": 1 });
-    assert.ok(body.notes.includes(`feature "${PLAN}": status in_progress → done; description changed`));
+    assert.ok(body.notes.includes(`feature "${PLAN}": status in progress → done; description "Plans." → "Plans in phases."`));
     assert.deepEqual(metis.writes, []);
     assert.equal(metis.features[0].status, "in_progress");
   });
@@ -263,7 +263,7 @@ describe("a product's own seed is the authority on its features", () => {
     const patch = metis.requests.find((r) => r.method === "PATCH");
     assert.deepEqual(patch.body, { status: "done", description: "Plans in phases." });
     assert.deepEqual(body.counts.features, { reused: 1, updated: 1 });
-    assert.ok(body.notes.includes(`feature "${PLAN}": status in_progress → done; description changed`));
+    assert.ok(body.notes.includes(`feature "${PLAN}": status in progress → done; description "Plans." → "Plans in phases."`));
     assert.equal(metis.features[0].status, "done");
     assert.equal(metis.features[0].priority, 2);
   });
@@ -356,6 +356,22 @@ describe("unseed uses the importer's capability identity", () => {
       features: [{ ref: "f-plan", product_ref: "p", name: PLAN, capability_refs: ["c1", "c2"] }],
     }));
     assert.deepEqual(wouldDelete(body).sort(), ['would delete capability "Keyword Search"', 'would delete capability "Keyword search"']);
+  });
+});
+
+describe("a description change shows both versions", () => {
+  const plan = (description) => [{ ref: "f-plan", product_ref: "p", name: PLAN, capability_refs: ["c-search"], description }];
+
+  test("trimmed to where they differ", async () => {
+    use(existing({ feature: { description: "Plans delivery in phases, sized for one coding session each, and orders them by dependency." } }));
+    const { body } = await importSeed(seed({ features: plan("Plans delivery in phases, sized for one coding session each, and orders them by risk.") }));
+    assert.ok(body.notes.includes(`feature "${PLAN}": description "…and orders them by dependency." → "…and orders them by risk."`));
+  });
+
+  test("a feature with no description yet", async () => {
+    use(existing({ feature: { description: null } }));
+    const { body } = await importSeed(seed({ features: plan("Plans in phases.") }));
+    assert.ok(body.notes.includes(`feature "${PLAN}": description empty → "Plans in phases."`));
   });
 });
 

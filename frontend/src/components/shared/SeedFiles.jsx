@@ -6,18 +6,36 @@ import { api } from "../../lib/api.js";
 // metis-seed/v1 JSON file), and how a project moves between instances.
 // Inline panels, not dialogs — they live on Get started and Settings.
 
+// The importer's collections and actions in people's words; the raw key
+// stays one hover away.
+const COLLECTION_WORDS = {
+  goals: "goals",
+  capabilities: "capabilities",
+  motivations: "goal links",
+  features: "features",
+  edges: "links between features",
+  products: "products",
+  bundles: "capabilities added by hand",
+  decompositions: "plan documents",
+  technologies: "technologies",
+  tech_usage: "technologies in use",
+  satisfactions: "technology links",
+  guesses: "guesses",
+};
+const ACTION_WORDS = { reused: "already in metis", absent: "not in metis" };
+
 function formatCounts(collection, counts) {
-  if (!counts) return null;
-  const detail = Object.entries(counts)
-    .filter(([, value]) => value > 0)
-    .map(([action, value]) => `${value} ${action}`)
-    .join(", ");
-  return detail ? `${collection}: ${detail}` : null;
+  const entries = Object.entries(counts || {}).filter(([, value]) => value > 0);
+  if (entries.length === 0) return null;
+  return {
+    key: collection,
+    text: `${COLLECTION_WORDS[collection]}: ${entries.map(([action, value]) => `${value} ${ACTION_WORDS[action] ?? action}`).join(", ")}`,
+    raw: `${collection}: ${entries.map(([action, value]) => `${value} ${action}`).join(", ")}`,
+  };
 }
 
 export const summarizeCounts = (counts) =>
-  ["goals", "capabilities", "motivations", "features", "edges", "products", "bundles", "decompositions",
-    "technologies", "tech_usage", "satisfactions", "guesses"]
+  Object.keys(COLLECTION_WORDS)
     .map((k) => formatCounts(k, counts?.[k]))
     .filter(Boolean);
 
@@ -33,7 +51,12 @@ function ResultBox({ title, result, tone }) {
     <div role="status" style={{ border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", background: "var(--surface-inset)", padding: 12, display: "flex", flexDirection: "column", gap: 8 }}>
       <div style={{ fontSize: "var(--text-sm)", fontWeight: "var(--weight-semibold)", color: tone === "danger" ? "var(--danger-fg)" : "var(--text-heading)" }}>{title}</div>
       {result.counts && (
-        <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>{summarizeCounts(result.counts).join(" · ") || "Nothing would change."}</div>
+        <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>
+          {summarizeCounts(result.counts).map((c, i) => (
+            <React.Fragment key={c.key}>{i > 0 && " · "}<span title={c.raw}>{c.text}</span></React.Fragment>
+          ))}
+          {summarizeCounts(result.counts).length === 0 && "Nothing would change."}
+        </div>
       )}
       {(result.notes || []).map((note, i) => (
         <div key={`n${i}`} style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>{note}</div>

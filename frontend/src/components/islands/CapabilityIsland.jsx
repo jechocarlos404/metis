@@ -476,7 +476,7 @@ function BothWays({ impact, name }) {
   if (both.length === 0) return null;
   return (
     <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>
-      On both lists: {andList(both)}. Some of {both.length === 1 ? "its" : "their"} features need a {name} feature;
+      On both lists: {andList(both)}. Some of {both.length === 1 ? "its" : "their"} features need a feature built on {name};
       others are needed by one. That is two links, not a loop.
     </div>
   );

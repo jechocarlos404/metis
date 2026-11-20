@@ -2,7 +2,7 @@ import React from "react";
 import { Icon, IconButton } from "../../ds";
 import { createForceGraph } from "./forceGraphEngine.js";
 import { buildFeatureGraph, buildHubGraph, buildAdjacency, edgeStyle, nodeAccentVar, wrapLabel, NODE_W, NODE_H, HUB_W, HUB_H } from "./graph-data.js";
-import { EDGE, count, statusLabel } from "../../lib/words.js";
+import { EDGE, LAYER, count, statusLabel } from "../../lib/words.js";
 import { Term } from "../shared/Term.jsx";
 
 // useLayoutEffect must win in the browser (it runs before paint, so a
@@ -27,6 +27,7 @@ export function FeatureGraphView({ layout, hubs, selectedId, onSelect, recheckSt
   const edgeElsRef = React.useRef(new Map());
   const onSelectRef = React.useRef(onSelect);
   const hasFitRef = React.useRef(false);
+  const legendRef = React.useRef(null);
 
   const [pinned, setPinned] = React.useState(() => new Set());
   const [hoveredId, setHoveredId] = React.useState(null);
@@ -59,7 +60,10 @@ export function FeatureGraphView({ layout, hubs, selectedId, onSelect, recheckSt
   // change would throw away simulation state (positions/velocities) and
   // defeat the entire point of smooth transitions between data updates.
   useIsomorphicLayoutEffect(() => {
+    // A narrow graph starts with the key folded; an open key is framed around, never drawn over.
+    if (svgRef.current.clientWidth < 560) legendRef.current.open = false;
     const engine = createForceGraph({
+      fitInsetLeft: () => (legendRef.current?.open ? legendRef.current.offsetLeft + legendRef.current.offsetWidth : 0),
       svgEl: svgRef.current,
       viewportEl: viewportRef.current,
       nodeSize: { width: NODE_W, height: NODE_H },
@@ -226,11 +230,11 @@ export function FeatureGraphView({ layout, hubs, selectedId, onSelect, recheckSt
         onZoomOut={() => engineRef.current?.zoomBy(1 / 1.4)}
         onFit={() => engineRef.current?.fitToView()}
       />
-      <GraphLegend cutActive={cutStates != null} recheckActive={recheckStates != null} hubs={hubs} graphData={graphData} />
+      <GraphLegend legendRef={legendRef} cutActive={cutStates != null} recheckActive={recheckStates != null} hubs={hubs} graphData={graphData} />
 
       <div style={{
         position: "absolute", bottom: 10, left: 12, pointerEvents: "none",
-        fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-secondary)",
+        fontFamily: "var(--font-mono)", fontSize: "var(--text-2xs)", color: "var(--text-secondary)",
       }}>
         drag to move · double-click to release · scroll to zoom
       </div>
@@ -376,18 +380,20 @@ const lineMark = (opacity) => (
   <svg width="16" height="6"><line x1="0" y1="3" x2="16" y2="3" stroke="var(--ink-4)" strokeWidth="1" opacity={opacity} /></svg>
 );
 
-function GraphLegend({ cutActive, recheckActive, hubs, graphData }) {
+function GraphLegend({ legendRef, cutActive, recheckActive, hubs, graphData }) {
   const CUT_TIERS = [
     ["target", "var(--accent)", 1],
     ["needed", "var(--ok-fg)", 1],
     ["can wait", "var(--text-secondary)", 0.3],
   ];
+  const shown = new Set(graphData.nodes.map((n) => n.layer));
+  const layers = Object.keys(LAYER).filter((l) => shown.has(l));
   return (
-    <details open style={{
+    <details ref={legendRef} open style={{
       position: "absolute", top: 10, left: 10,
       background: "var(--surface-card)", border: "1px solid var(--border-hairline)",
       borderRadius: "var(--radius-sm)", boxShadow: "var(--shadow-card)", padding: "6px 10px",
-      fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-secondary)",
+      fontFamily: "var(--font-mono)", fontSize: "var(--text-2xs)", color: "var(--text-secondary)",
     }}>
       <summary style={{ cursor: "pointer", color: "var(--text-heading)" }}>Key</summary>
       <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 6 }}>
@@ -429,6 +435,10 @@ function GraphLegend({ cutActive, recheckActive, hubs, graphData }) {
         <div style={LEGEND_HEAD}>Corner dot: status</div>
         {Object.keys(STATUS_DOT).map((status) => (
           <LegendRow key={status} mark={dot(STATUS_DOT[status])}><span title={status}>{statusLabel(status)}</span></LegendRow>
+        ))}
+        {layers.length > 0 && <div style={LEGEND_HEAD}>Left dot: layer</div>}
+        {layers.map((layer) => (
+          <LegendRow key={layer} mark={dot(`var(${nodeAccentVar(layer)})`)}><Term dict={LAYER} value={layer} /></LegendRow>
         ))}
         {recheckActive && (
           <>

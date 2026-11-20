@@ -14,8 +14,8 @@ RELATES_TO participates in nothing.
 
 Containment is NOT here: the capability map (PART_OF) is relational
 (capabilities.parent_id). The bridge between planes is each feature's set of
-capability_ids (REALIZES, many-to-many), carried as a node attribute so the
-capability coupling projection can be computed from this graph alone.
+capability_ids (REALIZES, many-to-many), carried as a node attribute so
+capability impact can be computed from this graph alone.
 
 Postgres is the system of record: every mutation commits there first, then
 write-through updates this graph. Any in-memory failure marks the graph dirty
@@ -177,16 +177,23 @@ class FeatureGraph:
                 g.add_edge(dst, src)
         return g
 
-    def would_create_cycle(self, src: uuid.UUID, dst: uuid.UUID, kind: EdgeKind | str) -> bool:
+    def would_create_cycle(
+        self, src: uuid.UUID, dst: uuid.UUID, kind: EdgeKind | str
+    ) -> list[uuid.UUID] | None:
         """Write-time guard: would adding src --kind--> dst close a precedence
-        cycle? RELATES_TO never can. Unknown nodes can't be on a cycle yet."""
+        cycle? Returns the existing chain it would close (each feature needs
+        the next), else None. RELATES_TO never can. Unknown nodes can't be on
+        a cycle yet."""
         if str(kind) not in PRECEDENCE_KINDS:
-            return False
+            return None
         if not (self._g.has_node(src) and self._g.has_node(dst)):
-            return False
+            return None
         need_from, need_to = (src, dst) if str(kind) == str(EdgeKind.DEPENDS_ON) else (dst, src)
         # Adding need_from -> need_to cycles iff need_to already reaches need_from.
-        return nx.has_path(self._precedence_subgraph(), need_to, need_from)
+        try:
+            return nx.shortest_path(self._precedence_subgraph(), need_to, need_from)
+        except nx.NetworkXNoPath:
+            return None
 
     def impact(self, feature_id: uuid.UUID) -> dict[str, list[dict[str, Any]]]:
         """dependents = blast radius (who breaks); dependencies = what it needs."""
@@ -211,7 +218,8 @@ class FeatureGraph:
         retest: same-product features sharing a confirmed capability, rare
         shared capabilities first (score = sum of 1 / product features using
         it). A capability used by more than half of the product's features, and
-        by at least 6, is broad: counted, not listed. elsewhere: our other
+        by at least 6, is broad: counted, not listed, and the count is that same
+        number (this feature and its breaks included). elsewhere: our other
         products with the same capabilities, information only. Crosses the
         bridge explicitly; capability_ids are confirmed links, never guesses."""
         if not self._g.has_node(feature_id):
@@ -263,7 +271,7 @@ class FeatureGraph:
                 {
                     "id": str(c),
                     "name": capability_names.get(c, str(c)),
-                    "features": len(users[c] - skip),
+                    "features": len(users[c]),
                 }
                 for c in broad_ids
             ),
@@ -374,37 +382,33 @@ class FeatureGraph:
             for cycle in islice(nx.simple_cycles(dep), limit)
         ]
 
-    # ---- capability coupling (slow-plane projection) ----
-
-    def coupling_edges(self) -> set[tuple[uuid.UUID, uuid.UUID]]:
-        """Project the precedence graph onto capabilities: (c1, c2) means some
-        feature realizing c1 needs a feature realizing c2. Computed, never
-        stored. Same-capability pairs are internal and dropped."""
-        edges: set[tuple[uuid.UUID, uuid.UUID]] = set()
-        for u, v in self._precedence_subgraph().edges:
-            for cu in self._g.nodes[u].get("capability_ids", ()):
-                for cv in self._g.nodes[v].get("capability_ids", ()):
-                    if cu != cv:
-                        edges.add((cu, cv))
-        return edges
+    # ---- capability impact (read off the feature graph) ----
 
     def capability_impact(self, capability_ids: set[uuid.UUID]) -> dict[str, list[uuid.UUID]]:
-        """Blast radius at capability resolution for a submap's worth of ids:
-        dependents = capabilities whose features break, dependencies = what the
-        submap's features need. Aggregation over a subtree is the caller's job
-        (the capability service owns the PART_OF forest)."""
-        g = nx.DiGraph()
-        g.add_edges_from(self.coupling_edges())
-        dependents: set[uuid.UUID] = set()
-        dependencies: set[uuid.UUID] = set()
-        for cid in capability_ids:
-            if g.has_node(cid):
-                dependents |= nx.ancestors(g, cid)
-                dependencies |= nx.descendants(g, cid)
-        return {
-            "dependents": sorted(dependents - capability_ids, key=str),
-            "dependencies": sorted(dependencies - capability_ids, key=str),
-        }
+        """Blast radius at capability resolution for a submap's worth of ids.
+        Walks feature needs, never capability pairs: dependents = capabilities
+        of the features that need (through links of links) a feature realizing
+        the submap, dependencies = capabilities of what those features need.
+        Projecting edges onto capabilities first would let a shared capability
+        (File Storage, sign-in) bridge products that never need each other.
+        Aggregation over a subtree is the caller's job (the capability service
+        owns the PART_OF forest); so is ordering, since names live there."""
+        dep = self._precedence_subgraph()
+        seeds = [
+            n for n in self._g.nodes
+            if capability_ids.intersection(self._g.nodes[n].get("capability_ids", ()))
+        ]
+        needers: set[uuid.UUID] = set()
+        needed: set[uuid.UUID] = set()
+        for n in seeds:
+            needers |= nx.ancestors(dep, n)
+            needed |= nx.descendants(dep, n)
+
+        def capabilities_of(features: set[uuid.UUID]) -> list[uuid.UUID]:
+            found = {c for f in features for c in self._g.nodes[f].get("capability_ids", ())}
+            return sorted(found - capability_ids, key=str)
+
+        return {"dependents": capabilities_of(needers), "dependencies": capabilities_of(needed)}
 
     def layout(self) -> dict[str, Any]:
         """Server-computed positions, one block per product.

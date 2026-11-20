@@ -3,12 +3,11 @@ import { PageHeader } from "../shell/PageHeader.jsx";
 import { Badge, Button, Card, Checkbox, Dialog, Icon, Input, Select, StatusBadge, Tabs, Toast, DeleteConfirm } from "../../ds";
 import { api } from "../../lib/api.js";
 import { count, freshness, productOptions, statusLabel } from "../../lib/words.js";
-import { openChatWithPrompt } from "../../lib/chat-launch.js";
 import { useParamRestore, writeParams } from "../../lib/url-state.js";
 import { exportSeedFile } from "../shared/SeedFiles.jsx";
 import { WhatItDoes } from "../products/WhatItDoes.jsx";
 import { ProductGoals } from "../products/ProductGoals.jsx";
-import { ProductPlan, SIZE_HINT } from "../products/ProductPlan.jsx";
+import { ProductPlan, SIZE_HINT, hasPlan } from "../products/ProductPlan.jsx";
 import { downloadSnapshot } from "../products/shareSnapshot.js";
 
 const TABS = ["does", "goals", "plan"];
@@ -49,10 +48,15 @@ export default function ProductsIsland({ canWrite = true }) {
   useParamRestore("tab", (v) => setTab(TABS.includes(v) ? v : "does"));
   const selectProduct = (id) => { setProductId(id); setTab("does"); writeParams({ product: id, tab: null }, { push: true }); };
   const changeTab = (t) => { setTab(t); writeParams({ tab: t === "does" ? null : t }, { push: true }); };
-  // The plan only applies to products we build.
-  const shownTab = tab === "plan" && product?.external ? "does" : tab;
   const prd = decompositions[0];
   const strategy = strategies[0];
+  // Planning is on demand, and only for products we build: the tab shows once
+  // a plan exists, or to a writer while some of its features aren't done.
+  // Until this product's plan and features load, nobody knows yet.
+  const planKnown = detailId === productId && features != null;
+  const showPlan = planKnown && product != null && !product.external && (
+    hasPlan(product, { prd, epics, tickets, strategy }) || (canWrite && features.some((f) => f.status !== "done")));
+  const shownTab = tab !== "plan" || showPlan ? tab : planKnown || product?.external ? "does" : "plan";
 
   const loadProducts = React.useCallback(async () => {
     const [list, goalList] = await Promise.all([api("/products"), api("/goals")]);
@@ -247,19 +251,17 @@ export default function ProductsIsland({ canWrite = true }) {
 
   const closeTicket = () => { setTicketDialog(null); setConfirmingTicketDelete(false); };
 
-  const decomposePrompt = () =>
-    `Decompose the Spec "${product.name}" (${product.display_id}, product id ${productId}) into a PRD: epics must pin capabilities, stories must pin features, tickets sized S/M/L for one Claude session each. Use the current capability map and feature graph.`;
-
-  const refreshPrdPrompt = () =>
-    `Refresh the draft PRD for "${product.name}" (${product.display_id}, product id ${productId}). Keep approved pins where still valid; update epics/stories/tickets to match the current taxonomy.`;
-
-  const strategyPrompt = () =>
-    `Create a delivery strategy for "${product.name}" (${product.display_id}, product id ${productId}): a phased Gantt plan aligned with the current PRD and feature graph.${strategy ? " Replace the existing strategy with a new version." : ""}`;
-
+  // What the owner reads in their own Chat thread, so plain words. The display id
+  // stays: the agent resolves a product by it, and a bare name can match two.
   const planActions = {
-    decompose: () => openChatWithPrompt(decomposePrompt()),
-    refreshPrd: () => openChatWithPrompt(refreshPrdPrompt()),
-    strategy: () => openChatWithPrompt(strategyPrompt()),
+    prompts: {
+      decompose: () =>
+        `Plan the work left on "${product.name}" (${product.display_id}): break it down into a plan document and tickets, each ticket small enough for one coding session. Use the current capabilities and features.`,
+      refreshPrd: () =>
+        `Update the draft plan document for "${product.name}" (${product.display_id}) to match the current capabilities and features. Keep what still fits.`,
+      strategy: () =>
+        `Make a delivery strategy for "${product.name}" (${product.display_id}): a timeline in phases that follows its plan document and the order its features need.${strategy ? " It replaces the current one with a new version." : ""}`,
+    },
     approveSpec: approveProduct,
     approvePrd,
     newTicket: () => setTicketDialog({ mode: "new", title: "", description: "", budget: "M", files: "" }),
@@ -325,7 +327,7 @@ export default function ProductsIsland({ canWrite = true }) {
               tabs={[
                 { value: "does", label: "What it does", count: features?.length },
                 { value: "goals", label: "Goals" },
-                ...(product.external ? [] : [{ value: "plan", label: "Plan" }]),
+                ...(showPlan ? [{ value: "plan", label: "Plan" }] : []),
               ]}
               value={shownTab}
               onChange={changeTab}
@@ -339,7 +341,7 @@ export default function ProductsIsland({ canWrite = true }) {
             {shownTab === "goals" && <ProductGoals product={product} goals={goals} features={features} capabilities={capabilities}
               motivations={motivations} canWrite={canWrite} />}
 
-            {shownTab === "plan" && (detailId === productId ? (
+            {shownTab === "plan" && (showPlan ? (
               <ProductPlan product={product} prd={prd} epics={epics} tickets={tickets} strategy={strategy}
                 capabilities={capabilities} features={features} canWrite={canWrite} actions={planActions} />
             ) : (

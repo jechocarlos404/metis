@@ -64,6 +64,13 @@ export default function FeaturesIsland({ canWrite = true }) {
   // On a phone, changing the view closes the panel so the change shows.
   const changeTab = (t) => { setTab(t); setPanelOpen(false); writeParams({ tab: t === "directory" ? "" : t }, { push: true }); };
   const changeProduct = (v) => { setProductFilter(v); setPanelOpen(false); writeParams({ product: v }, { push: true }); };
+  // A link to a product that's gone (removed, then a bookmark or Back) shows
+  // every product, never "0 features" under some other product's name (B39).
+  React.useEffect(() => {
+    if (!loaded || !productFilter || productFilter === "unattributed" || products.some((p) => p.id === productFilter)) return;
+    setProductFilter("");
+    writeParams({ product: "" });
+  }, [loaded, products, productFilter]);
   const [draft, setDraft] = React.useState(EMPTY_DRAFT);
   const [edgeDraft, setEdgeDraft] = React.useState({ kind: "DEPENDS_ON", targetId: "" });
   const [edgeError, setEdgeError] = React.useState(null); // shown under the relationship picker

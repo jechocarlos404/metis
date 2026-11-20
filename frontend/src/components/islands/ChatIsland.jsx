@@ -452,7 +452,10 @@ export default function ChatIsland({ threadId: initialThreadId = null, canWrite 
           )}
           {messages.length === 0 && (
             <div style={{ border: "1px dashed var(--border-default)", borderRadius: "var(--radius-md)", padding: 20, color: "var(--text-secondary)", fontSize: "var(--text-sm)", lineHeight: "var(--leading-body)" }}>
-              {canWrite ? (
+              {canWrite && products?.length === 0 ? (
+                // No product yet: every starter question would spend a paid turn to answer "nothing" (C36).
+                <>Nothing to ask about yet. Chat answers questions about products and their capabilities: add the first one from <a href="/home">Get started</a> on Home.</>
+              ) : canWrite ? (
                 <>
                   Ask about the inventory in plain words. For example:
                   {available !== false ? (

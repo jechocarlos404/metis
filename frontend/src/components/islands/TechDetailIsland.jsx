@@ -85,7 +85,8 @@ export default function TechDetailIsland({ slug, canWrite = false }) {
           tech_id: detail.id,
           person: draft.person.trim(),
           depth: draft.depth,
-          last_at: new Date().toISOString().slice(0, 10),
+          // Today where the person is; toISOString would give UTC's date (B42).
+          last_at: new Date().toLocaleDateString("en-CA"),
         },
       });
       setDraft({ person: "", depth: "touched" });

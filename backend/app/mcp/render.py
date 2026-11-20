@@ -136,16 +136,26 @@ def tech_blast_radius(envelope: dict) -> str:
 def tech_exposure(envelope: dict) -> str:
     rows = envelope["answer"]
     at_risk = sum(r["required_slots"] for r in rows)
+    # Filtered to a product, the answer is about what that product uses only.
+    subject = envelope["subject"]
+    product = subject["slug"] if subject.get("kind") == "product" else None
     lines = [
-        f"{len(rows)} exposed technolog(ies), {at_risk} required slot(s) affected.",
+        f"{len(rows)} exposed technolog(ies){f' used by {product}' if product else ''}, "
+        f"{at_risk} required slot(s) affected.",
         "",
     ]
-    if not rows:
+    if not rows and product is None:
         # Nothing exposed is only an all-clear for what exposure can see.
         lines.append(
             "Nothing recorded reaches its end of life in the window, has a deprecated or "
             "banned stance, or rests on a single maintainer. tech_search shows what is "
             "recorded at all."
+        )
+    elif not rows and not envelope.get("unresolved"):
+        # Otherwise the Unresolved line says what it couldn't judge.
+        lines.append(
+            f"Nothing {product} is recorded as using reaches its end of life in the window, "
+            "has a deprecated or banned stance, or rests on a single maintainer."
         )
     lines += _table(
         [

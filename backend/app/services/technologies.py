@@ -722,19 +722,22 @@ async def exposure(
     return findings
 
 
-async def lifecycle(session: AsyncSession) -> dict:
+async def lifecycle(session: AsyncSession, tech_ids: set[uuid.UUID] | None = None) -> dict:
     """How many technologies exposure can judge at all. One with no end-of-life
     date on any version and no maintainer count on its vendor can never show
-    up as at risk, so an empty exposure list says nothing about it."""
+    up as at risk, so an empty exposure list says nothing about it. `tech_ids`
+    narrows it to those (one product's), as exposure's product filter does."""
     dated = select(TechVersion.tech_id).where(TechVersion.eol_on.is_not(None))
     counted = select(Vendor.id).where(Vendor.bus_factor.is_not(None))
+    scope = [Technology.id.in_(tech_ids)] if tech_ids is not None else []
     total, unknown = (
         await session.execute(
             select(
-                select(func.count()).select_from(Technology).scalar_subquery(),
+                select(func.count()).select_from(Technology).where(*scope).scalar_subquery(),
                 select(func.count())
                 .select_from(Technology)
                 .where(
+                    *scope,
                     Technology.id.not_in(dated),
                     or_(Technology.vendor_id.is_(None), Technology.vendor_id.not_in(counted)),
                 )

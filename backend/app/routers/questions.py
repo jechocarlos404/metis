@@ -205,6 +205,7 @@ async def tech_exposure(
     a nightly job fails the build when required_slots is non-zero inside the
     window, so treat a change to this shape as breaking."""
     findings = await tech_service.exposure(session, window_days=window_days)
+    using = None
     if product is not None:
         target = await by_slug(session, Product, product, "Product")
         using = {
@@ -227,23 +228,34 @@ async def tech_exposure(
         for reason in [_exposure_reason(f)]
     ]
     # A short list is no all-clear for what exposure cannot date or count.
-    lifecycle = await tech_service.lifecycle(session)
+    # Filtered to a product, that is the product's own technologies, and one
+    # that records none has nothing to judge.
+    lifecycle = await tech_service.lifecycle(session, using)
     unresolved = []
-    if lifecycle["unknown"]:
+    if using is not None and not using:
         unresolved = [
             Unresolved(
-                subject="estate",
+                subject=product,
+                reason="no technology is recorded as used by this product, so this "
+                "says nothing about what it runs on",
+            )
+        ]
+    elif lifecycle["unknown"]:
+        unresolved = [
+            Unresolved(
+                subject=product or "estate",
                 reason=f"{lifecycle['unknown']} of {lifecycle['technologies']} "
-                "technologies have no lifecycle data (no end-of-life date, no "
-                "maintainer count), so only a stance can flag them",
+                f"technologies {'it uses ' if product else ''}have no lifecycle data "
+                "(no end-of-life date, no maintainer count), so only a stance can flag them",
             )
         ]
     return envelope(
         Question.tech_exposure,
-        SubjectKind.estate,
+        SubjectKind.product if product else SubjectKind.estate,
         product or "estate",
         rows,
-        f"/tech?view=exposure&window_days={window_days}",
+        f"/tech?view=exposure&window_days={window_days}"
+        + (f"&product={product}" if product else ""),
         unresolved,
     )
 

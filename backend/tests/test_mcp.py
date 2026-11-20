@@ -6,7 +6,7 @@ this is the only place the shared rows get turned into something else.
 """
 
 import json
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 import pytest_asyncio
@@ -28,10 +28,12 @@ from app.schemas.capability import CapabilityCreate
 from app.schemas.envelope import Question
 from app.schemas.feature import EdgeCreate, FeatureCreate
 from app.schemas.journey import JourneyCreate, JourneyStepIn
-from app.schemas.technology import TechnologyCreate
+from app.schemas.stack import ProductTechnologyWrite
+from app.schemas.technology import TechnologyCreate, VersionCreate
 from app.services import capabilities as capability_service
 from app.services import features as feature_service
 from app.services import journeys as journey_service
+from app.services import stacks as stack_service
 from app.services import technologies as tech_service
 from app.services.graph_service import FeatureGraph
 
@@ -638,6 +640,66 @@ async def test_exposure_says_what_it_cannot_judge(api):
         "Unresolved — estate: 1 of 1 technologies have no lifecycle data (no end-of-life "
         "date, no maintainer count), so only a stance can flag them"
     ) in text.splitlines()
+
+
+async def test_exposure_for_one_product_is_about_that_product(api):
+    """Filtered to a product, the answer names it, says nothing about the rest
+    of the estate, and its Open line keeps the product."""
+    w = await _world(*api)
+    _, db = api
+    async with db() as s:
+        dying = await tech_service.create_technology(
+            s, TechnologyCreate(slug="nestjs", name="NestJS", kind=TechKind.framework)
+        )
+        await tech_service.create_version(
+            s, dying.id, VersionCreate(label="9.0", eol_on=date.today() + timedelta(days=30))
+        )
+        await stack_service.record_usage(s, w["climb"].id, ProductTechnologyWrite(tech_id=dying.id))
+
+    # Rival records no technology: nothing to judge, and not an all-clear.
+    text = await server._dispatch("tech_exposure", {"product": "rival"})
+    _conventions(text)
+    assert text.startswith("0 exposed technolog(ies) used by rival,")
+    assert "Nothing recorded reaches" not in text
+    assert "nestjs" not in text and "estate" not in text
+    assert (
+        "Unresolved — rival: no technology is recorded as used by this product, so this "
+        "says nothing about what it runs on"
+    ) in text.splitlines()
+    assert text.endswith("Open: /tech?view=exposure&window_days=180&product=rival")
+
+    # Can I Climb uses the dying one.
+    text = await server._dispatch("tech_exposure", {"product": str(w["climb"].id)})
+    assert text.startswith("1 exposed technolog(ies) used by can-i-climb,")
+    assert "nestjs" in text and "Unresolved" not in text
+    assert text.endswith("Open: /tech?view=exposure&window_days=180&product=can-i-climb")
+
+    # Something it uses with no lifecycle data is counted against it alone.
+    async with db() as s:
+        quiet = await tech_service.create_technology(
+            s, TechnologyCreate(slug="redis", name="Redis", kind=TechKind.service)
+        )
+        await stack_service.record_usage(s, w["rival"].id, ProductTechnologyWrite(tech_id=quiet.id))
+    text = await server._dispatch("tech_exposure", {"product": "rival"})
+    assert text.startswith("0 exposed technolog(ies) used by rival,")
+    assert "Nothing" not in text and "estate" not in text
+    assert (
+        "Unresolved — rival: 1 of 1 technologies it uses have no lifecycle data (no "
+        "end-of-life date, no maintainer count), so only a stance can flag them"
+    ) in text.splitlines()
+
+    # Dated far off, it is a real all-clear, for rival alone.
+    async with db() as s:
+        await tech_service.create_version(
+            s, quiet.id, VersionCreate(label="7", eol_on=date.today() + timedelta(days=900))
+        )
+    text = await server._dispatch("tech_exposure", {"product": "rival"})
+    _conventions(text)
+    assert (
+        "Nothing rival is recorded as using reaches its end of life in the window, has a "
+        "deprecated or banned stance, or rests on a single maintainer."
+    ) in text.splitlines()
+    assert "Unresolved" not in text
 
 
 async def test_own_products_are_not_scored(api):

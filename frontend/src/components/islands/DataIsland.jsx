@@ -2,7 +2,7 @@ import React from "react";
 import { PageHeader } from "../shell/PageHeader.jsx";
 import { Badge, Button, Checkbox, Dialog, Icon, IconButton, Input, Select, Tabs, Tag, Toast, DeleteConfirm } from "../../ds";
 import { api } from "../../lib/api.js";
-import { ENTITIES, REF_SOURCES, shortId } from "../../lib/data-entities.js";
+import { ENTITIES, REF_SOURCES, TABLE_WORDS, shortId } from "../../lib/data-entities.js";
 import { count } from "../../lib/words.js";
 
 const TH = {
@@ -13,7 +13,11 @@ const CELL = { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap
 const CELL_MONO = { ...CELL, fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-secondary)" };
 const MUTED = { fontSize: "var(--text-sm)", color: "var(--text-secondary)" };
 // The API's table labels are plural ("Goals", "Stories"): "1 goal", "2 stories".
-const tally = (t) => count(t.count, t.label.replace(/ies$/, "y").replace(/s$/, "").toLowerCase(), t.label.toLowerCase());
+// Link tables use the tabs' words instead (TABLE_WORDS), the table on hover.
+const tally = (t) => (TABLE_WORDS[t.table]
+  ? count(t.count, ...TABLE_WORDS[t.table])
+  : count(t.count, t.label.replace(/ies$/, "y").replace(/s$/, "").toLowerCase(), t.label.toLowerCase()));
+const rawTable = (t) => (TABLE_WORDS[t.table] ? t.table : undefined);
 const EMPTY_REFS = Object.fromEntries(
   Object.keys(REF_SOURCES).map((k) => [k, { list: [], byId: new Map() }]),
 );
@@ -235,7 +239,7 @@ export default function DataIsland() {
       />
       <div style={{ padding: "12px 24px 0", flex: "none" }}>
         <Tabs
-          tabs={ENTITIES.map((e) => ({ value: e.key, label: e.label, count: counts[e.key] }))}
+          tabs={ENTITIES.map((e) => ({ value: e.key, label: e.label, title: e.table, count: counts[e.key] }))}
           value={tab}
           onChange={setTab}
           style={{ overflowX: "auto" }}
@@ -288,7 +292,7 @@ export default function DataIsland() {
               }}
             >
               <span onClick={(e) => e.stopPropagation()}>
-                <Checkbox aria-label={`Select ${ent.title?.(row) ?? row.name ?? row.title ?? "row"}`} checked={selected.has(row.id)} onChange={() => toggle(row.id)} />
+                <Checkbox aria-label={`Select ${ent.title?.(row, refs) ?? row.name ?? row.title ?? "row"}`} checked={selected.has(row.id)} onChange={() => toggle(row.id)} />
               </span>
               {ent.columns.map((c) => {
                 const value = c.render(row, refs);
@@ -303,7 +307,7 @@ export default function DataIsland() {
                 );
               })}
               {ent.editable ? (
-                <IconButton size="sm" label={`Edit ${ent.singular}`}
+                <IconButton size="sm" label={`Edit ${ent.singular} ${ent.title(row, refs)}`}
                   onClick={(e) => { e.stopPropagation(); openEdit(row); }}>
                   <Icon name="pencil" size={13} />
                 </IconButton>
@@ -372,7 +376,7 @@ export default function DataIsland() {
               <div style={TH}>Deletes {count(previewData.total_rows, "row")}</div>
               {previewData.total_deletes.map((t) => (
                 <div key={t.table}>
-                  <b style={{ fontWeight: "var(--weight-medium)", color: "var(--text-heading)" }}>{tally(t)}</b>
+                  <b title={rawTable(t)} style={{ fontWeight: "var(--weight-medium)", color: "var(--text-heading)" }}>{tally(t)}</b>
                   {t.names?.length > 0 && <>: {t.names.join(", ")}</>}
                 </div>
               ))}
@@ -390,7 +394,7 @@ export default function DataIsland() {
                     {r.missing ? `${shortId(r.id)} (already gone)` : r.label}
                   </span>
                   <span style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                    {r.deletes.map((t) => <Tag key={t.table}>{tally(t)}</Tag>)}
+                    {r.deletes.map((t) => <span key={t.table} title={rawTable(t)}><Tag>{tally(t)}</Tag></span>)}
                     {r.deletes.length === 0 && !r.missing && <span style={MUTED}>no dependents</span>}
                   </span>
                 </div>
@@ -401,7 +405,7 @@ export default function DataIsland() {
               <div style={{ borderTop: "1px solid var(--border-hairline)", paddingTop: 12, display: "flex", flexDirection: "column", gap: 4 }}>
                 <div style={TH}>Kept, but unlinked</div>
                 {previewData.total_detaches.map((t) => (
-                  <div key={t.table} style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>
+                  <div key={t.table} title={rawTable(t)} style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>
                     {tally(t)}
                   </div>
                 ))}

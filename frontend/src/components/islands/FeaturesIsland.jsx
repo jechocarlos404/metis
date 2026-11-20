@@ -213,17 +213,6 @@ export default function FeaturesIsland({ canWrite = true }) {
       edges: layout.edges.filter((e) => keep.has(e.src) && keep.has(e.dst)),
     };
   }, [activeProduct, layout, matchesProduct]);
-  // Org goals the selected feature's own products sit under.
-  const ownGoalRoots = React.useMemo(() => {
-    const roots = new Set();
-    if (!detail) return roots;
-    for (const pid of nodeById.get(detail.id)?.product_ids ?? []) {
-      const goalId = productById.get(pid)?.goal_id;
-      if (goalId) roots.add(goalRoot(goalParent, goalId));
-    }
-    return roots;
-  }, [detail, nodeById, productById, goalParent]);
-
   // Group by capability or goal: hubs for the graph's one product. Goals use
   // the same "own goal" rule as the panel's Why (same top goal as the product).
   const hubs = React.useMemo(() => {
@@ -594,8 +583,7 @@ export default function FeaturesIsland({ canWrite = true }) {
                 capabilityById={capabilityById}
                 journeys={inJourneys}
                 why={why}
-                goalParent={goalParent}
-                ownGoalRoots={ownGoalRoots}
+                goals={goals}
                 allNodes={layout.nodes}
                 edgeDraft={edgeDraft}
                 onEdgeDraft={(d) => { setEdgeDraft(d); setEdgeError(null); }}
@@ -717,7 +705,7 @@ function FeatureLink({ feature, onSelect, active, style }) {
   );
 }
 
-function FeaturePanel({ detail, canWrite, onEdit, onGuessConfirmed, onSelect, productIds, productById, capabilityById, journeys, why, goalParent, ownGoalRoots, allNodes, edgeDraft, onEdgeDraft, edgeError, onAddEdge, onRemoveEdge, recheck, onRecheck, onClearRecheck }) {
+function FeaturePanel({ detail, canWrite, onEdit, onGuessConfirmed, onSelect, productIds, productById, capabilityById, journeys, why, goals, allNodes, edgeDraft, onEdgeDraft, edgeError, onAddEdge, onRemoveEdge, recheck, onRecheck, onClearRecheck }) {
   const layer = detail.facets?.layer;
   return (
     <>
@@ -773,7 +761,7 @@ function FeaturePanel({ detail, canWrite, onEdit, onGuessConfirmed, onSelect, pr
         {canWrite && <Guesses query={{ feature_id: detail.id }} title="Probably also built on" onConfirmed={onGuessConfirmed} />}
       </div>
 
-      <WhySection chain={why?.chain} goalParent={goalParent} ownRoots={ownGoalRoots} hasCapabilities={detail.capability_ids.length > 0} />
+      <WhySection chain={why?.chain} goals={goals} product={productById.get(productIds[0])} hasCapabilities={detail.capability_ids.length > 0} />
 
       <div style={SECTION}>
         <div style={CAPS_HEADER}>Relationships</div>
@@ -890,18 +878,19 @@ function EdgeRow({ word, feature, onSelect, onRemove }) {
   );
 }
 
-function WhySection({ chain, ownRoots, goalParent, hasCapabilities }) {
-  if (!chain) return null;
-  const goals = chain.filter((s) => s.kind === "goal");
-  // A goal is this feature's own when it sits under the same org goal as the
-  // feature's product. Everything else arrived through a shared capability:
-  // that is reuse, not motivation.
-  const rootOf = (id) => {
-    return goalRoot(goalParent, id);
-  };
-  const classify = ownRoots.size > 0;
-  const own = classify ? goals.filter((g) => ownRoots.has(rootOf(g.id))) : goals;
-  const shared = classify ? goals.filter((g) => !ownRoots.has(rootOf(g.id))) : [];
+function WhySection({ chain, goals, product, hasCapabilities }) {
+  // Whose each goal is comes from the goals API (product_id), which loads on
+  // its own: say nothing about it until it has.
+  if (!chain || !Array.isArray(goals)) return null;
+  const steps = chain.filter((s) => s.kind === "goal");
+  // A goal is this feature's own when it belongs to the feature's product.
+  // Everything else arrived through a shared capability: reuse, not motivation.
+  const owner = new Map(goals.map((g) => [g.id, g.product_id]));
+  const own = product ? steps.filter((s) => owner.get(s.id) === product.id) : [];
+  const shared = steps.filter((s) => !own.includes(s));
+  const ownsGoals = product != null && goals.some((g) => g.product_id === product.id);
+  const theirs = product?.external && !ownsGoals;
+  const goal = ownsGoals ? goals.find((g) => g.id === product.goal_id) : null;
   const goalRow = (step, i) => (
     <a key={`goal-${step.id}-${i}`} href={`/goals?goal=${step.id}`} style={{ ...LINK, ...ELLIPSIS, display: "block" }}>
       {step.display_id ? `${step.display_id} ${step.name}` : step.name}
@@ -910,12 +899,19 @@ function WhySection({ chain, ownRoots, goalParent, hasCapabilities }) {
   return (
     <div style={SECTION}>
       <div style={CAPS_HEADER}>Why</div>
-      {!hasCapabilities ? (
+      {theirs ? (
+        <div style={NOTE}>Someone else's product: metis doesn't record its goals.</div>
+      ) : !hasCapabilities ? (
         <div style={NOTE}>Goals show up here once it has a capability.</div>
-      ) : own.length > 0 ? own.map(goalRow) : (
-        <div style={NOTE}>No goal of this product yet.</div>
+      ) : own.length > 0 ? own.map(goalRow) : goal ? (
+        <div style={NOTE}>
+          None of {product.name}'s goals links to this feature's capabilities. The product's goal is{" "}
+          <a href={`/goals?goal=${goal.id}`} style={LINK}>{goal.display_id} {goal.title}</a>.
+        </div>
+      ) : (
+        <div style={NOTE}>{product ? "No goal of this product yet." : "No product, so no goal of its own."}</div>
       )}
-      {shared.length > 0 && (
+      {shared.length > 0 && !theirs && (
         <details>
           <summary style={{ ...NOTE, cursor: "pointer" }}>
             Also serves {count(shared.length, "goal")} of other products

@@ -177,8 +177,10 @@ class FakeMetis {
     throw new Error(`fake metis has no route ${route}`);
   }
 
-  goal(title, { parent = null, goal_type = parent ? "product" : "org" } = {}) {
-    const row = { id: this.id("goal"), display_id: `G-${this.seq}`, goal_type, title, parent_goal_id: parent?.id ?? null };
+  // product_id is the product the goal belongs to, which the real backend
+  // works out (services/goals.py); a test sets it.
+  goal(title, { parent = null, goal_type = parent ? "product" : "org", product = null } = {}) {
+    const row = { id: this.id("goal"), display_id: `G-${this.seq}`, goal_type, title, parent_goal_id: parent?.id ?? null, product_id: product?.id ?? null };
     this.goals.push(row);
     return row;
   }
@@ -722,12 +724,12 @@ describe("exporting a product carries its whole goal tree", () => {
     const [chat, team, unrelated] = fake.capabilities;
     const [tm, other] = fake.products;
     fake.features.push({ id: "f-chat", product_id: tm.id, name: "Chat", capability_ids: [chat.id] });
-    const org = fake.goal("Help teams");
+    const org = fake.goal("Help teams", { product: tm });
     fake.link(org, chat);
-    fake.link(fake.goal("Plan work", { parent: org }), chat);
-    fake.link(fake.goal("Know who can do it", { parent: org }), team);
+    fake.link(fake.goal("Plan work", { parent: org, product: tm }), chat);
+    fake.link(fake.goal("Know who can do it", { parent: org, product: tm }), team);
     tm.goal_id = org.id;
-    const otherOrg = fake.goal("Other org goal");
+    const otherOrg = fake.goal("Other org goal", { product: other });
     fake.link(otherOrg, unrelated);
     other.goal_id = otherOrg.id;
     return fake;
@@ -754,15 +756,19 @@ describe("exporting a product carries its whole goal tree", () => {
     assert.ok(!body.notes.some((n) => n.startsWith("kept goal")));
   });
 
-  test("a goal another product points into stays that product's", async () => {
+  test("only the goals the backend says are the product's travel with it", async () => {
+    // Before the website points into the org goal, all of it is Tagomoto's;
+    // after, the org goal and its unclaimed goal are neither one's.
     const fake = use(new FakeMetis({ products: [{ name: "Tagomoto" }, { name: "Website" }] }));
     const [app, site] = fake.products;
-    const org = fake.goal("Household org goal");
-    app.goal_id = fake.goal("Find items", { parent: org }).id;
-    fake.goal("Keep inventory current", { parent: org });
+    const org = fake.goal("Household org goal", { product: app });
+    app.goal_id = fake.goal("Find items", { parent: org, product: app }).id;
+    const keep = fake.goal("Keep inventory current", { parent: org, product: app });
     let doc = await exportOf(app.id);
     assert.deepEqual(doc.goals.map((g) => g.title).sort(), ["Find items", "Household org goal", "Keep inventory current"]);
-    site.goal_id = fake.goal("Turn visitors into downloads", { parent: org }).id;
+    site.goal_id = fake.goal("Turn visitors into downloads", { parent: org, product: site }).id;
+    org.product_id = null;
+    keep.product_id = null;
     doc = await exportOf(app.id);
     assert.deepEqual(doc.goals.map((g) => g.title).sort(), ["Find items", "Household org goal"]);
   });

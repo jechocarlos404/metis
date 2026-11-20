@@ -25,6 +25,7 @@ from app.schemas.work import TicketCreate, TicketUpdate
 from app.services import capabilities as capability_service
 from app.services import decomposition as decomposition_service
 from app.services import features as feature_service
+from app.services import goals as goal_service
 from app.services import search as search_service
 from app.services import strategies as strategy_service
 from app.services import tickets as ticket_service
@@ -270,7 +271,7 @@ def score_text(score) -> str:
     if not score.buildable and score.partly:
         lines.append(
             "Nothing counts as buildable yet: its features still have capabilities nobody has "
-            "named. Partly known is the useful number here."
+            "named."
         )
     lacking = {
         f.name: [n.match.name if n.match else n.name for n in f.capabilities if not (n.match and n.match.ours)]
@@ -297,7 +298,7 @@ def score_text(score) -> str:
     if gaps:
         lines += ["", f"{_count(len(gaps), 'capability', 'capabilities')} we don't have, most useful first:"]
         for i, g in enumerate(gaps, 1):
-            covers = f"; adding it covers everything named for {g.only_gap} of them" if g.only_gap else ""
+            covers = f" · the only gap in {g.only_gap} of them" if g.only_gap else ""
             where = f"also in {', '.join(p.name for p in g.elsewhere)}" if g.elsewhere else "in no other product"
             lines.append(f"{i}. {g.name} · needed by {_count(g.features, 'feature')}{covers} · {where}")
     if score.closest_products:
@@ -308,8 +309,8 @@ def score_text(score) -> str:
         ]
     lines += [
         "",
-        "\"Adding it covers everything named\" is not \"buildable\": a feature whose capability list "
-        "is incomplete never counts as buildable, so at best it becomes partly known.",
+        "\"The only gap\" is not \"buildable\": a feature whose capability list is incomplete "
+        "never counts as buildable, so adding its only gap makes it partly known at best.",
     ]
     return "\n".join(lines)
 
@@ -621,8 +622,16 @@ async def capability_rollup(ctx: ToolContext, capability: str) -> ToolResult:
 
 async def why_feature(ctx: ToolContext, feature: str) -> ToolResult:
     feature_obj = await _resolve(ctx.session, Feature, feature, "FTR", Feature.name)
-    chain = await capability_service.why(ctx.session, feature_obj)
-    return ToolResult(_dump(chain.model_dump(mode="json")))
+    chain = (await capability_service.why(ctx.session, feature_obj)).model_dump(mode="json")
+    # Whose each goal is (services/goals.py), so a shared capability's goals
+    # don't read as this feature's reason.
+    owners = await goal_service.owners(ctx.session)
+    for step in chain["chain"]:
+        if step["kind"] == "goal":
+            owner = owners.get(uuid.UUID(step["id"]))
+            step["product_id"] = str(owner) if owner else None
+    chain["product_id"] = str(feature_obj.product_id) if feature_obj.product_id else None
+    return ToolResult(_dump(chain))
 
 
 async def mvp_cut(ctx: ToolContext, targets: list[str]) -> ToolResult:
@@ -795,7 +804,7 @@ AGENT_TOOLS: dict[str, list[tuple[ToolDef, Any]]] = {
     "graph_agent": SHARED_TOOLS + [
         _tool("impact_query", "For a feature: which features transitively depend on it (dependents = blast radius) and what it depends on (dependencies).", {"feature": _STR}, ["feature"], impact_query),
         _tool("capability_rollup", "Derived progress for a capability: pending/in_progress/done counts over every feature realizing it or its sub-capabilities.", {"capability": _STR}, ["capability"], capability_rollup),
-        _tool("why_feature", "Provenance chain for a feature: REALIZES -> capability -> PART_OF* -> MOTIVATES -> goals up to org intent.", {"feature": _STR}, ["feature"], why_feature),
+        _tool("why_feature", "Provenance chain for a feature: REALIZES -> capability -> PART_OF* -> MOTIVATES -> goals up to org intent. Each goal's product_id is the product it belongs to (null: none); only goals whose product_id is the feature's product_id are its reason, the rest share a capability with it.", {"feature": _STR}, ["feature"], why_feature),
         _tool("topo_order", "All features ordered dependencies-first (safe build order). Fails if the graph has a cycle.", {}, [], topo_order),
         _tool("ready_set", "The work frontier: pending features whose precedence dependencies are all done.", {}, [], ready_set),
         _tool("find_cycles", "List dependency cycles in the feature graph.", {}, [], find_cycles),

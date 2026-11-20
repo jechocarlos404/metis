@@ -3,16 +3,16 @@ import { StatusBadge } from "../../ds";
 import { count } from "../../lib/words.js";
 
 // A product serves one goal (Product.goal_id), which may sit under an org goal.
-// Same link Goals uses to list a goal's products. The goals under it are this
-// product's own too, unless another product serves one of them.
-// Below, folded: other goals that motivate a capability one of this product's
-// features realizes (direct links only: feature -> capability <- goal).
-export function ProductGoals({ product, products, goals, features, capabilities, motivations, canWrite }) {
+// Its own goals are the ones the goals API says belong to it (product_id):
+// that goal, the goal it is part of, and their other goals no other product
+// points into. They list first; below, folded: other goals that motivate a
+// capability one of this product's features realizes (direct links only:
+// feature -> capability <- goal).
+export function ProductGoals({ product, goals, features, capabilities, motivations, canWrite }) {
   const goal = goals.find((g) => g.id === product.goal_id);
   const parent = goal && goals.find((g) => g.id === goal.parent_goal_id);
-  const servedElsewhere = new Set(products.filter((p) => p.id !== product.id).map((p) => p.goal_id));
-  const subgoals = goal ? goals.filter((g) => g.parent_goal_id === goal.id && !servedElsewhere.has(g.id)) : [];
-  const own = new Set([product.goal_id, ...subgoals.map((g) => g.id)]);
+  const subgoals = goals.filter((g) => g.product_id === product.id && g.id !== goal?.id && g.id !== parent?.id);
+  const own = new Set([product.goal_id, ...goals.filter((g) => g.product_id === product.id).map((g) => g.id)]);
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       {goal ? (

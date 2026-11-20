@@ -22,6 +22,12 @@ desktop.
     that already exist, each checked with `check_idea`, ranked by how much
     already exists, with a link that opens Home's idea check filled in. It
     saves nothing: saving an idea is the owner's choice on the desktop.
+  - `metis-map-outside-product`: describe someone else's product from its
+    public pages as a seed file of features and guessed capability links,
+    for you to review and load.
+  - `metis-fill-gaps`: in one of your repos, read the code behind features
+    whose capabilities are unknown, and hand you a seed file of guesses plus
+    the links the code confirms, to add on the desktop.
 - **Hooks.** Each one is silent when metis is unreachable or the repo is not a
   known product:
   - *Session start:* a short brief on this repo's product. It gives the
@@ -170,5 +176,6 @@ plugin/
   .mcp.json                     the metis SSE server
   hooks/hooks.json              SessionStart, UserPromptSubmit, Stop
   hooks/metis_hooks.py          all three hooks, Python stdlib only
-  skills/                       metis-check-idea, metis-find-reuse, metis-what-next
+  skills/                       metis-check-idea, metis-find-reuse, metis-what-next,
+                                metis-map-outside-product, metis-fill-gaps
 ```

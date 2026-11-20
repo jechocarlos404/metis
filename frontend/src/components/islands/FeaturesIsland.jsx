@@ -212,6 +212,13 @@ export default function FeaturesIsland({ canWrite = true }) {
     return goalHubs(visibleLayout.nodes, motivations, goals, goalId ? goalRoot(goalParent, goalId) : null);
   }, [tab, group, visibleLayout, capabilityById, goals, motivations, productById, activeProduct, goalParent]);
   const visibleReady = activeProduct ? ready.filter((f) => matchesProduct(f.id)) : ready;
+  // Planning is on demand: ready to start, build order and the smallest
+  // version say nothing true until one of our features is planned. The header
+  // judges the features on screen; the Plan tab judges its own product filter.
+  const hasPlanned = (nodes) => nodes.some((n) => n.status === "pending" && !n.external);
+  const plannedShown = hasPlanned(visibleLayout.nodes);
+  const canPlan = productFilter ? plannedShown : hasPlanned(layout.nodes);
+  const shownTab = tab === "plan" && !canPlan ? "directory" : tab;
   const visibleTopo = activeProduct && topoOrder ? topoOrder.filter((f) => matchesProduct(f.id)) : topoOrder;
   // A cycle anywhere stops the build order, so show every cycle when it does.
   const visibleCycles = activeProduct && topoError !== "cycle" ? cycles.filter((c) => c.some((f) => matchesProduct(f.id))) : cycles;
@@ -382,14 +389,13 @@ export default function FeaturesIsland({ canWrite = true }) {
   };
 
   const noFeatures = loaded && layout.nodes.length === 0;
-  const filteredProduct = productById.get(activeProduct);
   const cutTargetOptions = visibleLayout.nodes.filter((n) => !n.external);
 
   return (
     <>
       <PageHeader
         title="Features"
-        meta={`${count(visibleLayout.nodes.length, "feature")} · ${visibleReady.length} ready to start${activeProduct ? ` · filtered from ${layout.nodes.length}` : ""}`}
+        meta={`${count(visibleLayout.nodes.length, "feature")}${plannedShown ? ` · ${visibleReady.length} ready to start` : ""}${activeProduct ? ` · filtered from ${layout.nodes.length}` : ""}`}
         actions={
           <>
             {products.length > 0 && (
@@ -413,7 +419,7 @@ export default function FeaturesIsland({ canWrite = true }) {
         }
       />
       <div style={{ padding: "12px 24px 0", flex: "none" }}>
-        <Tabs tabs={[{ value: "directory", label: "Directory", count: directory.length }, { value: "graph", label: "Graph" }, { value: "plan", label: "Plan" }]} value={tab} onChange={changeTab} />
+        <Tabs tabs={[{ value: "directory", label: "Directory", count: directory.length }, { value: "graph", label: "Graph" }, ...(canPlan ? [{ value: "plan", label: "Plan" }] : [])]} value={shownTab} onChange={changeTab} />
       </div>
       {error && !dialog && <div role="alert" style={{ padding: "8px 24px", fontSize: "var(--text-sm)", color: "var(--danger-fg)" }}>{error}</div>}
 
@@ -457,10 +463,8 @@ export default function FeaturesIsland({ canWrite = true }) {
               </div>
             )}
           </div>
-        ) : tab === "plan" ? (
+        ) : shownTab === "plan" ? (
           <PlanView
-            hasFeatures={visibleLayout.nodes.length > 0}
-            externalProduct={filteredProduct?.external ? filteredProduct.name : null}
             ready={visibleReady}
             cycles={visibleCycles}
             topoOrder={visibleTopo}
@@ -850,13 +854,11 @@ function PlanList({ items, selectedId, onSelect, numbered, limit }) {
   );
 }
 
-function PlanView({ hasFeatures, externalProduct, ready, cycles, topoOrder, topoError, selectedId, onSelect, canCut, cutTargetOptions, cutTarget, onPickCutTarget, onRunCut, onClearCut, onShowCut, cut, cutError, cutting, matchesProduct, productFilter }) {
+// Shown only while a feature of ours is planned (see canPlan).
+function PlanView({ ready, cycles, topoOrder, topoError, selectedId, onSelect, canCut, cutTargetOptions, cutTarget, onPickCutTarget, onRunCut, onClearCut, onShowCut, cut, cutError, cutting, matchesProduct, productFilter }) {
   const body = (content) => (
     <div style={{ flex: 1, minWidth: 0, overflowY: "auto", padding: 20 }}>{content}</div>
   );
-  if (!hasFeatures) return body(<div style={{ ...PLAN_CARD, ...NOTE }}>{productFilter === "unattributed" ? "Every feature has a product, so there is nothing here to plan." : "This product has no features to plan yet."}</div>);
-  if (externalProduct) return body(<div style={{ ...PLAN_CARD, ...NOTE }}>{externalProduct} is an external product, so none of its features are ours to plan.</div>);
-
   const canWait = cut ? (productFilter ? cut.deferrable.filter((f) => matchesProduct(f.id)) : cut.deferrable) : [];
   const neededCaps = cut ? cut.capabilities.filter((c) => c.essential) : [];
   return body(

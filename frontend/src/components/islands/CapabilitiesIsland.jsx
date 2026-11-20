@@ -12,6 +12,7 @@ const FINDINGS = {
   unmotivated_capability: { label: "No goal explains it", tone: "danger", hint: "No goal links to it or to anything under it" },
   aspirational_gap: { label: "Wanted but nothing builds it", tone: "warn", hint: "None of our features builds it yet" },
   unlinked_feature: { label: "Feature with no capability", tone: "warn", hint: "It can't count toward reuse or coverage until it has one" },
+  stale_map: { label: "Map may be out of date", tone: "warn", hint: "Not imported from its seed file in 30 days, or ever" },
 };
 const FINDING_FILTERS = [
   { value: "", label: "All findings" },
@@ -259,6 +260,7 @@ function FindingList({ findings, total, byId, loaded }) {
         const capability = byId.get(f.subject_id);
         const href = f.kind === "empty_intent" ? `/goals?goal=${f.subject_id}`
           : f.kind === "unlinked_feature" ? `/features?feature=${f.subject_id}`
+          : f.kind === "stale_map" ? `/products?product=${f.subject_id}`
           : capability ? `/capabilities/${capability.slug}` : null;
         const label = f.subject_display_id ? `${f.subject_display_id} ${f.subject_name}` : f.subject_name;
         const Tag = href ? "a" : "div";

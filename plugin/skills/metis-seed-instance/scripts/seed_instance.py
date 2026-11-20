@@ -815,6 +815,16 @@ class Loader:
                 )
             self.note("decompositions", "created")
 
+    def mark_seeded(self):
+        """Last, once everything loaded: record that each product in the file
+        was just refreshed. The server stamps the time."""
+        if self.dry_run:
+            return
+        for pid in dict.fromkeys(self.prod_ids.values()):
+            status, body = self.api.post(f"/api/products/{pid}/seeded", None)
+            if status != 200:
+                self.notes.append(f"could not record when product {pid} was seeded: {status} {body}")
+
     def build_prd(self, decomp):
         def ticket(t):
             return prune(
@@ -926,6 +936,7 @@ def main():
     loader.load_edges()
     loader.load_technologies()
     loader.load_products()
+    loader.mark_seeded()
 
     print(("dry run — nothing written" if args.dry_run else "seed complete") + ":")
     loader.report()

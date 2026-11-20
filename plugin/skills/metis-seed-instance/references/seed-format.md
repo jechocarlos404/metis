@@ -276,6 +276,9 @@ satisfies. A technology is shared across products, like a capability.
   that already exists for the same (capability, feature) or (capability,
   technology) pair takes the file's `confidence` and `basis`. Re-running the
   same file is safe.
+- After a load that writes (not a dry run), the loader records that every product
+  in the file was just seeded; metis shows that time as how fresh the product's
+  map is. This is bookkeeping, not a change to the product.
 - Names are therefore identity: reuse the exact same name across runs to mean the
   same entity. For capabilities, also reuse the exact name another product already
   uses for the same ability (read `GET /api/capabilities/inventory` first) — that

@@ -2,7 +2,7 @@ import React from "react";
 import { PageHeader } from "../shell/PageHeader.jsx";
 import { Badge, Button, Input } from "../../ds";
 import { api } from "../../lib/api.js";
-import { VERDICT, count } from "../../lib/words.js";
+import { VERDICT, count, freshness } from "../../lib/words.js";
 import { CapabilityPicker } from "../shared/CapabilityPicker.jsx";
 import { CoverageReport } from "../shared/coverage.jsx";
 import GetStartedIsland from "./GetStartedIsland.jsx";
@@ -258,6 +258,7 @@ function Portfolio({ products }) {
               <a href={`/products?product=${p.id}`} style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap", padding: "9px 16px", textDecoration: "none" }}>
                 <span style={{ fontSize: "var(--text-sm)", fontWeight: "var(--weight-medium)", color: "var(--text-heading)" }}>{p.name}</span>
                 {p.external && <Badge>external</Badge>}
+                <span title="When its seed file was last imported" style={QUIET}>{freshness(p.seeded_at)}</span>
                 <span style={{ flex: 1 }} />
                 <ScoreLine score={scores[p.id]} />
               </a>

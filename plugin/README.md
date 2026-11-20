@@ -31,12 +31,14 @@ desktop.
 - **Hooks.** Each one is silent when metis is unreachable or the repo is not a
   known product:
   - *Session start:* a short brief on this repo's product. It gives the
-    feature count and the capabilities it shares with other products.
+    feature count, the capabilities it shares with other products, and when
+    its map was last updated from a seed file.
   - *Prompt submit:* if your prompt names a capability another product already
     has, Claude gets one line saying where.
   - *Stop:* if the session changed code in a known product, you see a
     one-line reminder to re-export the seed file with the `metis-export` skill.
-    It appears at most once per session.
+    It appears at most once per session, and says how old the map is when it
+    was last updated over 7 days ago, or never.
 
 ## Install
 

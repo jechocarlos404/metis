@@ -2,7 +2,7 @@ import React from "react";
 import { PageHeader } from "../shell/PageHeader.jsx";
 import { Badge, Button, Card, Checkbox, Dialog, Icon, Input, Select, StatusBadge, Tabs, Toast, DeleteConfirm } from "../../ds";
 import { api } from "../../lib/api.js";
-import { count, productOptions, statusLabel } from "../../lib/words.js";
+import { count, freshness, productOptions, statusLabel } from "../../lib/words.js";
 import { openChatWithPrompt } from "../../lib/chat-launch.js";
 import { useParamRestore, writeParams } from "../../lib/url-state.js";
 import { exportSeedFile } from "../shared/SeedFiles.jsx";
@@ -297,6 +297,7 @@ export default function ProductsIsland({ canWrite = true }) {
               <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                 <h2 style={{ margin: 0, fontSize: "var(--text-lg)", fontWeight: "var(--weight-semibold)", color: "var(--text-heading)" }}>{product.name}</h2>
                 {product.external && <span title="Someone else's product. Its features never count as ours."><Badge>external</Badge></span>}
+                <span title="When its seed file was last imported" style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>{freshness(product.seeded_at)}</span>
                 <span style={{ flex: 1 }} />
                 {canWrite && (
                   <>

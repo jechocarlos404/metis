@@ -1,7 +1,7 @@
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
@@ -84,6 +84,17 @@ async def delete_product(product_id: uuid.UUID, session: AsyncSession = Depends(
     product = await decomposition_service.get_product(session, product_id)
     await session.delete(product)
     await session.commit()
+
+
+@router.post("/products/{product_id}/seeded", response_model=ProductRead)
+async def mark_seeded(product_id: uuid.UUID, session: AsyncSession = Depends(get_db)):
+    """The seed loaders call this after an import: the product's map was just
+    refreshed. The time is the server's; a caller never supplies one."""
+    product = await decomposition_service.get_product(session, product_id)
+    product.seeded_at = func.now()
+    await session.commit()
+    await session.refresh(product)
+    return product
 
 
 @router.post("/products/{product_id}/approve", response_model=ProductRead)

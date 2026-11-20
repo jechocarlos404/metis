@@ -23,6 +23,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from datetime import datetime
 import urllib.parse
 import urllib.request
 
@@ -170,8 +171,43 @@ def products():
     return _cached(
         "products",
         "/api/products",
-        lambda rows: [dict(_ref(p), external=bool(p.get("external"))) for p in rows],
+        lambda rows: [
+            dict(
+                _ref(p),
+                external=bool(p.get("external")),
+                # Left absent, not None, when an older metis does not report it.
+                **({"seeded_at": p["seeded_at"]} if "seeded_at" in p else {}),
+            )
+            for p in rows
+        ],
     )
+
+
+def freshness(product):
+    """(phrase, days) for how fresh the product's map is, worded as the
+    desktop words it (frontend/src/lib/words.js). days is None when it was
+    never imported. None when metis does not report it."""
+    if "seeded_at" not in product:
+        return None
+    seeded = product["seeded_at"]
+    if seeded is None:
+        return "never imported from a seed file", None
+    # Python 3.9 parses neither "Z" nor every fraction length; days need neither.
+    when = datetime.fromisoformat(re.sub(r"\.\d+", "", seeded).replace("Z", "+00:00"))
+    days = max(0, int((time.time() - when.timestamp()) // 86400))
+
+    def count(n, unit):
+        return f"{n} {unit}" + ("" if n == 1 else "s")
+
+    if days == 0:
+        phrase = "updated today"
+    elif days < 30:
+        phrase = f"updated {count(days, 'day')} ago"
+    elif days < 365:
+        phrase = f"updated {count(days // 30, 'month')} ago"
+    else:
+        phrase = f"updated {count(days // 365, 'year')} ago"
+    return phrase, days
 
 
 def inventory():
@@ -262,6 +298,9 @@ def session_start(event):
         f"{coverage['total_features']} feature(s), {len(mine)} capabilit(ies), "
         f"{len(shared)} shared with other products.",
     ]
+    fresh = freshness(product)
+    if fresh:
+        lines.append(f"Its map in metis was {fresh[0]}.")
     if shared:
         lines.append("Shared capabilities, most reused first (capability -> other products):")
         for entry, others in shared[:15]:
@@ -346,10 +385,13 @@ def stop(event):
     if not product or not _changed_outside_seed(root):
         return None
     _write(marker, {})
+    fresh = freshness(product)
+    stale = fresh is not None and (fresh[1] is None or fresh[1] > 7)
     return {
         "systemMessage": (
             f"metis: {product['name']} has code changes. Re-export its seed file with "
             "the metis-export skill so metis stays accurate."
+            + (f" Its map was {fresh[0]}." if stale else "")
         )
     }
 

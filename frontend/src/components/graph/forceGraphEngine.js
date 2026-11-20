@@ -241,8 +241,9 @@ export function createForceGraph(opts) {
     let dx = tp.x - sp.x;
     let dy = tp.y - sp.y;
     if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) dy = 0.5; // degenerate same-spot edge: draw a hairline, not NaN
-    const a = trimToRect(dx, dy, halfW, halfH);
-    const b = trimToRect(-dx, -dy, halfW, halfH);
+    // A node may be drawn smaller than a card (hub pills): end the line at its edge.
+    const a = trimToRect(dx, dy, s.halfW ?? halfW, s.halfH ?? halfH);
+    const b = trimToRect(-dx, -dy, t.halfW ?? halfW, t.halfH ?? halfH);
     const x1 = sp.x + a.dx;
     const y1 = sp.y + a.dy;
     // b is the offset from the target's center to its near boundary (facing
@@ -448,6 +449,8 @@ export function createForceGraph(opts) {
           vy: 0,
           fx: null,
           fy: null,
+          halfW: meta.width != null ? meta.width / 2 : undefined,
+          halfH: meta.height != null ? meta.height / 2 : undefined,
         });
         structuralChange = true;
       }

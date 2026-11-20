@@ -7,11 +7,17 @@ import { CapabilityPicker } from "../shared/CapabilityPicker.jsx";
 import { Guesses } from "../shared/Guesses.jsx";
 import { api, ApiError } from "../../lib/api.js";
 import { FeatureGraphView } from "../graph/FeatureGraphView.jsx";
+import { capabilityHubs, goalHubs, goalRoot } from "../graph/graph-data.js";
 import { pressable } from "../../lib/pressable.js";
 import { useParamRestore, writeParams } from "../../lib/url-state.js";
 
 const TABS = new Set(["directory", "graph", "plan"]);
 const EDGE_KINDS = ["DEPENDS_ON", "BLOCKS", "RELATES_TO"];
+const GROUPS = [
+  { value: "order", label: "Build order" },
+  { value: "capability", label: "Capability" },
+  { value: "goal", label: "Goal" },
+];
 
 export default function FeaturesIsland({ canWrite = true }) {
   const [tab, setTab] = React.useState("directory");
@@ -27,13 +33,18 @@ export default function FeaturesIsland({ canWrite = true }) {
   const [capabilities, setCapabilities] = React.useState([]);
   const [edgeList, setEdgeList] = React.useState([]);
   const [products, setProducts] = React.useState([]);
-  const [goalParent, setGoalParent] = React.useState(new Map()); // goal id -> parent goal id
+  const [goals, setGoals] = React.useState(null); // null loading | false failed | rows
+  const [motivations, setMotivations] = React.useState(null); // null loading | false failed | rows
   const [productFilter, setProductFilter] = React.useState(""); // "" | "unattributed" | product id
+  const [group, setGroup] = React.useState("order"); // graph: order | capability | goal
+  const goalParent = React.useMemo(() => new Map((goals || []).map((g) => [g.id, g.parent_goal_id])), [goals]);
 
-  // ?feature=<id>&tab=graph|plan&product=<id>: linkable, and Back restores the previous view.
+  // ?feature=<id>&tab=graph|plan&product=<id>&group=capability|goal: linkable, and Back restores the previous view.
   useParamRestore("feature", (v) => v && setSelected(v));
   useParamRestore("tab", (v) => setTab(TABS.has(v) ? v : "directory"));
   useParamRestore("product", (v) => setProductFilter(v ?? ""));
+  useParamRestore("group", (v) => setGroup(GROUPS.some((g) => g.value === v) ? v : "order"));
+  const changeGroup = (g) => { setGroup(g); writeParams({ group: g === "order" ? "" : g }, { push: true }); };
   const selectFeature = React.useCallback((id) => {
     setSelected(id);
     writeParams({ feature: id }, { push: true });
@@ -65,7 +76,8 @@ export default function FeaturesIsland({ canWrite = true }) {
       api("/graph/ready"),
       api("/graph/cycles"),
     ]);
-    api("/goals").then((gs) => setGoalParent(new Map(gs.map((g) => [g.id, g.parent_goal_id])))).catch(() => {});
+    api("/goals").then(setGoals).catch(() => setGoals(false));
+    api("/motivations").then(setMotivations).catch(() => setMotivations(false));
     setLayout(data);
     setCapabilities(caps);
     setEdgeList(edges);
@@ -180,12 +192,21 @@ export default function FeaturesIsland({ canWrite = true }) {
     const roots = new Set();
     if (!detail) return roots;
     for (const pid of nodeById.get(detail.id)?.product_ids ?? []) {
-      let cur = productById.get(pid)?.goal_id;
-      for (let i = 0; i < 20 && cur && goalParent.get(cur); i++) cur = goalParent.get(cur);
-      if (cur) roots.add(cur);
+      const goalId = productById.get(pid)?.goal_id;
+      if (goalId) roots.add(goalRoot(goalParent, goalId));
     }
     return roots;
   }, [detail, nodeById, productById, goalParent]);
+
+  // Group by capability or goal: hubs for the graph's one product. Goals use
+  // the same "own goal" rule as the panel's Why (same top goal as the product).
+  const hubs = React.useMemo(() => {
+    if (tab !== "graph" || group === "order") return null;
+    if (group === "capability") return capabilityHubs(visibleLayout.nodes, capabilityById);
+    if (!goals || !motivations) return null;
+    const goalId = productById.get(activeProduct)?.goal_id;
+    return goalHubs(visibleLayout.nodes, motivations, goals, goalId ? goalRoot(goalParent, goalId) : null);
+  }, [tab, group, visibleLayout, capabilityById, goals, motivations, productById, activeProduct, goalParent]);
   const visibleReady = activeProduct ? ready.filter((f) => matchesProduct(f.id)) : ready;
   const visibleTopo = activeProduct && topoOrder ? topoOrder.filter((f) => matchesProduct(f.id)) : topoOrder;
   // A cycle anywhere stops the build order, so show every cycle when it does.
@@ -403,7 +424,28 @@ export default function FeaturesIsland({ canWrite = true }) {
       <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
         {tab === "graph" ? (
           <div style={{ flex: 1, position: "relative", margin: 20, background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", overflow: "hidden", minWidth: 0 }}>
-            <FeatureGraphView layout={visibleLayout} fitKey={activeProduct} selectedId={selected} onSelect={selectFeature} impactIds={impactIds} cutStates={cutStates} />
+            {group !== "order" && !hubs ? (
+              <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>
+                {goals === false || motivations === false ? "Could not load the goals behind these features." : "Loading goals…"}
+              </div>
+            ) : (
+              // A fresh graph per grouping and product: pins and hubs from another one would not fit this one.
+              <FeatureGraphView key={`${group}:${activeProduct}`}layout={visibleLayout} hubs={hubs} fitKey={activeProduct} selectedId={selected} onSelect={selectFeature} impactIds={impactIds} cutStates={cutStates} />
+            )}
+            <div role="group" aria-label="Group by" style={{ position: "absolute", top: 10, left: "50%", transform: "translateX(-50%)", display: "flex", alignItems: "center", gap: 8, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-secondary)" }}>
+              Group by
+              <div style={{ display: "inline-flex", border: "1px solid var(--border-control)", borderRadius: "var(--radius-sm)", overflow: "hidden", boxShadow: "var(--shadow-card)" }}>
+                {GROUPS.map((g, i) => (
+                  <button key={g.value} type="button" aria-pressed={group === g.value} onClick={() => changeGroup(g.value)}
+                    style={{ height: 26, padding: "0 10px", font: "inherit", fontFamily: "var(--font-body)", fontSize: "var(--text-xs)", cursor: "pointer", border: "none",
+                      borderLeft: i ? "1px solid var(--border-control)" : "none",
+                      background: group === g.value ? "var(--accent-wash)" : "var(--surface-card)",
+                      color: group === g.value ? "var(--text-accent)" : "var(--text-body)" }}>
+                    {g.label}
+                  </button>
+                ))}
+              </div>
+            </div>
             {cutStates && (
               <div style={{ position: "absolute", bottom: 10, right: 10, display: "flex", alignItems: "center", gap: 8, padding: "6px 8px 6px 12px", background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-sm)", boxShadow: "var(--shadow-card)", fontSize: "var(--text-xs)", color: "var(--text-body)" }}>
                 Smallest version that reaches {nodeById.get(cutTarget)?.name ?? "the target"}
@@ -695,9 +737,7 @@ function WhySection({ chain, ownRoots, goalParent, hasCapabilities }) {
   // feature's product. Everything else arrived through a shared capability:
   // that is reuse, not motivation.
   const rootOf = (id) => {
-    let cur = id;
-    for (let i = 0; i < 20 && goalParent.get(cur); i++) cur = goalParent.get(cur);
-    return cur;
+    return goalRoot(goalParent, id);
   };
   const classify = ownRoots.size > 0;
   const own = classify ? goals.filter((g) => ownRoots.has(rootOf(g.id))) : goals;

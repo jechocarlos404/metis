@@ -461,7 +461,7 @@ export default function FeaturesIsland({ canWrite = true }) {
     <>
       <PageHeader
         title="Features"
-        meta={`${searching ? `${directory.length} of ` : ""}${count(visibleLayout.nodes.length, "feature")}${searching ? " match" : ""}${plannedShown ? ` · ${visibleReady.length} ready to start` : ""}${activeProduct ? ` · filtered from ${layout.nodes.length}` : ""}`}
+        meta={`${searching ? `${directory.length} of ` : ""}${count(visibleLayout.nodes.length, "feature")}${searching ? " match" : ""}${plannedShown ? ` · ${visibleReady.length} ready to start` : ""}${shownTab === "graph" && !productFilter ? ` · ${productById.get(graphProduct)?.name ?? "No product"} only: the graph draws one product at a time` : activeProduct ? ` · filtered from ${layout.nodes.length}` : ""}`}
         actions={
           <>
             {!phone && filters}

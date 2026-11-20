@@ -24,7 +24,8 @@ ul { margin: 6px 0; padding-left: 20px; }
 .card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; margin: 10px 0; break-inside: avoid; }
 .card h3 { font-size: 15px; margin: 0 0 4px; }
 .row { display: flex; gap: 12px; justify-content: space-between; padding: 3px 0; }
-.row span:last-child { color: var(--muted); font-size: 13px; white-space: nowrap; }
+.row .name { min-width: 0; overflow-wrap: anywhere; }
+.row .status { color: var(--muted); font-size: 13px; white-space: nowrap; }
 .num { font-variant-numeric: tabular-nums; font-weight: 600; color: var(--accent); }
 footer { margin-top: 40px; padding-top: 12px; border-top: 1px solid var(--line); color: var(--muted); font-size: 13px; }
 @media print {
@@ -84,7 +85,7 @@ ${report && report.missing.length > 0 ? `<p>To build: ${esc(report.missing.join(
 
 function featureRows(list, showStatus) {
   return list
-    .map((f) => `<div class="row"><span>${esc(f.name)}</span>${showStatus ? `<span>${esc(statusLabel(f.status))}</span>` : ""}</div>`)
+    .map((f) => `<div class="row"><span class="name">${esc(f.name)}</span>${showStatus ? `<span class="status">${esc(statusLabel(f.status))}</span>` : ""}</div>`)
     .join("");
 }
 

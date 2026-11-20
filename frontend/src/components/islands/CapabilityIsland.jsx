@@ -401,7 +401,7 @@ export default function CapabilityIsland({ slug, canWrite = false }) {
             <>
               <ImpactList title={`${count(impact.dependents.length, "capability", "capabilities")} need this`} items={impact.dependents} />
               <ImpactList title={`It needs ${count(impact.dependencies.length, "capability", "capabilities")}`} items={impact.dependencies} />
-              <BothWays impact={impact} />
+              <BothWays impact={impact} name={cap.name} />
             </>
           )}
           </div>
@@ -470,15 +470,14 @@ function ProductGroup({ group, slugByName, external }) {
 // A capability can sit on both lists without any loop: features of it need
 // features of this one, and other features of it are needed by them (or one
 // feature is built on both). Say so, so the owner doesn't read a cycle.
-function BothWays({ impact }) {
+function BothWays({ impact, name }) {
   const needed = new Set(impact.dependencies.map((c) => c.id));
   const both = impact.dependents.filter((c) => needed.has(c.id)).map((c) => c.name).sort((a, b) => a.localeCompare(b));
   if (both.length === 0) return null;
   return (
     <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>
-      On both lists: {andList(both)}. Some of {both.length === 1 ? "its" : "their"} features need one of this capability's,
-      and others are needed by one, often because a feature is built on both. That is two links, not a loop:
-      features never need each other in a circle.
+      On both lists: {andList(both)}. Some of {both.length === 1 ? "its" : "their"} features need a {name} feature;
+      others are needed by one. That is two links, not a loop.
     </div>
   );
 }

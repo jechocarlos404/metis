@@ -68,6 +68,16 @@ export default function CapabilitiesIsland({ canWrite = true }) {
   const [deleted, setDeleted] = React.useState(null); // name a capability page just deleted
   const [guessCount, setGuessCount] = React.useState(0); // guesses still waiting for a decision
   const [near, setNear] = React.useState(null); // the typed name's exact match and near names
+  // Narrower than the table's columns (a phone), each row stacks its counts
+  // under its name instead of cutting them off.
+  const [tableEl, setTableEl] = React.useState(null);
+  const [narrow, setNarrow] = React.useState(false);
+  React.useEffect(() => {
+    if (!tableEl) return undefined;
+    const observer = new ResizeObserver(() => setNarrow(tableEl.clientWidth < TABLE_MIN));
+    observer.observe(tableEl);
+    return () => observer.disconnect();
+  }, [tableEl]);
 
   React.useEffect(() => {
     // The capability page sends you here after a delete; say so once.
@@ -230,12 +240,14 @@ export default function CapabilitiesIsland({ canWrite = true }) {
             )}
           </div>
         ) : (
-          <div style={{ background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", overflowX: "auto" }}>
-           <div style={{ minWidth: TABLE_MIN }}>
-            <div style={{ display: "grid", gridTemplateColumns: COLUMNS, gap: 12, padding: "8px 16px", borderBottom: "1px solid var(--border-hairline)", ...CAPS_HEADER }}>
-              <span>Capability</span><span>Maturity</span><span>Products</span><span>Our features</span>
-            </div>
-            {shown.map((c, i) => <CapabilityRow key={c.id} c={c} last={i === shown.length - 1} />)}
+          <div ref={setTableEl} style={{ background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", overflowX: narrow ? "visible" : "auto" }}>
+           <div style={{ minWidth: narrow ? 0 : TABLE_MIN }}>
+            {!narrow && (
+              <div style={{ display: "grid", gridTemplateColumns: COLUMNS, gap: 12, padding: "8px 16px", borderBottom: "1px solid var(--border-hairline)", ...CAPS_HEADER }}>
+                <span>Capability</span><span>Maturity</span><span>Products</span><span>Our features</span>
+              </div>
+            )}
+            {shown.map((c, i) => <CapabilityRow key={c.id} c={c} last={i === shown.length - 1} compact={narrow} />)}
             {inventory && all.length > 0 && shown.length === 0 && (
               <div style={{ padding: 16, fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>No capability matches "{find.trim()}".</div>
             )}
@@ -295,8 +307,27 @@ export default function CapabilitiesIsland({ canWrite = true }) {
   );
 }
 
-function CapabilityRow({ c, last }) {
+function CapabilityRow({ c, last, compact }) {
   const theirs = c.external_products;
+  const badge = c.ours ? <MaturityBadge maturity={c.maturity} /> : <span title={NEED[needKey(c)].hint}><Badge tone={NEED[needKey(c)].tone}>{NEED[needKey(c)].label}</Badge></span>;
+  if (compact) {
+    // Phone: the name and its badge, then the counts the table's columns hold.
+    return (
+      <a href={`/capabilities/${c.slug}`}
+        style={{ display: "flex", flexDirection: "column", gap: 4, padding: "10px 16px", textDecoration: "none", color: "inherit",
+          borderBottom: last ? "none" : "1px solid var(--border-hairline)", fontSize: "var(--text-sm)" }}>
+        <span style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", paddingLeft: c.depth * 12 }}>
+          <span style={{ color: "var(--text-heading)", fontWeight: "var(--weight-medium)", overflowWrap: "anywhere" }}>{c.name}</span>
+          {badge}
+        </span>
+        <span style={{ paddingLeft: c.depth * 12, fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>
+          <span title={c.products.map((p) => p.name).join(", ") || undefined}>in {count(c.products.length, "product")}</span>
+          {theirs.length > 0 && <span title={theirs.map((p) => p.name).join(", ")}> +{theirs.length} not ours</span>}
+          {` · ${count(c.features, "feature")} of ours`}
+        </span>
+      </a>
+    );
+  }
   return (
     <a href={`/capabilities/${c.slug}`}
       style={{ display: "grid", gridTemplateColumns: COLUMNS, gap: 12, alignItems: "center", padding: "10px 16px", textDecoration: "none", color: "inherit",
@@ -305,7 +336,7 @@ function CapabilityRow({ c, last }) {
         <Icon name="layers" size={13} style={{ color: "var(--text-secondary)", flex: "none" }} />
         <span style={{ color: "var(--text-heading)", fontWeight: "var(--weight-medium)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.name}</span>
       </span>
-      <span>{c.ours ? <MaturityBadge maturity={c.maturity} /> : <span title={NEED[needKey(c)].hint}><Badge tone={NEED[needKey(c)].tone}>{NEED[needKey(c)].label}</Badge></span>}</span>
+      <span>{badge}</span>
       <span style={{ display: "flex", gap: 8, alignItems: "baseline", minWidth: 0 }}>
         <span title={c.products.map((p) => p.name).join(", ") || undefined} style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--text-heading)" }}>
           {c.products.length}
@@ -339,12 +370,15 @@ function FindingList({ groups: findings, total, byId, loaded }) {
         const Tag = href ? "a" : "div";
         return (
           <Tag key={`${f.kind}-${f.subject_id}`} href={href ?? undefined}
-            style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "10px 16px", textDecoration: "none", color: "inherit",
+            style={{ display: "flex", flexDirection: "column", gap: 4, padding: "10px 16px", textDecoration: "none", color: "inherit",
               borderBottom: i < findings.length - 1 ? "1px solid var(--border-hairline)" : "none" }}>
-            {f.kinds.map((k) => <Badge key={k.kind} tone={FINDINGS[k.kind].tone}>{FINDINGS[k.kind].label}</Badge>)}
-            <span style={{ fontSize: "var(--text-sm)", fontWeight: "var(--weight-medium)", color: "var(--text-heading)" }}>{label}</span>
-            <span style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>
-              {f.kinds.map((k) => (k.kind === "stale_map" ? sentence(k.detail) : FINDINGS[k.kind].hint)).join(" · ")}
+            {/* The name on its own line, then what's wrong: the same at every width and length. */}
+            <span style={{ fontSize: "var(--text-sm)", fontWeight: "var(--weight-medium)", color: "var(--text-heading)", overflowWrap: "anywhere" }}>{label}</span>
+            <span style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              {f.kinds.map((k) => <Badge key={k.kind} tone={FINDINGS[k.kind].tone}>{FINDINGS[k.kind].label}</Badge>)}
+              <span style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>
+                {f.kinds.map((k) => (k.kind === "stale_map" ? sentence(k.detail) : FINDINGS[k.kind].hint)).join(" · ")}
+              </span>
             </span>
           </Tag>
         );

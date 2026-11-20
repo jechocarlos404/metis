@@ -27,6 +27,11 @@ export function GoalNetworkView({ goals, capsByGoal, selectedId, onSelect }) {
   const [hoveredId, setHoveredId] = React.useState(null);
 
   const data = React.useMemo(() => buildGoalNetwork(goals, capsByGoal), [goals, capsByGoal]);
+  // Goals that share a capability with another; the rest are faded at rest.
+  const sharing = React.useMemo(
+    () => new Set(data.edges.filter((e) => e.kind === "SHARES").flatMap((e) => [e.source, e.target])),
+    [data],
+  );
   const adjacency = React.useMemo(() => buildAdjacency(data.edges), [data]);
 
   useIsomorphicLayoutEffect(() => {
@@ -47,6 +52,8 @@ export function GoalNetworkView({ goals, capsByGoal, selectedId, onSelect }) {
       alphaDecay: 0.06,
       linkDistance,
       linkStrength,
+      // Never so far out that names are hidden: past this, pan instead.
+      scaleExtent: [0.5, 2.5],
       reducedMotion: window.matchMedia("(prefers-reduced-motion: reduce)").matches,
       onSelect: (id) => onSelectRef.current?.(id),
     });
@@ -84,8 +91,8 @@ export function GoalNetworkView({ goals, capsByGoal, selectedId, onSelect }) {
   };
 
   return (
-    <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
-      <div style={{ flex: 1, position: "relative", margin: 20, background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", overflow: "hidden", minWidth: 0 }}>
+    <div style={{ flex: 1, display: "flex", flexWrap: "wrap", minHeight: 0, overflowY: "auto" }}>
+      <div style={{ flex: "999 1 420px", minHeight: 420, position: "relative", margin: 20, background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", overflow: "hidden", minWidth: 0 }}>
         <svg ref={svgRef} role="img" aria-label="Goals linked by the capabilities they share"
           style={{ width: "100%", height: "100%", display: "block", cursor: "grab", touchAction: "none" }}>
           <g ref={viewportRef}>
@@ -98,7 +105,7 @@ export function GoalNetworkView({ goals, capsByGoal, selectedId, onSelect }) {
                     stroke={shares ? "var(--accent)" : "var(--ink-4)"}
                     strokeWidth={(shares ? sharesWidth(e.weight) : 1.2) + (focusId != null && !dim ? 1 : 0)}
                     strokeLinecap="round"
-                    opacity={dim ? 0.06 : shares ? (focusId != null ? 0.7 : 0.22) : 0.6}
+                    opacity={dim ? 0.06 : shares ? (focusId != null ? 0.7 : 0) : 0.6}
                     style={{ transition: "opacity var(--dur-med) var(--ease-out)" }}>
                     {shares && <title>{`Shares ${count(e.weight, "capability", "capabilities")}: ${e.capabilities.map((c) => c.name).join(", ")}`}</title>}
                   </line>
@@ -110,7 +117,7 @@ export function GoalNetworkView({ goals, capsByGoal, selectedId, onSelect }) {
                 <GoalNode key={n.id} node={n}
                   isSelected={selectedId === n.id}
                   isTabStop={selectedId ? selectedId === n.id : n.id === data.nodes[0]?.id}
-                  isDimmed={focusId != null && focusId !== n.id && !focusNeighbors?.has(n.id)}
+                  isDimmed={focusId != null ? focusId !== n.id && !focusNeighbors?.has(n.id) : !sharing.has(n.id)}
                   onSelect={onSelect} onHoverChange={setHoveredId}
                   registerEl={ref(nodeElsRef.current, n.id, "registerNode", "unregisterNode")} />
               ))}
@@ -122,7 +129,7 @@ export function GoalNetworkView({ goals, capsByGoal, selectedId, onSelect }) {
           onZoomOut={() => engineRef.current?.zoomBy(1 / 1.4)}
           onFit={() => engineRef.current?.fitToView()} />
         <NetworkKey />
-        <div style={{ position: "absolute", bottom: 10, left: 12, pointerEvents: "none", fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-secondary)" }}>
+        <div style={{ position: "absolute", bottom: 10, left: 12, pointerEvents: "none", fontFamily: "var(--font-mono)", fontSize: "var(--text-2xs)", color: "var(--text-secondary)" }}>
           drag to move · double-click to release · scroll to zoom
         </div>
       </div>
@@ -166,14 +173,15 @@ function NetworkKey() {
     <svg width="16" height="8"><line x1="0" y1="4" x2="16" y2="4" stroke={stroke} strokeWidth={width} strokeLinecap="round" /></svg>
   );
   return (
-    <details open style={{ position: "absolute", top: 10, left: 10, background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-sm)", boxShadow: "var(--shadow-card)", padding: "6px 10px", fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-secondary)" }}>
+    <details style={{ position: "absolute", top: 10, left: 10, background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-sm)", boxShadow: "var(--shadow-card)", padding: "6px 10px", fontFamily: "var(--font-mono)", fontSize: "var(--text-2xs)", color: "var(--text-secondary)" }}>
       <summary style={{ cursor: "pointer", color: "var(--text-heading)" }}>Key</summary>
       <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 6 }}>
         <div style={row}>{card("var(--surface-inverse)", "var(--surface-inverse)")}org goal</div>
         <div style={row}>{card("var(--surface-card)", "var(--ink-4)")}product goal</div>
         <div style={row}>{card("var(--surface-card)", "var(--ink-4)", "2,2")}no capabilities linked</div>
         <div style={row}>{line("var(--ink-4)", 1.2)}part of</div>
-        <div style={row}>{line("var(--accent)", 3)}share capabilities (thicker: more)</div>
+        <div style={row}>{line("var(--accent)", 3)}share capabilities (thicker: more), shown for the goal you point at</div>
+        <div style={row}><span style={{ display: "flex", opacity: 0.25 }}>{card("var(--surface-card)", "var(--ink-4)")}</span>faded: shares nothing</div>
       </div>
     </details>
   );
@@ -182,8 +190,8 @@ function NetworkKey() {
 function GoalPanel({ goals, edges, capsByGoal, selectedId, onSelect }) {
   const byId = React.useMemo(() => new Map(goals.map((g) => [g.id, g])), [goals]);
   const goal = selectedId ? byId.get(selectedId) : null;
-  const panel = { width: 300, flex: "none", borderLeft: "1px solid var(--border-hairline)", background: "var(--surface-card)", padding: "16px 18px", overflowY: "auto", display: "flex", flexDirection: "column", gap: 14, fontSize: "var(--text-sm)" };
-  const head = { fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: "var(--tracking-caps)", textTransform: "uppercase", color: "var(--text-secondary)" };
+  const panel = { flex: "1 1 300px", borderLeft: "1px solid var(--border-hairline)", background: "var(--surface-card)", padding: "16px 18px", overflowY: "auto", display: "flex", flexDirection: "column", gap: 14, fontSize: "var(--text-sm)" };
+  const head = { fontFamily: "var(--font-mono)", fontSize: "var(--text-2xs)", letterSpacing: "var(--tracking-caps)", textTransform: "uppercase", color: "var(--text-secondary)" };
   const goalButton = (g) => (
     <button type="button" onClick={() => onSelect(g.id)}
       style={{ font: "inherit", textAlign: "left", background: "none", border: "none", padding: 0, color: "var(--text-accent)", cursor: "pointer" }}>
@@ -192,11 +200,26 @@ function GoalPanel({ goals, edges, capsByGoal, selectedId, onSelect }) {
   );
 
   if (!goal) {
-    const sharing = new Set(edges.filter((e) => e.kind === "SHARES").flatMap((e) => [e.source, e.target]));
+    const shares = edges.filter((e) => e.kind === "SHARES");
+    const sharing = new Set(shares.flatMap((e) => [e.source, e.target]));
+    const most = [...shares].sort((a, b) => b.weight - a.weight || a.id.localeCompare(b.id)).slice(0, 6);
     return (
       <aside style={panel}>
         <div style={{ color: "var(--text-secondary)" }}>Pick a goal to see which other goals rely on the same capabilities.</div>
         <div style={{ color: "var(--text-secondary)" }}>{count(sharing.size, "goal")} of {goals.length} share a capability with another goal.</div>
+        {most.length > 0 && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <div style={head}>Share the most</div>
+            {most.map((e) => (
+              <div key={e.id} style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                <span>{goalButton(byId.get(e.source))} and {goalButton(byId.get(e.target))}</span>
+                <span style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }} title={e.capabilities.map((c) => c.name).join(", ")}>
+                  {count(e.weight, "capability", "capabilities")}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
       </aside>
     );
   }

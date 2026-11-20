@@ -11,6 +11,7 @@
  * slugs stay unique) applies here too. Only listing and cascade delete are new.
  */
 
+import { STATUS_TONE } from "../ds";
 import { EDGE, MATURITY, plain, statusLabel } from "./words.js";
 
 // Plain words on screen; each column's `raw` keeps the stored value one hover away.
@@ -21,7 +22,6 @@ const GOAL_TYPES = ["org", "product"];
 const EDGE_KINDS = ["DEPENDS_ON", "BLOCKS", "RELATES_TO"].map((v) => ({ value: v, label: plain(EDGE, v) }));
 const BUDGETS = ["S", "M", "L"];
 
-const STATUS_TONE = { pending: "neutral", in_progress: "accent", done: "ok" };
 const MATURITY_TONE = {
   planned: "neutral", alpha: "warn", beta: "warn",
   ga: "ok", deprecated: "danger", retired: "danger",

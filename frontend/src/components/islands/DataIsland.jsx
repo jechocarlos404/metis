@@ -3,14 +3,17 @@ import { PageHeader } from "../shell/PageHeader.jsx";
 import { Badge, Button, Checkbox, Dialog, Icon, IconButton, Input, Select, Tabs, Tag, Toast, DeleteConfirm } from "../../ds";
 import { api } from "../../lib/api.js";
 import { ENTITIES, REF_SOURCES, shortId } from "../../lib/data-entities.js";
+import { count } from "../../lib/words.js";
 
 const TH = {
-  fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: "var(--tracking-caps)",
+  fontFamily: "var(--font-mono)", fontSize: "var(--text-2xs)", letterSpacing: "var(--tracking-caps)",
   textTransform: "uppercase", color: "var(--text-secondary)",
 };
 const CELL = { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--text-body)" };
 const CELL_MONO = { ...CELL, fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-secondary)" };
 const MUTED = { fontSize: "var(--text-sm)", color: "var(--text-secondary)" };
+// The API's table labels are plural ("Goals", "Stories"): "1 goal", "2 stories".
+const tally = (t) => count(t.count, t.label.replace(/ies$/, "y").replace(/s$/, "").toLowerCase(), t.label.toLowerCase());
 const EMPTY_REFS = Object.fromEntries(
   Object.keys(REF_SOURCES).map((k) => [k, { list: [], byId: new Map() }]),
 );
@@ -92,6 +95,8 @@ export default function DataIsland() {
     () => `32px ${ent.columns.map((c) => c.width).join(" ")} 40px`,
     [ent],
   );
+  const minWidth = 32 + 40 + 32 + 8 * (ent.columns.length + 1)
+    + ent.columns.reduce((sum, c) => sum + (c.width.endsWith("px") ? parseInt(c.width, 10) : 140), 0);
 
   const allSelected = rows.length > 0 && selected.size === rows.length;
 
@@ -199,8 +204,8 @@ export default function DataIsland() {
       setSelected(new Set());
       setToast({
         tone: "ok",
-        title: `Deleted ${result.total} row${result.total === 1 ? "" : "s"}`,
-        detail: result.deleted.map((t) => `${t.count} ${t.label.toLowerCase()}`).join(", "),
+        title: `Deleted ${count(result.total, "row")}`,
+        detail: result.deleted.map(tally).join(", "),
       });
     } catch (e) {
       setPreview(null);
@@ -216,9 +221,6 @@ export default function DataIsland() {
   };
 
   const previewData = preview?.data;
-  const summary = previewData
-    ? previewData.total_deletes.map((t) => `${t.count} ${t.label.toLowerCase()}`).join(", ")
-    : "";
 
   return (
     <>
@@ -236,6 +238,7 @@ export default function DataIsland() {
           tabs={ENTITIES.map((e) => ({ value: e.key, label: e.label, count: counts[e.key] }))}
           value={tab}
           onChange={setTab}
+          style={{ overflowX: "auto" }}
         />
       </div>
       {banner && (
@@ -249,7 +252,7 @@ export default function DataIsland() {
 
       <div style={{ flex: 1, overflowY: "auto", margin: 20, minWidth: 0 }}>
         {selected.size > 0 && (
-          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, padding: "8px 16px", background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)" }}>
+          <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 10, marginBottom: 12, padding: "8px 16px", background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)" }}>
             <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-secondary)" }}>
               {selected.size} of {rows.length} selected
             </span>
@@ -262,8 +265,8 @@ export default function DataIsland() {
           </div>
         )}
 
-        <div style={{ background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", overflow: "hidden" }}>
-          <div style={{ display: "grid", gridTemplateColumns: cols, alignItems: "center", gap: 8, padding: "8px 16px", borderBottom: "1px solid var(--border-hairline)", ...TH }}>
+        <div style={{ background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", overflowX: "auto" }}>
+          <div style={{ display: "grid", gridTemplateColumns: cols, minWidth, alignItems: "center", gap: 8, padding: "8px 16px", borderBottom: "1px solid var(--border-hairline)", ...TH }}>
             <Checkbox
               aria-label={allSelected ? "Deselect all rows" : "Select all rows"}
               checked={allSelected}
@@ -277,7 +280,7 @@ export default function DataIsland() {
               key={row.id}
               onClick={() => openEdit(row)}
               style={{
-                display: "grid", gridTemplateColumns: cols, alignItems: "center", gap: 8,
+                display: "grid", gridTemplateColumns: cols, minWidth, alignItems: "center", gap: 8,
                 padding: "10px 16px", fontSize: "var(--text-sm)",
                 borderBottom: i < rows.length - 1 ? "1px solid var(--border-hairline)" : "none",
                 cursor: ent.editable ? "pointer" : "default",
@@ -353,7 +356,7 @@ export default function DataIsland() {
           <>
             <DeleteConfirm armed={confirming} onArm={() => setConfirming(true)} onCancel={() => setConfirming(false)} onConfirm={runBulkDelete}
               disabled={saving || !previewData} label="Delete"
-              confirmLabel={`Delete ${previewData?.total_rows ?? 0} rows`} style={{ marginRight: "auto" }} />
+              confirmLabel={`Delete ${count(previewData?.total_rows ?? 0, "row")}`} style={{ marginRight: "auto" }} />
             <Button size="sm" variant="secondary" onClick={() => setPreview(null)}>Cancel</Button>
           </>
         }
@@ -364,8 +367,15 @@ export default function DataIsland() {
         )}
         {previewData && (
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            <div style={{ fontSize: "var(--text-sm)", color: "var(--text-body)", lineHeight: "var(--leading-snug)" }}>
-              Deletes {summary}.
+            {/* Every row that goes, by name where it has one; link rows are counted. */}
+            <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 200, overflowY: "auto", fontSize: "var(--text-sm)", color: "var(--text-body)", lineHeight: "var(--leading-snug)" }}>
+              <div style={TH}>Deletes {count(previewData.total_rows, "row")}</div>
+              {previewData.total_deletes.map((t) => (
+                <div key={t.table}>
+                  <b style={{ fontWeight: "var(--weight-medium)", color: "var(--text-heading)" }}>{tally(t)}</b>
+                  {t.names?.length > 0 && <>: {t.names.join(", ")}</>}
+                </div>
+              ))}
             </div>
             {previewData.warnings.map((w, i) => (
               <div key={i} style={{ fontSize: "var(--text-xs)", color: "var(--warn-fg, var(--text-secondary))" }}>{w}</div>
@@ -380,7 +390,7 @@ export default function DataIsland() {
                     {r.missing ? `${shortId(r.id)} (already gone)` : r.label}
                   </span>
                   <span style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                    {r.deletes.map((t) => <Tag key={t.table}>{t.count} {t.label.toLowerCase()}</Tag>)}
+                    {r.deletes.map((t) => <Tag key={t.table}>{tally(t)}</Tag>)}
                     {r.deletes.length === 0 && !r.missing && <span style={MUTED}>no dependents</span>}
                   </span>
                 </div>
@@ -392,7 +402,7 @@ export default function DataIsland() {
                 <div style={TH}>Kept, but unlinked</div>
                 {previewData.total_detaches.map((t) => (
                   <div key={t.table} style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>
-                    {t.count} {t.label.toLowerCase()}
+                    {tally(t)}
                   </div>
                 ))}
               </div>

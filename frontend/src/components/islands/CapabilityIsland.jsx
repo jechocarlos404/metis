@@ -1,11 +1,11 @@
 import React from "react";
 import { PageHeader } from "../shell/PageHeader.jsx";
-import { Badge, Button, DeleteConfirm, Dialog, Icon, Input, Select } from "../../ds";
+import { Badge, Button, DeleteConfirm, Dialog, Icon, Input, Select, STATUS_TONE } from "../../ds";
 import { MaturityBadge } from "../shared/coverage.jsx";
 import { Term } from "../shared/Term.jsx";
 import { Guesses } from "../shared/Guesses.jsx";
 import { api } from "../../lib/api.js";
-import { FIT, MATURITY, count, plain, statusLabel } from "../../lib/words.js";
+import { FIT, MATURITY, NEED, count, needKey, plain, statusLabel } from "../../lib/words.js";
 import { FIT_TONE, STANCE_TONE } from "../../lib/ontology.js";
 
 /**
@@ -26,7 +26,14 @@ const SECTION = {
 const H2 = { fontSize: "var(--text-md)", fontWeight: "var(--weight-semibold)", color: "var(--text-heading)", margin: 0 };
 const SUBHEAD = { fontSize: "var(--text-xs)", fontWeight: "var(--weight-medium)", color: "var(--text-secondary)" };
 const NOTE = { fontSize: "var(--text-sm)", color: "var(--text-secondary)" };
-const STATUS_TONE = { done: "ok", in_progress: "accent" };
+
+// Maturity describes our build, so only a capability that is ours shows one;
+// the rest say where they stand instead ("not built yet", "only elsewhere").
+function Standing({ c }) {
+  if (c.ours) return <MaturityBadge maturity={c.maturity} />;
+  const need = NEED[needKey(c)];
+  return <span title={need.hint}><Badge tone={need.tone}>{need.label}</Badge></span>;
+}
 
 function subtreeIds(id, all, out = new Set()) {
   out.add(id);
@@ -54,6 +61,7 @@ export default function CapabilityIsland({ slug, canWrite = false }) {
   const [motivations, setMotivations] = React.useState(null);
   const [notFound, setNotFound] = React.useState(false);
   const [error, setError] = React.useState(null);
+  const [saved, setSaved] = React.useState(null); // what the last edit changed, said in place
   const [dialogOpen, setDialogOpen] = React.useState(false);
   const [draft, setDraft] = React.useState(null);
   const [saving, setSaving] = React.useState(false);
@@ -61,6 +69,7 @@ export default function CapabilityIsland({ slug, canWrite = false }) {
   const [confirmingDelete, setConfirmingDelete] = React.useState(false);
   const [removing, setRemoving] = React.useState(null); // goal id armed for unlink
   const [impact, setImpact] = React.useState(null); // null | "loading" | "error" | {dependents, dependencies}
+  const [techNames, setTechNames] = React.useState({}); // slug → name, for Build or buy
 
   const all = inventory ?? [];
   const cap = all.find((c) => c.slug === slug) ?? null;
@@ -75,6 +84,8 @@ export default function CapabilityIsland({ slug, canWrite = false }) {
       setInventory(inv);
       setSupply(sup);
       setGoals(goalList);
+      const techs = await Promise.all((sup.answer ?? []).map((o) => api(`/tech/${o.tech}`).catch(() => null)));
+      setTechNames(Object.fromEntries(techs.filter(Boolean).map((t) => [t.slug, t.name])));
       const entry = inv.find((c) => c.slug === slug);
       if (entry) setMotivations(await api(`/capabilities/${entry.id}/motivations`));
     } catch (e) {
@@ -123,6 +134,7 @@ export default function CapabilityIsland({ slug, canWrite = false }) {
   const addable = goals.filter((g) => !linked.has(g.id));
 
   const openEdit = () => {
+    setSaved(null);
     setDraft({ name: cap.name, description: cap.description ?? "", parentId: cap.parent_id ?? "", maturity: cap.maturity });
     setDialogError(null);
     setDialogOpen(true);
@@ -132,17 +144,23 @@ export default function CapabilityIsland({ slug, canWrite = false }) {
     if (!draft.name.trim()) return;
     setSaving(true);
     setDialogError(null);
+    const body = {
+      name: draft.name.trim(),
+      description: draft.description.trim() || null,
+      parent_id: draft.parentId || null,
+      maturity: draft.maturity,
+    };
+    const newParent = all.find((c) => c.id === body.parent_id);
+    const changes = [
+      body.name !== cap.name && `renamed from ${cap.name}`,
+      body.parent_id !== (cap.parent_id ?? null) && (newParent ? `moved under ${newParent.name}` : "moved to top level"),
+      body.maturity !== cap.maturity && `maturity now ${plain(MATURITY, body.maturity)}`,
+      body.description !== (cap.description ?? null) && "description updated",
+    ].filter(Boolean);
     try {
-      await api(`/capabilities/${cap.id}`, {
-        method: "PATCH",
-        body: {
-          name: draft.name.trim(),
-          description: draft.description.trim() || null,
-          parent_id: draft.parentId || null,
-          maturity: draft.maturity,
-        },
-      });
+      await api(`/capabilities/${cap.id}`, { method: "PATCH", body });
       setDialogOpen(false);
+      setSaved(changes.length ? `Saved: ${changes.join(", ")}.` : "Saved. Nothing changed.");
       await load();
     } catch (e) {
       setDialogError(e.status === 409 && e.detail?.slug
@@ -153,16 +171,41 @@ export default function CapabilityIsland({ slug, canWrite = false }) {
     }
   };
 
+  // What stops a delete, said before anyone confirms: features linked to this
+  // capability itself (not through a sub-capability) and technologies offered for it.
+  const inUse = () => {
+    const features = (supply?.realizations ?? []).filter((r) => !r.via);
+    const techs = supply?.answer ?? [];
+    if (!features.length && !techs.length) return null;
+    const named = [
+      ...features.map((r) => (r.product_name ? `${r.feature} (${r.product_name})` : r.feature)),
+      ...techs.map((o) => techNames[o.tech] ?? o.tech),
+    ];
+    const what = [
+      features.length && count(features.length, "feature"),
+      techs.length && count(techs.length, "technology", "technologies"),
+    ].filter(Boolean).join(" and ");
+    return `Can't delete: ${what} still use${features.length + techs.length === 1 ? "s" : ""} it: ${named.join(", ")}. Unlink ${features.length + techs.length === 1 ? "it" : "them"} first.`;
+  };
+
+  const armDelete = () => {
+    setSaved(null);
+    const blocked = inUse();
+    if (blocked) setError(blocked);
+    else {
+      setError(null);
+      setConfirmingDelete(true);
+    }
+  };
+
   const remove = async () => {
     setSaving(true);
     setError(null);
     try {
       await api(`/capabilities/${cap.id}`, { method: "DELETE" });
-      window.location.href = "/capabilities";
+      window.location.href = `/capabilities?deleted=${encodeURIComponent(cap.name)}`;
     } catch (e) {
-      setError(e.status === 409
-        ? "Features or technologies still use this capability. Unlink them first, then delete it."
-        : String(e.message));
+      setError(e.status === 409 ? `Can't delete: ${e.message}` : String(e.message));
       setConfirmingDelete(false);
       setSaving(false);
     }
@@ -206,7 +249,7 @@ export default function CapabilityIsland({ slug, canWrite = false }) {
     <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0, overflowY: "auto" }}>
       <PageHeader
         title={cap.name}
-        meta={<MaturityBadge maturity={cap.maturity} />}
+        meta={<Standing c={cap} />}
         actions={
           canWrite && (
             <span style={{ display: "inline-flex", gap: 8, alignItems: "center" }}>
@@ -220,7 +263,7 @@ export default function CapabilityIsland({ slug, canWrite = false }) {
                     : `Its ${children.length} sub-capabilities will move to the top level.`}
                 </span>
               )}
-              <DeleteConfirm armed={confirmingDelete} onArm={() => setConfirmingDelete(true)} onCancel={() => setConfirmingDelete(false)}
+              <DeleteConfirm armed={confirmingDelete} onArm={armDelete} onCancel={() => setConfirmingDelete(false)}
                 onConfirm={remove} disabled={saving} label="Delete" confirmLabel="Delete capability" />
             </span>
           )
@@ -229,9 +272,10 @@ export default function CapabilityIsland({ slug, canWrite = false }) {
 
       <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 16, maxWidth: 880 }}>
         {error && <div role="alert" style={{ fontSize: "var(--text-sm)", color: "var(--danger-fg)" }}>{error}</div>}
+        {saved && <div role="status" style={{ fontSize: "var(--text-sm)", color: "var(--ok-fg)" }}>{saved}</div>}
 
         <section style={SECTION}>
-          <h2 style={H2}>What it is</h2>
+          <h2 style={H2} title={facets.map(([k, v]) => `${k}: ${v}`).join("\n") || undefined}>What it is</h2>
           {cap.description ? (
             <div style={{ fontSize: "var(--text-sm)", color: "var(--text-body)", maxWidth: "68ch", textWrap: "pretty" }}>{cap.description}</div>
           ) : (
@@ -242,18 +286,13 @@ export default function CapabilityIsland({ slug, canWrite = false }) {
               Part of <a href={`/capabilities/${parent.slug}`}>{parent.name}</a>
             </div>
           )}
-          {facets.length > 0 && (
-            <div style={{ display: "flex", gap: 14, flexWrap: "wrap", fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>
-              {facets.map(([k, v]) => <span key={k}>{k}: {v}</span>)}
-            </div>
-          )}
           {children.length > 0 && (
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               <div style={SUBHEAD}>{count(children.length, "sub-capability", "sub-capabilities")}</div>
               {children.map((c) => (
                 <div key={c.id} style={{ display: "flex", gap: 8, alignItems: "center", fontSize: "var(--text-sm)" }}>
                   <a href={`/capabilities/${c.slug}`}>{c.name}</a>
-                  <MaturityBadge maturity={c.maturity} />
+                  <Standing c={c} />
                 </div>
               ))}
             </div>
@@ -268,7 +307,10 @@ export default function CapabilityIsland({ slug, canWrite = false }) {
               {canWrite ? <>Link a feature to it on <a href="/features">Features</a>.</> : "An editor or admin can link features to it."}
             </div>
           ) : (
-            ours.map((g) => <ProductGroup key={g.product?.id ?? "none"} group={g} slugByName={slugByName} external={false} />)
+            <>
+              {!cap.ours && <div style={NOTE}>Not built yet: our features for it are planned or in progress.</div>}
+              {ours.map((g) => <ProductGroup key={g.product?.id ?? "none"} group={g} slugByName={slugByName} external={false} />)}
+            </>
           )}
           {canWrite && <Guesses query={{ capability_id: cap.id }} name="subject" title="Features and technologies that probably use it" onConfirmed={() => load()} />}
           {theirs.length > 0 && (
@@ -316,7 +358,7 @@ export default function CapabilityIsland({ slug, canWrite = false }) {
             ) : (
               offers.map((o) => (
                 <div key={o.tech} style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", fontSize: "var(--text-sm)" }}>
-                  <a href={`/tech/${o.tech}`} style={{ flex: "1 1 160px", minWidth: 0 }}>{o.tech}</a>
+                  <a href={`/tech/${o.tech}`} title={o.tech} style={{ flex: "1 1 160px", minWidth: 0 }}>{techNames[o.tech] ?? o.tech}</a>
                   <Badge tone={FIT_TONE[o.fit] ?? "neutral"}><Term dict={FIT} value={o.fit} /></Badge>
                   <Badge tone={o.stance ? STANCE_TONE[o.stance] ?? "neutral" : "neutral"}>{o.stance ? plain({}, o.stance) : "no stance"}</Badge>
                   {typeof o.cost?.ops_burden === "number" && (
@@ -367,7 +409,11 @@ export default function CapabilityIsland({ slug, canWrite = false }) {
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             {dialogError && <div role="alert" style={{ fontSize: "var(--text-sm)", color: "var(--danger-fg)" }}>{dialogError}</div>}
             <Input label="Name" hint="A noun phrase, e.g. Route planning" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
-            <Input label="Description" value={draft.description} onChange={(e) => setDraft({ ...draft, description: e.target.value })} />
+            <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <span style={{ fontSize: "var(--text-xs)", fontWeight: "var(--weight-medium)", color: "var(--text-heading)" }}>Description</span>
+              <textarea rows={3} value={draft.description} onChange={(e) => setDraft({ ...draft, description: e.target.value })}
+                style={{ padding: "8px 10px", fontSize: "var(--text-sm)", fontFamily: "var(--font-body)", color: "var(--text-heading)", background: "var(--surface-card)", border: "1px solid var(--border-control)", borderRadius: "var(--radius-sm)", resize: "vertical" }} />
+            </label>
             <Select label="Maturity" value={draft.maturity} onChange={(e) => setDraft({ ...draft, maturity: e.target.value })}
               options={Object.entries(MATURITY).map(([value, label]) => ({ value, label }))} />
             <Select label="Part of" value={draft.parentId} onChange={(e) => setDraft({ ...draft, parentId: e.target.value })} options={parentOptions} />
@@ -412,7 +458,7 @@ function ImpactList({ title, items }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
       <div style={SUBHEAD}>{title}</div>
-      {items.map((c) => (
+      {[...items].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" })).map((c) => (
         <a key={c.id} href={`/capabilities/${c.slug}`} style={{ fontSize: "var(--text-sm)" }}>{c.name}</a>
       ))}
     </div>

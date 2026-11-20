@@ -61,14 +61,20 @@ def capability_supply(envelope: dict) -> str:
         ]
     )
     realizations = envelope.get("realizations") or []
-    if realizations:
-        lines += ["", f"Build side — {len(realizations)} feature(s) realize it:"]
+    # An external product's feature is known, never our build side.
+    ours = [f for f in realizations if not f.get("external")]
+    theirs = [f for f in realizations if f.get("external")]
+    if ours:
+        lines += ["", f"Build side — {len(ours)} feature(s) of ours realize it:"]
         lines += _table(
             [
                 [f["feature"], f["status"], f"{f['tickets']} ticket(s)", f["product"] or ""]
-                for f in realizations
+                for f in ours
             ]
         )
+    if theirs:
+        lines += ["", f"External products — {len(theirs)} feature(s), not ours:"]
+        lines += _table([[f["feature"], f["status"], f["product"] or ""] for f in theirs])
     if rows:
         lines.append("")
     return _tail(envelope, lines)

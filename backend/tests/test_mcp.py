@@ -143,6 +143,26 @@ def test_bound_offer_is_marked_in_place_not_filtered():
     assert "← bound in metis::data::Vector index" in text
 
 
+def test_build_side_counts_only_our_features():
+    """An external product's feature is set apart, never counted as ours, so
+    the build side agrees with `capability`'s count of our features."""
+    text = render.capability_supply(
+        {**SUPPLY, "realizations": [
+            {"feature": "Spec similarity", "product": "metis", "external": False,
+             "status": "in_progress", "tickets": 4},
+            {"feature": "Find similar routes", "product": "komoot", "external": True,
+             "status": "done", "tickets": 0},
+        ]}
+    )
+    lines = text.splitlines()
+    assert "Build side — 1 feature(s) of ours realize it:" in lines
+    ours = lines.index("Build side — 1 feature(s) of ours realize it:")
+    assert lines[ours + 1].startswith("Spec similarity")
+    theirs = lines.index("External products — 1 feature(s), not ours:")
+    assert lines[theirs + 1].split() == ["Find", "similar", "routes", "done", "komoot"]
+    assert text.endswith("Open: /capabilities/semantic-search")
+
+
 def test_exposure_prints_as_of():
     """An agent quoting a stale exposure number is worse than one that says it
     does not know."""

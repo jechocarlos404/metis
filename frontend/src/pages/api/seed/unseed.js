@@ -280,9 +280,9 @@ class Unseeder {
     return this.instEpics.filter((epic) => !deadProducts.has(epic.product_id));
   }
 
-  note(collection, action) {
+  note(collection, action, n = 1) {
     const key = `${collection}:${action}`;
-    this.counts[key] = (this.counts[key] || 0) + 1;
+    this.counts[key] = (this.counts[key] || 0) + n;
   }
 
   count(collection) {
@@ -315,21 +315,27 @@ class Unseeder {
 
   /** `unsure`: the delete depends on a capability or technology that a list
    * this account can't read might keep. A dry run then says so instead of
-   * claiming it. */
-  async remove(collection, route, label, unsure = false) {
+   * claiming it. `cascades`: rows of other kinds the delete takes with it,
+   * already counted on its line, counted under their own kind too, so the
+   * summary counts each kind the way the import does. */
+  async remove(collection, route, label, unsure = false, cascades = {}) {
+    const tally = (action) => {
+      this.note(collection, action);
+      for (const [kind, n] of Object.entries(cascades)) if (n > 0) this.note(kind, action, n);
+    };
     if (this.dryRun) {
       if (unsure && this.unreadable.length > 0) {
-        this.note(collection, "can't tell");
+        tally("can't tell");
         this.notes.push(`can't tell whether ${label} goes`);
         return;
       }
-      this.note(collection, "would delete");
+      tally("would delete");
       this.notes.push(`would delete ${label}`);
       return;
     }
     const { status, body } = await this.api.delete(route);
     if (status === 204) {
-      this.note(collection, "deleted");
+      tally("deleted");
       this.notes.push(`deleted ${label}`);
     } else if (status === 404) {
       this.note(collection, "absent");
@@ -637,12 +643,14 @@ class Unseeder {
         ]);
         continue;
       }
-      await this.remove("products", `/api/products/${product.id}`, this.productLine(product));
+      const { label, cascades } = this.productLine(product);
+      await this.remove("products", `/api/products/${product.id}`, label, false, cascades);
     }
   }
 
   /** A product's delete takes its plan, stacks and the rest of its own rows
-   * with it; each is counted here. What only pointed at it stays, and says so. */
+   * with it; each is counted here. What only pointed at it stays, and says so.
+   * The kinds an import counts come back too, for the summary. */
   productLine(product) {
     const id = product.id;
     const epics = this.instEpics.filter((epic) => epic.product_id === id);
@@ -655,9 +663,10 @@ class Unseeder {
     const slotIds = new Set(this.instSlots.filter((slot) => stackIds.has(slot.stack_id)).map((slot) => slot.id));
     const uses = (this.instUsage.get(id) || []).length;
     const byHand = this.instBundles.filter((bundle) => bundle.product_id === id).length;
+    const plans = (this.instPlans.get(id) || []).length;
     const n = (rows) => rows.length;
     const parts = [
-      [n(this.instPlans.get(id) || []), "plan document"],
+      [plans, "plan document"],
       [n(epics), "epic"],
       [storyIds.size, "story", "stories"],
       [n(tickets), "ticket"],
@@ -696,31 +705,39 @@ class Unseeder {
           `${agree(recorded.length, "stays", "stay")}, no longer naming it`,
       );
     }
-    return [
-      `product ${JSON.stringify(product.name)}${parts.length > 0 ? `, with ${andList(parts)}` : ""}`,
-      ...after,
-    ].join("; ");
+    return {
+      label: [
+        `product ${JSON.stringify(product.name)}${parts.length > 0 ? `, with ${andList(parts)}` : ""}`,
+        ...after,
+      ].join("; "),
+      cascades: { tech_usage: uses, bundles: byHand, decompositions: plans },
+    };
   }
 
-  /** A feature's delete takes its guesses and capability links. Another
-   * product's story and a journey step that pointed at it stay. */
+  /** A feature's delete takes its capability links and guesses, each
+   * counted, and a link the file doesn't declare named. Another product's
+   * story and a journey step that pointed at it stay. */
   featureLine(feature) {
     const parts = [];
-    const guesses = this.instGuesses.filter((guess) => guess.feature_id === feature.id).length;
-    if (guesses > 0) parts.push(`its ${count(guesses, "guess", "guesses")}`);
+    const links = feature.capability_ids || [];
     const file = [...this.features.entries()].find(([, row]) => row.id === feature.id)?.[0];
     const declared = new Set(
       ((this.doc.features || []).find((row) => row.ref === file)?.capability_refs || [])
         .map((ref) => this.caps.get(ref)?.id),
     );
     const capNames = new Map(this.instCaps.map((cap) => [cap.id, cap.name]));
-    const extra = (feature.capability_ids || []).filter((cid) => !declared.has(cid));
-    if (extra.length > 0) {
+    const extra = links.filter((cid) => !declared.has(cid));
+    if (links.length > 0) {
       parts.push(
-        `its ${agree(extra.length, "link", "links")} to ${andList(extra.map((cid) => JSON.stringify(capNames.get(cid) ?? cid)))}, ` +
-          `which the seed does not have`,
+        `its ${count(links.length, "capability link")}` +
+          (extra.length > 0
+            ? `, including the ${agree(extra.length, "link", "links")} to ` +
+              `${andList(extra.map((cid) => JSON.stringify(capNames.get(cid) ?? cid)))} the seed does not have`
+            : ""),
       );
     }
+    const guesses = this.instGuesses.filter((guess) => guess.feature_id === feature.id).length;
+    if (guesses > 0) parts.push(`its ${count(guesses, "guess", "guesses")}`);
     const after = [];
     const deadProducts = this.deadProductIds();
     for (const epic of this.instEpics.filter((row) => !deadProducts.has(row.product_id))) {
@@ -732,12 +749,16 @@ class Unseeder {
       const steps = (journey.steps || []).filter((step) => step.feature_id === feature.id).length;
       if (steps > 0) after.push(`journey ${JSON.stringify(journey.name)} keeps its ${agree(steps, "step", "steps")}, no longer linked to it`);
     }
-    return [`feature ${JSON.stringify(feature.name)}${parts.length > 0 ? `, with ${andList(parts)}` : ""}`, ...after].join("; ");
+    return {
+      label: [`feature ${JSON.stringify(feature.name)}${parts.length > 0 ? `, with ${andList(parts)}` : ""}`, ...after].join("; "),
+      cascades: { guesses },
+    };
   }
 
   async removeFeatures() {
     for (const feature of this.features.values()) {
-      await this.remove("features", `/api/features/${feature.id}`, this.featureLine(feature));
+      const { label, cascades } = this.featureLine(feature);
+      await this.remove("features", `/api/features/${feature.id}`, label, false, cascades);
     }
   }
 
@@ -761,6 +782,7 @@ class Unseeder {
         `/api/tech/${encodeURIComponent(tech.slug)}`,
         `technology ${JSON.stringify(tech.name)}${parts.length > 0 ? `, with ${andList(parts)}` : ""}`,
         true,
+        { satisfactions: sats.length, guesses: guesses.length },
       );
     }
     const deadTechs = this.dead("techs");
@@ -788,7 +810,10 @@ class Unseeder {
       const tail = guesses.length > 0
         ? `, with the ${agree(guesses.length, "guess", "guesses")} that ${andList(guesses.map((g) => JSON.stringify(techNames.get(g.tech_id) ?? g.tech_id)))} ${agree(guesses.length, "satisfies", "satisfy")} it`
         : "";
-      await this.remove("capabilities", `/api/capabilities/${cap.id}`, `capability ${JSON.stringify(cap.name)}${tail}`, true);
+      await this.remove(
+        "capabilities", `/api/capabilities/${cap.id}`, `capability ${JSON.stringify(cap.name)}${tail}`, true,
+        { guesses: guesses.length },
+      );
     }
   }
 
@@ -828,8 +853,12 @@ class Unseeder {
         edges: this.count("edges"),
         features: this.count("features"),
         products: this.count("products"),
+        bundles: this.count("bundles"),
+        decompositions: this.count("decompositions"),
         technologies: this.count("technologies"),
+        tech_usage: this.count("tech_usage"),
         satisfactions: this.count("satisfactions"),
+        guesses: this.count("guesses"),
         capabilities: this.count("capabilities"),
         goals: this.count("goals"),
       },

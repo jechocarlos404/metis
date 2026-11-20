@@ -122,7 +122,7 @@ TOOLS = [
             "type": "object",
             "properties": {
                 "window_days": {"type": "integer", "default": 180},
-                "product": {"type": "string", "description": "Product slug, optional"},
+                "product": {"type": "string", "description": "Product id or slug, optional"},
             },
         },
     ),
@@ -134,7 +134,7 @@ TOOLS = [
         ),
         inputSchema={
             "type": "object",
-            "properties": {"product": {"type": "string", "description": "Product slug"}},
+            "properties": {"product": {"type": "string", "description": "Product id or slug"}},
             "required": ["product"],
         },
     ),
@@ -160,7 +160,7 @@ TOOLS = [
         inputSchema={
             "type": "object",
             "properties": {
-                "product": {"type": "string", "description": "Product slug"},
+                "product": {"type": "string", "description": "Product id or slug"},
                 "slot": {"type": "string", "description": "Slot id, optional"},
                 "archetype": {"type": "string", "description": "Archetype stack id"},
             },
@@ -200,8 +200,9 @@ TOOLS = [
             "What we can already do, most reused first: each capability's "
             "slug and exact name, its maturity when ours, our products and "
             "feature count (any status), and external products that have it. "
-            "Ours (a finished feature of ours realizes it) first, then external "
-            "only, then not built yet (realized by no finished feature)."
+            "Ours (a finished feature of ours realizes it) first, then only "
+            "elsewhere (an external product has it), then not built yet "
+            "(realized by no finished feature)."
         ),
         inputSchema={
             "type": "object",
@@ -422,7 +423,10 @@ async def _dispatch(name: str, args: dict) -> str:
                 "limit": args.get("limit", 20),
             },
         )
-        return render.tech_search(page, args.get("q"))
+        catalog = page["total"]
+        if not catalog and any(args.get(k) for k in ("q", "kind", "layer", "adoption")):
+            catalog = (await client.get("/api/tech", {"limit": 1}))["total"]
+        return render.tech_search(page, args.get("q"), catalog)
 
     if name == "capability_supply":
         # Found the way `capability` finds it, so an unknown one is the same
@@ -444,21 +448,24 @@ async def _dispatch(name: str, args: dict) -> str:
         )
 
     if name == "tech_exposure":
+        slug = None
+        if args.get("product"):
+            product = await _product(args["product"])
+            if product is None:
+                return render.no_product(args["product"])
+            slug = _safe_slug(product["slug"], "product")
         return render.tech_exposure(
             await client.get(
-                "/api/exposure",
-                {
-                    "window_days": args.get("window_days", 180),
-                    "product": (
-                        _safe_slug(args["product"], "product") if args.get("product") else None
-                    ),
-                },
+                "/api/exposure", {"window_days": args.get("window_days", 180), "product": slug}
             )
         )
 
     if name == "stack_redundancy":
+        product = await _product(args["product"])
+        if product is None:
+            return render.no_product(args["product"])
         return render.stack_redundancy(
-            await client.get(f"/api/stacks/{_safe_slug(args['product'], 'product')}/redundancy")
+            await client.get(f"/api/stacks/{_safe_slug(product['slug'], 'product')}/redundancy")
         )
 
     if name == "tech_encounters":
@@ -469,10 +476,11 @@ async def _dispatch(name: str, args: dict) -> str:
 
     if name == "stack_recommend":
         body = {k: args[k] for k in ("slot", "archetype") if args.get(k)}
-        product = _safe_slug(args["product"], "product")
-        return render.stack_recommend(
-            await client.post(f"/api/stacks/{product}/recommend", body)
-        )
+        product = await _product(args["product"])
+        if product is None:
+            return render.no_product(args["product"])
+        slug = _safe_slug(product["slug"], "product")
+        return render.stack_recommend(await client.post(f"/api/stacks/{slug}/recommend", body))
 
     if name == "propose_binding":
         return await _propose(args)
@@ -519,10 +527,16 @@ async def _dispatch(name: str, args: dict) -> str:
         feature_id, named = await _feature_id(args["feature"])
         if feature_id is None:
             return render.no_feature(args["feature"], named, products)
+        try:
+            why = await client.get(f"/api/features/{feature_id}/why")
+        except ApiError as exc:
+            if exc.status == 404:
+                return render.no_feature(args["feature"], [], products)
+            raise
         # The chain lists each goal once; the motivations say which
         # capability each goal motivates, the goals and products whose it is.
         return render.feature_why(
-            await client.get(f"/api/features/{feature_id}/why"),
+            why,
             await client.get(f"/api/features/{feature_id}"),
             products,
             await client.get("/api/goals"),
@@ -540,7 +554,9 @@ async def _dispatch(name: str, args: dict) -> str:
             if len(named) != 1:
                 return render.no_journey(value, named)
             journey = _safe_id(named[0]["id"])
-        return render.journey_analysis(await client.get(f"/api/journeys/{journey}/analysis"))
+        return await _or_absent(
+            render.journey_analysis, f"/api/journeys/{journey}/analysis", render.no_journey(value, [])
+        )
 
     if name == "ready_features":
         products = await client.get("/api/products")
@@ -594,7 +610,11 @@ async def _recheck(value: str) -> str:
     feature_id, named = await _feature_id(value)
     if feature_id is None:
         return render.no_feature(value, named, products)
-    return render.recheck(await client.get(f"/api/graph/recheck/{feature_id}"), products)
+    return await _or_absent(
+        lambda answer: render.recheck(answer, products),
+        f"/api/graph/recheck/{feature_id}",
+        render.no_feature(value, [], products),
+    )
 
 
 async def _find_capability(value: str) -> tuple[dict | None, str]:

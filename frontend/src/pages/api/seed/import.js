@@ -1,6 +1,6 @@
 export const prerender = false;
 
-import { EDGE, statusLabel } from "../../../lib/words.js";
+import { EDGE, andList, count, statusLabel } from "../../../lib/words.js";
 
 const backend = () =>
   (process.env.API_INTERNAL_URL || "http://localhost:8000").replace(/\/$/, "");
@@ -592,9 +592,9 @@ class Loader {
         this.capIds.set(capability.ref, body.id);
         this.note("capabilities", "created");
         added.push(capability.name);
-      } else if (status === 409 && typeof body?.detail?.slug === "string") {
+      } else if (status === 409 && typeof body?.existing?.slug === "string") {
         // Created since the list was read: the same slug is the same capability.
-        const row = (await this.api.get("/api/capabilities")).find((c) => c.slug === body.detail.slug);
+        const row = (await this.api.get("/api/capabilities")).find((c) => c.slug === body.existing.slug);
         if (!row) throw new Error(`POST /api/capabilities for ${capability.name} returned 409 for a slug no capability has: ${JSON.stringify(body)}`);
         this.reuseCapability(capability, row);
       } else {
@@ -861,6 +861,22 @@ class Loader {
           usage.get(productId).add(techId);
           this.note("tech_usage", "created");
         }
+      }
+    }
+
+    // Removing a product leaves a person's recorded use of a technology with
+    // no product, and an import never links one back: say so, so a re-import
+    // isn't read as a full restore.
+    for (const tech of techs) {
+      const slug = techSlug(tech);
+      if (!existing.has(slug) || !(tech.products || []).length) continue;
+      const detail = await this.api.getOptional(`/api/tech/${encodeURIComponent(slug)}`);
+      const people = (detail?.encounters || []).filter((row) => !row.product_id).map((row) => row.person);
+      if (people.length > 0) {
+        this.notes.push(
+          `technology ${JSON.stringify(tech.name)} has ${count(people.length, "recorded use")} naming no product ` +
+            `(${andList(people)}); an import never links a recorded use to a product`,
+        );
       }
     }
 

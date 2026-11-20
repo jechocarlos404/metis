@@ -1,8 +1,10 @@
 export class ApiError extends Error {
-  constructor(detail, status) {
+  /** `existing`: the row a 409 clashes with, `{slug, name}`, when it names one. */
+  constructor(detail, status, existing) {
     super(typeof detail === "string" ? detail : JSON.stringify(detail));
     this.detail = detail;
     this.status = status;
+    this.existing = existing;
   }
 }
 
@@ -24,12 +26,15 @@ export async function api(path, { method = "GET", body } = {}) {
   }
   if (!res.ok) {
     let detail = res.statusText;
+    let existing;
     try {
-      detail = (await res.json()).detail ?? detail;
+      const said = await res.json();
+      detail = said.detail ?? detail;
+      existing = said.existing;
     } catch {
       /* non-JSON error body */
     }
-    throw new ApiError(detail, res.status);
+    throw new ApiError(detail, res.status, existing);
   }
   if (res.status === 204) return null;
   return res.json();

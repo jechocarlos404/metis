@@ -371,13 +371,13 @@ export default function DataIsland() {
         )}
         {previewData && (
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            {/* Every row that goes, by name where it has one; link rows are counted. */}
+            {/* Every row that goes, by name where it has one (a link by its two ends); the rest are counted. */}
             <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 200, overflowY: "auto", fontSize: "var(--text-sm)", color: "var(--text-body)", lineHeight: "var(--leading-snug)" }}>
               <div style={TH}>Deletes {count(previewData.total_rows, "row")}</div>
               {previewData.total_deletes.map((t) => (
                 <div key={t.table}>
                   <b title={rawTable(t)} style={{ fontWeight: "var(--weight-medium)", color: "var(--text-heading)" }}>{tally(t)}</b>
-                  {t.names?.length > 0 && <>: {t.names.join(", ")}</>}
+                  {t.names?.length > 0 && <>: {t.names.join("; ")}</>}
                 </div>
               ))}
             </div>

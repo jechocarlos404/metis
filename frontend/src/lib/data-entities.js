@@ -393,6 +393,7 @@ export const ENTITIES = [
  *  Tables not listed keep the API's label. */
 export const TABLE_WORDS = {
   motivations: ["goal link", "goal links"],
+  feature_capabilities: ["capability link", "capability links"],
   feature_edges: ["link between features", "links between features"],
   product_bundles: ["capability added by hand", "capabilities added by hand"],
   product_technologies: ["technology in use", "technologies in use"],

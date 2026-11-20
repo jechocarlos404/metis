@@ -180,8 +180,8 @@ on a technology, below) are links metis stores as marked guesses:
   confirmed and goes in `capability_refs`.
 
 For an **external** product: no evidence anchors (there is no code to point at),
-leave capability `maturity` unset — it describes *our* implementation, and an
-external-only capability's maturity is ignored anyway. Put only the links you
+leave capability `maturity` unset — it describes *our* implementation, and a
+capability that is only elsewhere has its maturity ignored anyway. Put only the links you
 can confirm in `capability_refs`; anything inferred goes in
 `capability_guesses`, with `unknown_capabilities: true`.
 

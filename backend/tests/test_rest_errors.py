@@ -1,7 +1,8 @@
 """REST errors: one shape, 404 for an unknown id, and oversized bodies refused.
 
-`detail` is always there, as a sentence or (the write boundary, a name clash)
-an object with a `message`; the frontend and the seed scripts read it.
+`detail` is always there, as a sentence. The write boundary's 403 is the one
+object (`{error, message, href}`), which agents and the seed scripts parse; a
+name clash keeps the row it clashes with one key over, under `existing`.
 """
 
 import json
@@ -9,11 +10,12 @@ import uuid
 
 import pytest
 import pytest_asyncio
+from fastapi import HTTPException
 from httpx import ASGITransport, AsyncClient
 
 from app.config import Settings, get_settings
 from app.db import get_db
-from app.main import MAX_BODY, MAX_READ_BODY, create_app
+from app.main import MAX_BODY, MAX_READ_BODY, create_app, http_error
 from app.schemas.capability import CapabilityCreate
 from app.services import capabilities as capability_service
 
@@ -76,6 +78,25 @@ async def test_a_validation_error_reads_as_a_sentence(client):
         content=b"{not json", headers={"content-type": "application/json"},
     )
     assert res.status_code == 422 and "JSON decode error" in res.json()["detail"]
+
+
+async def test_a_refusal_with_more_to_say_still_reads_as_a_sentence(client, db):
+    """A clash names the row it clashes with one key over; a feature cycle
+    keeps its ids the same way. Only the write boundary's 403 stays an object."""
+    async with db() as s:
+        await capability_service.create_capability(s, CapabilityCreate(name="Search"))
+    res = await client.post("/api/capabilities", json={"name": "search"})
+    assert (res.status_code, res.json()) == (
+        409, {"detail": '"Search" already exists', "existing": {"slug": "search", "name": "Search"}}
+    )
+
+    said = await http_error(None, HTTPException(409, {"message": "A circle.", "cycle": ["a", "b"]}))
+    assert json.loads(said.body) == {"detail": "A circle.", "cycle": ["a", "b"]}
+    boundary = {"error": "human_action_required", "message": "A human action.", "href": "/home"}
+    said = await http_error(None, HTTPException(403, boundary))
+    assert json.loads(said.body) == {"detail": boundary}
+    said = await http_error(None, HTTPException(404, "Feature not found"))
+    assert json.loads(said.body) == {"detail": "Feature not found"}
 
 
 def _idea(size: int) -> bytes:

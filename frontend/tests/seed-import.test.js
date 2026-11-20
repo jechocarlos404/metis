@@ -22,6 +22,7 @@ class FakeMetis {
     this.motivations = [];
     this.bundles = [];
     this.usage = [];
+    this.sats = [];
     this.guesses = [];
     // 403 plays an account that may not read guesses (a viewer, an MCP token).
     this.guessesStatus = 200;
@@ -62,7 +63,7 @@ class FakeMetis {
       this.capabilities.push(...this.racing.filter(clashes));
       this.racing = this.racing.filter((c) => !clashes(c));
       const held = this.capabilities.find(clashes);
-      if (held) return [409, { detail: { message: `"${held.name}" already exists`, slug: held.slug, name: held.name } }];
+      if (held) return [409, { detail: `"${held.name}" already exists`, existing: { slug: held.slug, name: held.name } }];
       const row = { id: this.id("cap"), slug, parent_id: null, ...body };
       this.capabilities.push(row);
       return [201, row];
@@ -99,14 +100,34 @@ class FakeMetis {
     }
     if (route === "GET /api/features/edges") return [200, this.edges];
     if (route === "POST /api/features/edges") {
-      this.edges.push(body);
-      return [201, body];
+      const row = { id: this.id("edge"), ...body };
+      this.edges.push(row);
+      return [201, row];
     }
     if (route === "GET /api/guesses") {
       return this.guessesStatus === 200 ? [200, this.guesses] : [this.guessesStatus, { detail: "Requires editor or admin role" }];
     }
-    if (route === "GET /api/tech/satisfactions") return [200, []];
-    if (route === "GET /api/tech" && this.techs.length > 0) return [200, { rows: this.techs, total: this.techs.length }];
+    if (route === "GET /api/tech/satisfactions") return [200, this.sats];
+    if (route === "POST /api/tech/satisfactions") {
+      const row = { id: this.id("sat"), ...body };
+      this.sats.push(row);
+      return [201, row];
+    }
+    if (route === "GET /api/tech") {
+      const rows = this.techs.map((t) => ({ ...t, used_by: this.usage.filter((u) => u.tech_id === t.id).length }));
+      return [200, { rows, total: rows.length }];
+    }
+    if (route === "POST /api/tech") {
+      const row = { id: this.id("tech"), ...body };
+      this.techs.push(row);
+      return [201, row];
+    }
+    if (route === "PUT /api/stacks/usage") {
+      const productId = new URLSearchParams(path.split("?")[1]).get("product_id");
+      const row = { id: this.id("use"), product_id: productId, tech_id: body.tech_id };
+      this.usage.push(row);
+      return [201, row];
+    }
     if ((m = route.match(/^GET \/api\/tech\/([a-z0-9-]+)$/)) && this.techs.some((t) => t.slug === m[1])) {
       const tech = this.techs.find((t) => t.slug === m[1]);
       return [200, { ...tech, versions: [], outgoing: [], incoming: [], encounters: this.encounters.filter((e) => e.tech_id === tech.id) }];
@@ -119,7 +140,6 @@ class FakeMetis {
     if (route === "GET /api/tickets") return [200, this.tickets];
     if ((m = route.match(/^GET \/api\/products\/([^/]+)\/epics$/))) return [200, this.epics.filter((e) => e.product_id === m[1])];
     if ((m = route.match(/^GET \/api\/products\/([^/]+)\/strategies$/))) return [200, []];
-    if (route === "GET /api/tech") return [200, { rows: [], total: 0 }];
     if (route === "GET /api/motivations") return [200, this.motivations];
     if (route === "GET /api/product-bundles") return [200, this.bundles];
     if (route === "GET /api/stacks/usage") {
@@ -140,6 +160,17 @@ class FakeMetis {
     // row a removal takes with it.
     if ((m = route.match(/^DELETE \/api\/capabilities\/([^/]+)\/motivations\/([^/]+)$/))) {
       this.motivations = this.motivations.filter((r) => !(r.capability_id === m[1] && r.goal_id === m[2]));
+      return [204, null];
+    }
+    if ((m = route.match(/^DELETE \/api\/tech\/satisfactions\/([^/]+)$/))) {
+      this.sats = this.sats.filter((r) => r.id !== m[1]);
+      return [204, null];
+    }
+    if ((m = route.match(/^DELETE \/api\/tech\/([^/]+)$/))) {
+      const tech = this.techs.find((t) => t.slug === m[1]);
+      this.techs = this.techs.filter((t) => t !== tech);
+      this.sats = this.sats.filter((r) => r.tech_id !== tech.id);
+      this.guesses = this.guesses.filter((g) => g.tech_id !== tech.id);
       return [204, null];
     }
     if ((m = route.match(/^DELETE \/api\/features\/edges\/([^/]+)$/))) {
@@ -196,6 +227,9 @@ class FakeMetis {
       ...this.capabilities.map((c) => `capability ${c.name}`),
       ...this.products.map((p) => `product ${p.name}`),
       ...this.features.map((f) => `feature ${f.name}`),
+      ...this.features.flatMap((f) => (f.capability_ids || []).map((c) => `capability link ${f.name} -> ${c}`)),
+      ...this.techs.map((t) => `technology ${t.name}`),
+      ...this.sats.map((r) => `technology link ${r.tech_id} -> ${r.capability_id}`),
       ...this.motivations.map((r) => `goal link ${r.goal_title} -> ${r.capability_name}`),
       ...this.bundles.map((b) => `bundle ${b.product_name} -> ${b.capability_name}`),
       ...this.usage.map((u) => `usage ${u.product_id} -> ${u.tech_id}`),
@@ -437,6 +471,20 @@ describe("dry run and re-import", () => {
     assert.deepEqual(again.body.notes, []);
     assert.deepEqual(again.body.warnings, []);
   });
+
+  test("a recorded use that lost its product is named, since an import doesn't link it back", async () => {
+    use(new FakeMetis({ products: [{ name: "Metis" }] }));
+    metis.techs.push({ id: "tech-n", slug: "nestjs", name: "NestJS" });
+    metis.encounters.push(
+      { id: "enc-1", tech_id: "tech-n", person: "ana", product_id: null },
+      { id: "enc-2", tech_id: "tech-n", person: "bo", product_id: metis.products[0].id },
+    );
+    const doc = { ...fresh(), technologies: [{ ref: "t", name: "NestJS", kind: "framework", products: ["p"] }] };
+    const { body } = await importSeed(doc);
+    assert.ok(body.notes.includes(
+      'technology "NestJS" has 1 recorded use naming no product (ana); an import never links a recorded use to a product',
+    ), body.notes.join("\n"));
+  });
 });
 
 describe("unseed uses the importer's capability identity", () => {
@@ -583,6 +631,9 @@ describe("removing a seeded product names every row it deletes or keeps", () => 
     assert.deepEqual([...before].filter((row) => !after.has(row)).sort(), [
       "bundle Probe -> Probe Cap",
       "capability Probe Cap",
+      `capability link Probe feature -> ${cap.id}`,
+      `capability link Probe feature -> ${shared.id}`,
+      `capability link Second feature -> ${cap.id}`,
       "edge feat-other -> feat-probe",
       "edge feat-probe -> feat-second",
       "edge feat-second -> feat-probe",
@@ -599,8 +650,8 @@ describe("removing a seeded product names every row it deletes or keeps", () => 
       'deleted link "Second feature" needs "Probe feature"',
       'deleted link "Probe feature" related to "Second feature" (not in the seed; it goes with its features)',
       'deleted link "Other feature" needs "Probe feature" (feature "Other feature" is outside the seed; the link goes with the deleted one)',
-      'deleted feature "Probe feature"',
-      'deleted feature "Second feature", with its 1 guess',
+      'deleted feature "Probe feature", with its 2 capability links',
+      'deleted feature "Second feature", with its 1 capability link and its 1 guess',
       'deleted product "Probe", with its use of 1 technology and 1 capability added by hand',
       'deleted capability "Probe Cap"',
       'deleted goal "Probe org goal"',
@@ -614,6 +665,51 @@ describe("removing a seeded product names every row it deletes or keeps", () => 
     // product's delete and counted "absent".
     assert.deepEqual(body.counts.features, { deleted: 2 });
     assert.deepEqual(body.counts.products, { deleted: 1 });
+    // What a line counts is counted under its own kind too, as the import does.
+    assert.deepEqual(body.counts.guesses, { deleted: 1 });
+    assert.deepEqual(body.counts.tech_usage, { deleted: 1 });
+    assert.deepEqual(body.counts.bundles, { deleted: 1 });
+  });
+
+  test("a link the file doesn't declare is named on its feature's line", async () => {
+    use(probe());
+    const doc = probeSeed();
+    doc.features[0].capability_refs = ["c"];
+    const { body } = await unseed(doc);
+    assert.ok(body.notes.includes(
+      'would delete feature "Probe feature", with its 2 capability links, including the link to "Shared Cap" the seed does not have',
+    ), body.notes.join("\n"));
+  });
+
+  test("a round trip counts each kind the same way in and out", async () => {
+    use(new FakeMetis());
+    const doc = {
+      format: "metis-seed/v1",
+      capabilities: [{ ref: "c1", name: "File Storage" }, { ref: "c2", name: "Semantic Search" }],
+      products: [{ ref: "p", name: "Round" }],
+      features: [
+        { ref: "f1", product_ref: "p", name: "Upload a file", capability_refs: ["c1", "c2"] },
+        { ref: "f2", product_ref: "p", name: "Find a file", capability_refs: ["c2"] },
+      ],
+      edges: [{ src_ref: "f2", dst_ref: "f1" }],
+      technologies: [
+        { ref: "t1", name: "MinIO", kind: "service", products: ["p"], satisfies: [{ capability_ref: "c1", fit: "native" }] },
+        { ref: "t2", name: "Qdrant", kind: "service", products: ["p"], satisfies: [{ capability_ref: "c2", fit: "native" }] },
+      ],
+    };
+    const imported = await importSeed(doc, { dryRun: false });
+    assert.deepEqual(imported.body.counts.satisfactions, { created: 2 });
+    assert.deepEqual(imported.body.counts.tech_usage, { created: 2 });
+    const before = metis.snapshot();
+    const preview = await unseed(doc);
+    const { body } = await unseed(doc, { dryRun: false });
+    for (const [kind, actions] of Object.entries(imported.body.counts)) {
+      if (actions.created) assert.deepEqual(body.counts[kind], { deleted: actions.created }, kind);
+      if (actions.created) assert.deepEqual(preview.body.counts[kind], { "would delete": actions.created }, kind);
+    }
+    assert.ok(body.notes.includes('deleted technology "MinIO", with its link to "File Storage"'));
+    assert.ok(body.notes.includes('deleted feature "Upload a file", with its 2 capability links'));
+    assert.deepEqual([...before].filter((row) => metis.snapshot().has(row)), []);
   });
 
   test("a product with a feature outside the seed is kept, so that feature stays", async () => {
@@ -675,8 +771,8 @@ describe("removing a seeded product names every row it deletes or keeps", () => 
     assert.ok(body.notes.includes(
       'would delete product "Probe", with 1 epic, 1 story, 2 tickets and its stack "Probe stack" (1 slot)',
     ), body.notes.join("\n"));
-    assert.ok(body.notes.includes('would delete feature "Probe feature"; journey "Sign up" keeps its step, no longer linked to it'));
-    assert.ok(body.notes.includes('would delete feature "Second feature"; story "Their story" of product "Other" stays, no longer about it'));
+    assert.ok(body.notes.includes('would delete feature "Probe feature", with its 2 capability links; journey "Sign up" keeps its step, no longer linked to it'));
+    assert.ok(body.notes.includes('would delete feature "Second feature", with its 1 capability link; story "Their story" of product "Other" stays, no longer about it'));
     assert.ok(body.notes.includes('kept capability "Probe Cap": epic "Their epic" of product "Other" is about it'));
   });
 

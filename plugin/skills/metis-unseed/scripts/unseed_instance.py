@@ -274,8 +274,8 @@ class Unseeder:
                 + ", and those can keep a capability or technology, so where the removal "
                 "depends on them this dry run says \"can't tell\" instead of \"would delete\""
             )
+            # Once, before the rows it qualifies, which print as they go.
             print(f"  note: {msg}")
-            self.notes.append(msg)
 
     def _optional(self, path, what):
         """A list an older instance may lack (404: none), or this token may
@@ -764,22 +764,26 @@ class Unseeder:
         return "; ".join([head, *after])
 
     def _feature_line(self, feat):
-        """A feature's delete takes its guesses and capability links. Another
-        product's story and a journey step that pointed at it stay."""
+        """A feature's delete takes its capability links and guesses, each
+        counted, and a link the seed doesn't declare named. Another product's
+        story and a journey step that pointed at it stay."""
         parts = []
-        guesses = sum(1 for g in self.inst_guesses if g.get("feature_id") == feat["id"])
-        if guesses:
-            parts.append(f"its {guesses} guess(es)")
+        links = feat.get("capability_ids") or []
         ref = next((r for r, f in self.feats.items() if f["id"] == feat["id"]), None)
         entry = next((f for f in self.doc.get("features") or [] if f.get("ref") == ref), {})
         refs = entry.get("capability_refs") or ([entry["capability_ref"]] if entry.get("capability_ref") else [])
         declared = {(self.caps.get(r) or {}).get("id") for r in refs}
         cap_names = {c["id"]: c["name"] for c in self.inst_caps}
-        extra = [cid for cid in feat.get("capability_ids") or [] if cid not in declared]
-        if extra:
+        extra = [cid for cid in links if cid not in declared]
+        if links:
             parts.append(
-                f"its link(s) to {_and([repr(cap_names.get(c, c)) for c in extra])}, which the seed does not have"
+                f"its {len(links)} capability link(s)"
+                + (f", including the link(s) to {_and([repr(cap_names.get(c, c)) for c in extra])}"
+                   " the seed does not have" if extra else "")
             )
+        guesses = sum(1 for g in self.inst_guesses if g.get("feature_id") == feat["id"])
+        if guesses:
+            parts.append(f"its {guesses} guess(es)")
         after = []
         dead = self._dead_prod_ids()
         for e in self.inst_epics:
@@ -865,10 +869,8 @@ class Unseeder:
             self._dead("goals")
             goals = [g for g in self._dead_cache["goals"] if g.get("display_id")]
             example = f" ({goals[-1]['display_id']} would not come back as {goals[-1]['display_id']})" if goals else ""
-            # First, after any "cannot read" note, so it is read before the rows.
-            at = next((i for i, n in enumerate(self.notes) if not n.startswith("this token cannot read")), len(self.notes))
             self.notes.insert(
-                at, f"Numbers are not kept: importing this file again adds these rows back under new numbers{example}."
+                0, f"Numbers are not kept: importing this file again adds these rows back under new numbers{example}."
             )
 
     def remove_goals(self):

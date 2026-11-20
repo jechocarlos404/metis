@@ -26,6 +26,7 @@ import os
 import re
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 
 # ---------------------------------------------------------------------------
@@ -606,15 +607,17 @@ class Loader:
                 added.append(c["name"])
                 continue
             status, body = self.api.post("/api/capabilities", prune(payload))
-            detail = body.get("detail") if isinstance(body, dict) else None
+            # The clash names the row under `existing`; an older instance put
+            # it in `detail` itself.
+            existing = body.get("existing") or body.get("detail") if isinstance(body, dict) else None
             if status == 201:
                 self.cap_ids[c["ref"]] = body["id"]
                 self.note("capabilities", "created")
                 added.append(c["name"])
-            elif status == 409 and isinstance(detail, dict) and isinstance(detail.get("slug"), str):
+            elif status == 409 and isinstance(existing, dict) and isinstance(existing.get("slug"), str):
                 # Created since the list was read: the same slug is the same capability.
                 row = next(
-                    (r for r in self.api.get("/api/capabilities") if r["slug"] == detail["slug"]), None
+                    (r for r in self.api.get("/api/capabilities") if r["slug"] == existing["slug"]), None
                 )
                 if row is None:
                     sys.exit(f"error: POST /api/capabilities for {c['name']!r} returned 409 "
@@ -869,6 +872,22 @@ class Loader:
                         sys.exit(f"error: usage {t['ref']} by {prod_ref} returned {status}: {body}")
                     usage[pid].add(tid)
                     self.note("tech_usage", "created")
+
+        # Removing a product leaves a person's recorded use of a technology
+        # with no product, and an import never links one back: say so, so a
+        # re-import isn't read as a full restore.
+        for t in techs:
+            slug = tech_slug(t)
+            if slug not in existing or not t.get("products"):
+                continue
+            detail = self.api.get_optional(f"/api/tech/{urllib.parse.quote(slug, safe='')}")
+            people = [e["person"] for e in (detail.get("encounters") or []) if not e.get("product_id")] \
+                if isinstance(detail, dict) else []
+            if people:
+                self.notes.append(
+                    f"technology {t['name']!r} has {len(people)} recorded use(s) naming no product "
+                    f"({', '.join(people)}); an import never links a recorded use to a product"
+                )
 
         confirmed = {
             (s["tech_id"], s["capability_id"]) for s in self.api.get("/api/tech/satisfactions")

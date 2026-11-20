@@ -923,7 +923,8 @@ async def get_prompt(name: str, arguments: dict | None) -> GetPromptResult:
             "it to the model's word and say which you are using."
         )
     else:
-        raise ValueError(f"Unknown prompt: {name}")
+        known = ", ".join(p.name for p in PROMPTS)
+        raise ValueError(render.error(f"No prompt named {name!r}. The prompts are: {known}.", "/home"))
     return GetPromptResult(
         description=next(p.description for p in PROMPTS if p.name == name),
         messages=[

@@ -1058,8 +1058,19 @@ async def test_sdk_and_resource_errors_end_with_an_open_line(api):
             ))
         assert str(err.value).splitlines() == [said, f"Open: {href}"]
 
+    prompt = server.server.request_handlers[types.GetPromptRequest]
+    with pytest.raises(ValueError) as err:
+        await prompt(types.GetPromptRequest(
+            method="prompts/get", params=types.GetPromptRequestParams(name="nope")
+        ))
+    assert str(err.value).splitlines() == [
+        "No prompt named 'nope'. The prompts are: check_this_dependency, choose_a_stack, "
+        "explain_the_ontology.",
+        "Open: /home",
+    ]
 
-async def test_an_unknown_subject_is_an_answer_in_every_tool(api):
+
+async def test_an_unknown_capability_technology_or_slot_is_an_answer(api):
     """capability_supply finds a capability the way `capability` does, so an
     unknown one is the same answer with the same near names, not a refusal;
     an unknown technology or slot reads the same way."""

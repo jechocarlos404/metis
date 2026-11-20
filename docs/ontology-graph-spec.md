@@ -60,9 +60,12 @@ Notes:
 1. **Precedence graph** — `DEPENDS_ON ∪ reverse(BLOCKS)` over features. The only graph
    execution algorithms run on. Must be acyclic; a cycle is rejected at write time
    (extends the existing cycle check, which today covers `DEPENDS_ON` alone).
-2. **Capability coupling graph** — project precedence onto the slow plane:
-   `C₁ → C₂` iff some feature realizing C₁ (or its `PART_OF` descendants) depends on a
-   feature realizing C₂. Computed, never authored.
+2. **Capability impact** — read off the precedence graph, never a capability-pair
+   projection: the features that need a feature realizing C (or its `PART_OF`
+   descendants), through links of links, and the capabilities those features realize
+   besides C. Projecting edges onto capability pairs first let a shared capability
+   (File Storage, sign-in) bridge products that never need each other. Computed, never
+   authored.
 
 ## Traversals and what they mean
 
@@ -86,7 +89,7 @@ Semantics stated as questions; existing implementations noted.
 timeline anywhere. Decisions baked in:
 
 - **Necessity lives on the feature plane.** There is no authored capability-level
-  `REQUIRES` edge; capability ordering is always the derived coupling projection.
+  `REQUIRES` edge; capability ordering is always derived from feature needs.
   Consequence: capability-level ordering cannot be expressed before decomposition —
   decompose coarsely early rather than invent a new edge kind.
 - **A cut is a query, not an entity.** No Release/Milestone node — a milestone without
@@ -112,7 +115,7 @@ timeline anywhere. Decisions baked in:
 | `scope(c)` | what work belongs to c? | all features `REALIZES`-ing any node of `submap(c)` — **this is exactly what a PRD epic snapshot freezes** |
 | `rollup(c)` | how done is c? | aggregate of `WorkStatus` over `scope(c)`; capabilities have no stored status, this *is* their status |
 | `surface(p)` | what does product p do? | `BUNDLES` targets of p plus their submaps — the answer a Spec narrates |
-| `impact_capability(c)` | what breaks at product resolution if c changes? | ancestors of c in the capability coupling graph |
+| `impact_capability(c)` | what breaks at product resolution if c changes? | the capabilities of the features that need c's features, through links of links (and, as dependencies, of what c's features need) |
 | `recheck(f)` | if f changes, what must be rechecked? | `impact(f)` dependents (breaks), plus same-product features sharing a confirmed `REALIZES` target with f, rarest capability first (retest); capabilities used by more than half of the product (and at least 6 features) are counted, not listed; our other products with the same capabilities are information only. Crosses the bridge explicitly and says so per group; guesses never count |
 | `why(f)` | why does f exist? | f `—REALIZES→` c `—PART_OF*→` root capability `←MOTIVATES—` product goal `←parent—` org goal; every ticket can print this provenance chain — this traversal *is* the Metis pitch |
 
@@ -125,7 +128,7 @@ timeline anywhere. Decisions baked in:
 | capability unreachable from any Product via `BUNDLES` | dead map territory → prune or bundle |
 | goal with no `MOTIVATES` out-edges | empty intent → decompose or drop |
 | `drift(snapshot)` | diff pinned frozen copies vs live nodes: renamed / re-parented / deleted / split since approval — reportable, never auto-healed |
-| coupling graph ⋈ `PART_OF` forest | authored map says X, dependency reality says Y — the emergent-taxonomy idea (divergence #11) as a lint rule |
+| capability impact ⋈ `PART_OF` forest | authored map says X, dependency reality says Y — the emergent-taxonomy idea (divergence #11) as a lint rule |
 
 ### Non-traversals (explicitly meaningless)
 
@@ -148,7 +151,7 @@ a different node type and runs some traversals backwards:
 | maturity at creation | `planned` | observed state, typically `GA` |
 | goals | given | inferred from the map (`why` run in reverse) — `MOTIVATES` health check relaxed during ingestion |
 | fast plane at T₀ | features from PRD decomposition | **legitimately empty** — features begin with the first planned change |
-| coupling graph evidence | feature `DEPENDS_ON` edges | static analysis of the code, checked against the authored map |
+| feature-need evidence | feature `DEPENDS_ON` edges | static analysis of the code, checked against the authored map |
 
 Two amendments the brownfield case forces (both already folded into the tables above):
 

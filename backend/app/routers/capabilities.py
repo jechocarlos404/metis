@@ -90,7 +90,9 @@ async def rollup(capability_id: uuid.UUID, session: AsyncSession = Depends(get_d
 async def impact(
     capability_id: uuid.UUID, request: Request, session: AsyncSession = Depends(get_db)
 ):
-    """Blast radius at capability resolution, over the coupling projection."""
+    """Blast radius at capability resolution. Dependents are the other
+    capabilities of the features that need this capability's features, through
+    links of links; dependencies, those of what its features need."""
     graph = get_graph(request)
     if graph is None:
         raise HTTPException(503, "Graph not initialized")

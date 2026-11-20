@@ -479,6 +479,16 @@ describe("a description change shows both versions", () => {
     assert.ok(body.notes.includes(`feature "${PLAN}": description "…and orders them by dependency." → "…and orders them by risk."`));
   });
 
+  test("the trimmed note carries both texts in full for its hover", async () => {
+    const before = "Plans delivery in phases, sized for one coding session each, and orders them by dependency.";
+    const after = "Plans delivery in phases, sized for one coding session each, and orders them by risk. Answers stream in as they are written, so a long plan shows its first phase at once.";
+    use(existing({ feature: { description: before } }));
+    const { body } = await importSeed(seed({ features: plan(after) }));
+    const note = body.notes.find((n) => n.startsWith(`feature "${PLAN}": description`));
+    assert.ok(note.length < after.length, "the note itself stays short");
+    assert.equal(body.fullText[note], `Description before:\n${before}\n\nAfter:\n${after}`);
+  });
+
   test("a feature with no description yet", async () => {
     use(existing({ feature: { description: null } }));
     const { body } = await importSeed(seed({ features: plan("Plans in phases.") }));

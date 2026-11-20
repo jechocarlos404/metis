@@ -372,7 +372,7 @@ function JourneyMap({ steps }) {
 
   // Every card is as tall as the one with the most text, so no name, product
   // or status is cut short. Measured, not guessed: the font is proportional
-  // and loads late, and an edit changes the text without remounting the map.
+  // and loads late.
   const labelEls = React.useRef([]);
   const whereEls = React.useRef([]);
   const [text, setText] = React.useState({ label: 32, where: 14 });
@@ -488,11 +488,11 @@ function JourneyMap({ steps }) {
           <div style={{ position: "absolute", zIndex: 1, top: 0, left: 0, right: 0, padding: "0 16px 6px", background: "var(--surface-card)", pointerEvents: "none" }}>
             {hoveredCap ? (
               <span>
-                <b style={{ color: "var(--text-heading)" }}>{hoveredCap.need.match?.name ?? hoveredCap.need.name}</b>: {capInfo(hoveredCap.need)} · used by {count(hoveredCap.steps.length, "step")} here{tapAgain}
+                <b style={{ color: "var(--text-heading)" }}>{hoveredCap.need.match?.name ?? hoveredCap.need.name}:</b> {capInfo(hoveredCap.need)} · used by {count(hoveredCap.steps.length, "step")} here{tapAgain}
               </span>
             ) : (
               <span>
-                <b style={{ color: "var(--text-heading)" }}>{hoveredStep.label}</b>: {stepWhere(hoveredStep)} · {VERDICT[stepKind(hoveredStep)].hint}
+                <b style={{ color: "var(--text-heading)" }}>{hoveredStep.label}:</b> {stepWhere(hoveredStep)} · {VERDICT[stepKind(hoveredStep)].hint}
                 {verdictOf(stepKind(hoveredStep), stepMatches(hoveredStep)).elsewhere ? ` · ${NEED.elsewhere.label}` : ""}
                 {hoveredStep.note ? ` · ${hoveredStep.note}` : ""}
                 {tapAgain}

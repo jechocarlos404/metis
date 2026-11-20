@@ -9,8 +9,8 @@ human_action_required` with the screen that can make the change. Writes are a
 human action on the desktop.
 
 **From Claude Code, use the plugin.** [`plugin/`](../plugin/README.md) wires
-this server into any repo over SSE, adds skills that use it
-(`metis-check-idea`, `metis-find-reuse`, `metis-what-next`), and adds read-only
+this server into any repo over SSE, adds eight skills (`metis-check-idea`,
+`metis-find-reuse` and `metis-what-next` use this server), and adds read-only
 hooks that brief each session on its product. The rest of this page is for
 other clients and for wiring it by hand.
 

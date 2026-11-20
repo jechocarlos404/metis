@@ -63,7 +63,8 @@ async def lifespan(app: FastAPI):
 #: reads-by-POST (coverage, recommend, mvp-cut) are open to viewers and the MCP
 #: token, and their near-name search costs time per byte, so they get a small
 #: cap; a real idea or a seed file's new names fit in a few KB. Writes need an
-#: editor on the desktop, and the largest (a PRD body) still fits in 1 MB.
+#: editor on the desktop and send one row each (the largest stored value in a
+#: full instance is about 3 KB), so their cap only stops a runaway.
 MAX_READ_BODY = 64_000
 MAX_BODY = 1_000_000
 

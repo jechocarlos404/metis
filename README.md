@@ -354,8 +354,9 @@ The server refuses to start SSE without `MCP_SSE_TOKEN`: it holds an API token, 
 open port would lend it to anyone who can reach the address.
 
 **Claude Code plugin.** [`plugin/`](plugin/README.md) brings this server to a coding
-session in any repo, with skills that check for reuse before building
-(`metis-check-idea`, `metis-find-reuse`, `metis-what-next`) and read-only hooks: a
+session in any repo, with eight skills (among them `metis-check-idea`,
+`metis-find-reuse` and `metis-what-next`, which check for reuse before building)
+and read-only hooks: a
 product brief at session start, a one-line nudge when a prompt names a capability another
 product already has, and a reminder to re-export the seed file after code changes. The
 repo root is its marketplace:
@@ -443,6 +444,9 @@ All optional — see `.env.example`:
 ## Development
 
 ```sh
+# settings, once: compose and the backend below both read this file
+cp .env.example .env
+
 # database, and Keycloak: the backend checks every token against it and the
 # frontend signs in through it (or set AUTH_ENABLED=false in .env for scripts)
 docker compose up -d postgres keycloak

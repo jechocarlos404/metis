@@ -39,10 +39,25 @@ def test_every_tool_is_named(doc):
     assert [t.name for t in TOOLS if f"`{t.name}`" not in text] == [], doc
 
 
-def test_the_plugin_readme_names_every_skill_in_both_lists():
-    skills = sorted(
+def _skills():
+    return sorted(
         p.name for p in (ROOT / "plugin/skills").iterdir() if (p / "SKILL.md").exists()
     )
+
+
+@pytest.mark.parametrize("doc", DOCS)
+def test_every_skill_count_is_the_real_one(doc):
+    text = (ROOT / doc).read_text()
+    said = [
+        int(c) if c.isdigit() else WORDS[c.lower()]
+        for c in re.findall(r"\b(\d+|[A-Za-z]+) skills\b", text)
+        if c.isdigit() or c.lower() in WORDS
+    ]
+    assert all(n == len(_skills()) for n in said), (doc, said)
+
+
+def test_the_plugin_readme_names_every_skill_in_both_lists():
+    skills = _skills()
     text = (ROOT / "plugin/README.md").read_text()
     bullets = text.split("## What it gives you")[1].split("## Install")[0]
     tree = text.split("## Files")[1]

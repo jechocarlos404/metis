@@ -1,6 +1,6 @@
 export const prerender = false;
 
-import { EDGE, andList, count, slugify, statusLabel } from "../../../lib/words.js";
+import { EDGE, SEED_KINDS as KINDS, andList, count, slugify, statusLabel } from "../../../lib/words.js";
 
 const backend = () =>
   (process.env.API_INTERNAL_URL || "http://localhost:8000").replace(/\/$/, "");
@@ -17,21 +17,6 @@ const TECH_FITS = new Set(["native", "partial", "workaround"]);
 // The coverage read's bounds (backend MAX_IDEA_NAMES, MAX_CAPABILITY_NAME).
 const COVERAGE_NAMES = 300;
 const COVERAGE_NAME_LENGTH = 100;
-// Each kind an import counts, in the words the Settings page counts it in.
-const KINDS = {
-  goals: ["goal", "goals"],
-  capabilities: ["capability", "capabilities"],
-  motivations: ["goal link", "goal links"],
-  features: ["feature", "features"],
-  edges: ["link between features", "links between features"],
-  products: ["product", "products"],
-  bundles: ["capability added by hand", "capabilities added by hand"],
-  decompositions: ["plan document", "plan documents"],
-  technologies: ["technology", "technologies"],
-  tech_usage: ["technology in use", "technologies in use"],
-  satisfactions: ["technology link", "technology links"],
-  guesses: ["guess", "guesses"],
-};
 // Every key the format has, per kind of object. Any other key is refused by
 // name: a misspelled one ("stauts") would otherwise be dropped without a word.
 // `source` and `facets` are free-form, so their keys are not checked.

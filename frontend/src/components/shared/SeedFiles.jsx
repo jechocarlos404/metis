@@ -1,28 +1,14 @@
 import React from "react";
 import { Button, DeleteConfirm, Select } from "../../ds";
 import { api } from "../../lib/api.js";
-import { andList, count, productOptions } from "../../lib/words.js";
+import { SEED_KINDS, andList, count, productOptions, seedImportTitle, seedRejected, seedRemovalTitle } from "../../lib/words.js";
 
 // Seed files: how a repo gets into metis (a coding agent describes it as a
 // metis-seed/v1 JSON file), and how a project moves between instances.
 // Inline panels, not dialogs — they live on Get started and Settings.
 
-// The importer's collections and actions in people's words, as [one, many];
-// the raw key stays one hover away.
-const COLLECTION_WORDS = {
-  goals: ["goal", "goals"],
-  capabilities: ["capability", "capabilities"],
-  motivations: ["goal link", "goal links"],
-  features: ["feature", "features"],
-  edges: ["link between features", "links between features"],
-  products: ["product", "products"],
-  bundles: ["capability added by hand", "capabilities added by hand"],
-  decompositions: ["plan document", "plan documents"],
-  technologies: ["technology", "technologies"],
-  tech_usage: ["technology in use", "technologies in use"],
-  satisfactions: ["technology link", "technology links"],
-  guesses: ["guess", "guesses"],
-};
+// The importer's actions in people's words (its collections' are
+// words.js SEED_KINDS); the raw key stays one hover away.
 const ACTION_WORDS = { reused: "already in metis", absent: "not in metis", "would reject": "would be rejected" };
 
 function formatCounts(collection, counts) {
@@ -30,26 +16,13 @@ function formatCounts(collection, counts) {
   if (entries.length === 0) return null;
   return {
     key: collection,
-    text: `${COLLECTION_WORDS[collection][1]}: ${entries.map(([action, value]) => `${value} ${ACTION_WORDS[action] ?? action}`).join(", ")}`,
+    text: `${SEED_KINDS[collection][1]}: ${entries.map(([action, value]) => `${value} ${ACTION_WORDS[action] ?? action}`).join(", ")}`,
     raw: `${collection}: ${entries.map(([action, value]) => `${value} ${action}`).join(", ")}`,
   };
 }
 
-/** An import that adds, links or updates nothing: every row was reused or
- * skipped. */
-const changesNothing = (counts) =>
-  Object.values(counts || {}).every((actions) =>
-    Object.entries(actions).every(([action, n]) => n === 0 || action === "reused" || action === "skipped"));
-
-/** What the import rejects (or, checked, would reject), in words: "1 link
- * between features". Empty when nothing is. */
-const rejectedWords = (counts) => andList(Object.entries(counts || {}).flatMap(([collection, actions]) => {
-  const n = (actions["would reject"] ?? 0) + (actions.rejected ?? 0);
-  return n > 0 && COLLECTION_WORDS[collection] ? [count(n, ...COLLECTION_WORDS[collection])] : [];
-}));
-
 export const summarizeCounts = (counts) =>
-  Object.keys(COLLECTION_WORDS)
+  Object.keys(SEED_KINDS)
     .map((k) => formatCounts(k, counts?.[k]))
     .filter(Boolean);
 
@@ -113,7 +86,7 @@ const LINE_GROUPS = [
  * same way, kept ones first and marked apart from the deletes. */
 function RemovalBox({ title, result, tone }) {
   const said = {};
-  for (const [kind, words] of Object.entries(COLLECTION_WORDS)) {
+  for (const [kind, words] of Object.entries(SEED_KINDS)) {
     for (const [action, n] of Object.entries(result.counts?.[kind] || {})) {
       if (n > 0) (said[action] ??= []).push(count(n, ...words));
     }
@@ -285,15 +258,7 @@ export function SeedImportPanel({ onImported }) {
       </div>
       {error && <div role="alert" style={{ fontSize: "var(--text-xs)", color: "var(--danger-fg)", whiteSpace: "pre-line" }}>{error}</div>}
       {result && (
-        <ResultBox result={result} tone={rejectedWords(result.counts) ? "danger" : undefined} title={
-          rejectedWords(result.counts)
-            ? result.dryRun
-              ? `Check found a problem: the import would reject ${rejectedWords(result.counts)}, named below. The rest is what it would do:`
-              : `Imported, except ${rejectedWords(result.counts)}, rejected as named below`
-            : changesNothing(result.counts)
-              ? `${result.dryRun ? "Check passed. " : ""}Nothing new: everything in this file ${result.dryRun ? "is" : "was"} already in metis.`
-              : result.dryRun ? "Check passed. This is what the import would do:" : "Imported"
-        } />
+        <ResultBox result={result} tone={seedRejected(result.counts) ? "danger" : undefined} title={seedImportTitle(result)} />
       )}
       <SeedExport />
     </div>
@@ -385,7 +350,7 @@ export function UnseedPanel({ onRemoved }) {
         Anything another product still uses is kept, and the preview says why.
       </div>
       {error && <div role="alert" style={{ fontSize: "var(--text-xs)", color: "var(--danger-fg)", whiteSpace: "pre-line" }}>{error}</div>}
-      {result && <RemovalBox title={result.dryRun ? "Preview: this is what would be removed" : "Removed"} result={result} tone={result.warnings?.length ? "danger" : undefined} />}
+      {result && <RemovalBox title={seedRemovalTitle(result)} result={result} tone={result.warnings?.length ? "danger" : undefined} />}
       {/* After the list it confirms, so it is read before Remove is pressed (B38). */}
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
         <DeleteConfirm armed={confirming} onArm={() => setConfirming(true)} onCancel={() => setConfirming(false)}

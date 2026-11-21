@@ -165,3 +165,36 @@ test("two small goal trees sit side by side and fit readable, not stacked in one
   // The 1440 canvas, less the controls' strip and the hint's.
   assert.ok(fitTransform(b, 882, 756, { top: 46, bottom: 46 }).k >= READABLE_SCALE);
 });
+
+const twoTrees = [
+  { id: "o1", goal_type: "org" }, { id: "p1", goal_type: "product", parent_goal_id: "o1" }, { id: "p2", goal_type: "product", parent_goal_id: "o1" },
+  { id: "o2", goal_type: "org" }, { id: "p3", goal_type: "product", parent_goal_id: "o2" }, { id: "p4", goal_type: "product", parent_goal_id: "o2" },
+];
+// Fit's view of anchors: the cards plus the engine's 40-unit margin.
+const fitBounds = (nodes) => ({
+  x0: Math.min(...nodes.map((n) => n.anchorX)) - NODE_W / 2 - 40, x1: Math.max(...nodes.map((n) => n.anchorX)) + NODE_W / 2 + 40,
+  y0: Math.min(...nodes.map((n) => n.anchorY)) - GOAL_H / 2 - 40, y1: Math.max(...nodes.map((n) => n.anchorY)) + GOAL_H / 2 + 40,
+});
+
+test("at 390 the two trees stack in one column, each org goal over its product goals, and the canvas grows to read them (C41)", () => {
+  const side = buildGoalNetwork(twoTrees, {});
+  assert.ok(fitTransform(fitBounds(side.nodes), 292, 472).k < READABLE_SCALE); // side by side: 0.445 measured
+  const { nodes, height } = buildGoalNetwork(twoTrees, {}, { w: 292, h: 650 });
+  const at = Object.fromEntries(nodes.map((n) => [n.id, n]));
+  assert.ok(at.o1.anchorY < at.p1.anchorY && at.p1.anchorY < at.p2.anchorY && at.p2.anchorY < at.o2.anchorY);
+  assert.ok(at.o1.anchorX < at.p1.anchorX && at.p1.anchorX === at.p2.anchorX);
+  assert.ok(height > 0 && height <= 650);
+  assert.ok(fitTransform(fitBounds(nodes), 292, height).k >= READABLE_SCALE);
+});
+
+test("the column is only for a canvas too narrow for the trees side by side, and only when it fits the height", () => {
+  const side = buildGoalNetwork(twoTrees, {});
+  const same = (room) => {
+    const r = buildGoalNetwork(twoTrees, {}, room);
+    assert.equal(r.height, null);
+    assert.deepEqual(r.nodes.map((n) => [n.anchorX, n.anchorY]), side.nodes.map((n) => [n.anchorX, n.anchorY]));
+  };
+  same({ w: 670, h: 500 }); // 768: side by side already reads
+  same({ w: 882, h: 650 }); // 1440
+  same({ w: 292, h: 400 }); // a short phone: the column wouldn't read either, so nothing moves
+});

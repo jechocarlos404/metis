@@ -242,8 +242,13 @@ export function wrapLabel(name, maxChars = 19, maxLines = 2) {
  *
  *   goals:      [{ id, goal_type, parent_goal_id, ... }]
  *   capsByGoal: { goalId: [{ id, name, slug }] }
+ *   room:       { w, h } px the canvas has (h: as tall as it may grow), or none
+ *
+ * In a canvas too narrow for the packed trees to read, they stack in one
+ * column instead, when the column reads whole in `room`; `height` is then
+ * the canvas px the column needs (C41).
  */
-export function buildGoalNetwork(goals, capsByGoal) {
+export function buildGoalNetwork(goals, capsByGoal, room = null) {
   const orgs = goals.filter((g) => g.goal_type === "org");
   const orgIds = new Set(orgs.map((o) => o.id));
   const clusters = orgs.map((o) => ({ center: o, members: goals.filter((g) => g.goal_type !== "org" && g.parent_goal_id === o.id) }));
@@ -285,6 +290,8 @@ export function buildGoalNetwork(goals, capsByGoal) {
       anchor.set(g.id, { x: cx + r * Math.cos(a), y: cy + r * Math.sin(a) });
     });
   });
+  const column = room && goalColumn(clusters, anchor, room);
+  if (column) column.anchor.forEach((a, id) => anchor.set(id, a));
 
   const nodes = goals.map((g) => ({
     id: g.id,
@@ -328,7 +335,45 @@ export function buildGoalNetwork(goals, capsByGoal) {
     e.weight = e.capabilities.length;
     edges.push(e);
   }
-  return { nodes, edges };
+  return { nodes, edges, height: column?.height ?? null };
+}
+
+// The engine's Fit keeps 40 units clear around the cards (bounds()).
+const FIT_MARGIN = 40;
+// A stacked column aims a little above the readable scale: the settled
+// cards sit a few units off their anchors.
+const COLUMN_SCALE = 0.98;
+const COLUMN_PITCH = GOAL_H + 20; // clears the network's collision box (GOAL_H + 16)
+const COLUMN_GAP = 40; // between two trees, more than inside one
+const COLUMN_INDENT = 24; // product goals sit right of their org goal, as in the list
+
+/**
+ * The trees in one column, each org goal over its product goals, when the
+ * packed trees (`anchor`) are too wide for `room.w` at the readable scale
+ * and the column reads whole in `room`. Otherwise null, and the packing
+ * stays as it is.
+ */
+function goalColumn(clusters, anchor, room) {
+  if (!anchor.size) return null;
+  const xs = [...anchor.values()].map((a) => a.x);
+  const packedW = Math.max(...xs) - Math.min(...xs) + NODE_W + 2 * FIT_MARGIN;
+  if (packedW * READABLE_SCALE <= room.w) return null;
+  const column = new Map();
+  let y = 0;
+  let indent = 0;
+  for (const c of clusters) {
+    const cards = c.center ? [c.center, ...c.members] : c.members;
+    cards.forEach((g, i) => {
+      const dx = c.center && c.members.length ? (i === 0 ? -COLUMN_INDENT : COLUMN_INDENT) : 0;
+      if (dx) indent = COLUMN_INDENT;
+      column.set(g.id, { x: dx, y: y + i * COLUMN_PITCH });
+    });
+    y += cards.length * COLUMN_PITCH - (COLUMN_PITCH - GOAL_H) + COLUMN_GAP;
+  }
+  const w = NODE_W + 2 * indent + 2 * FIT_MARGIN;
+  const h = y - COLUMN_GAP + 2 * FIT_MARGIN;
+  if (w * COLUMN_SCALE > room.w || h * COLUMN_SCALE > room.h) return null;
+  return { anchor: column, height: Math.ceil(h * COLUMN_SCALE) };
 }
 
 /** Walks parent links up to the top goal (an org goal, or a loose product goal). */

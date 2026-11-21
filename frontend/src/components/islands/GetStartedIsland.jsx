@@ -29,7 +29,8 @@ function Step({ n, done, title, optional, children }) {
 
 const TEXT = { fontSize: "var(--text-sm)", color: "var(--text-body)", lineHeight: "var(--leading-body)", margin: 0 };
 
-export default function GetStartedIsland({ canWrite, isAdmin, products, onReload }) {
+// Mounted only for an editor or admin (HomeIsland): a viewer's empty Home is its own.
+export default function GetStartedIsland({ isAdmin, products, onReload }) {
   const [model, setModel] = React.useState(null); // null while checking
   const [asked, setAsked] = React.useState(false);
 
@@ -49,43 +50,37 @@ export default function GetStartedIsland({ canWrite, isAdmin, products, onReload
         <p style={{ ...TEXT, color: "var(--text-secondary)" }}>
           Metis needs at least one of your products before it can say what you could build next.
         </p>
-        {!canWrite ? (
-          <p style={{ ...TEXT, marginTop: 8 }}>
-            Nothing is here yet. An editor needs to add the first product; once they do, this page shows what could be built from it.
-          </p>
-        ) : (
-          <ol style={{ listStyle: "none", margin: "8px 0 0", padding: 0 }}>
-            <Step n={1} done={model === true} title="Connect an AI model">
+        <ol style={{ listStyle: "none", margin: "8px 0 0", padding: 0 }}>
+          <Step n={1} done={model === true} title="Connect an AI model">
+            <p style={TEXT}>
+              {model === null ? "Checking…" : model ? "A model is connected." : isAdmin
+                ? <>No model is connected yet. <a href="/admin" style={LINK}>Connect one</a>.</>
+                : "No model is connected yet. Ask an admin to connect one."}
+            </p>
+          </Step>
+          <Step n={2} done={described} title="Describe a product from its repo">
+            <AgentPromptPanel />
+          </Step>
+          <Step n={3} done={described} title="Import the file it writes">
+            <SeedImportPanel onImported={onReload} />
+            {described && (
               <p style={TEXT}>
-                {model === null ? "Checking…" : model ? "A model is connected." : isAdmin
-                  ? <>No model is connected yet. <a href="/admin" style={LINK}>Connect one</a>.</>
-                  : "No model is connected yet. Ask an admin to connect one."}
+                {ours.length === 1 ? `${ours[0].name} is in.` : `${ours.length} products are in.`}{" "}
+                <a href="/home" style={LINK}>See what you could build next</a>.
               </p>
-            </Step>
-            <Step n={2} done={described} title="Describe a product from its repo">
-              <AgentPromptPanel />
-            </Step>
-            <Step n={3} done={described} title="Import the file it writes">
-              <SeedImportPanel onImported={onReload} />
-              {described && (
-                <p style={TEXT}>
-                  {ours.length === 1 ? `${ours[0].name} is in.` : `${ours.length} products are in.`}{" "}
-                  <a href="/home" style={LINK}>See what you could build next</a>.
-                </p>
-              )}
-            </Step>
-            <Step n={4} done={external.length > 0} optional title="Add a product you don't own to compare against">
-              <p style={TEXT}>
-                On <a href="/products" style={LINK}>Products</a>, choose New product and tick External.
-              </p>
-            </Step>
-            <Step n={5} done={asked} title="Ask your first question">
-              <p style={TEXT}>
-                <a href="/chat" style={LINK}>Open Chat</a> and ask about your products in your own words.
-              </p>
-            </Step>
-          </ol>
-        )}
+            )}
+          </Step>
+          <Step n={4} done={external.length > 0} optional title="Add a product you don't own to compare against">
+            <p style={TEXT}>
+              On <a href="/products" style={LINK}>Products</a>, choose New product and tick External.
+            </p>
+          </Step>
+          <Step n={5} done={asked} title="Ask your first question">
+            <p style={TEXT}>
+              <a href="/chat" style={LINK}>Open Chat</a> and ask about your products in your own words.
+            </p>
+          </Step>
+        </ol>
       </div>
     </div>
   );

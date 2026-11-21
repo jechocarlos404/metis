@@ -2,7 +2,7 @@ import React from "react";
 import { PageHeader } from "../shell/PageHeader.jsx";
 import { Badge, Button, Card, Checkbox, Dialog, Icon, Input, Select, StatusBadge, Tabs, Toast, DeleteConfirm, tabId } from "../../ds";
 import { api } from "../../lib/api.js";
-import { andList, count, freshness, productOptions, statusLabel } from "../../lib/words.js";
+import { andList, count, freshness, productOptions, statusLabel, takenCounts, takenRows, takenWords } from "../../lib/words.js";
 import { useParamRestore, writeParams } from "../../lib/url-state.js";
 import { exportSeedFile } from "../shared/SeedFiles.jsx";
 import { WhatItDoes } from "../products/WhatItDoes.jsx";
@@ -473,37 +473,6 @@ export default function ProductsIsland({ canWrite = true }) {
     </>
   );
 }
-
-// The rows a product delete takes besides its features (the API's deletes),
-// in plain words: [one, many, name them].
-const TAKEN = {
-  product_decompositions: ["plan document", "plan documents", true],
-  epics: ["epic", "epics", true],
-  stories: ["story", "stories", true],
-  tickets: ["ticket", "tickets", true],
-  delivery_strategies: ["delivery strategy", "delivery strategies", false],
-  tech_stacks: ["technology stack", "technology stacks", true],
-  stack_slots: ["stack slot", "stack slots", true],
-  stack_concern_answers: ["answer to a stack concern", "answers to stack concerns", false],
-  constraint_scopes: ["constraint on it", "constraints on it", false],
-  product_technologies: ["recorded technology use", "recorded technology uses", false],
-  product_bundles: ["capability added by hand", "capabilities added by hand", false],
-  feature_capabilities: ["link to a capability", "links to capabilities", false],
-  capability_guesses: ["guess waiting for review", "guesses waiting for review", false],
-  feature_edges: ["link between features", "links between features", false],
-};
-const ORDER = Object.keys(TAKEN);
-const takenRows = (takes) => (takes ?? []).filter((t) => t.table !== "features")
-  .sort((a, b) => (ORDER.indexOf(a.table) + 1 || 99) - (ORDER.indexOf(b.table) + 1 || 99));
-const takenCounts = (takes) => takenRows(takes).map((t) => {
-  const [one, many] = TAKEN[t.table] ?? [t.label.toLowerCase(), t.label.toLowerCase()];
-  return count(t.count, one, many);
-});
-// "1 plan document (version 1)", "2 epics (Search, Sync)": named when few.
-const takenWords = (takes) => takenRows(takes).map((t, i) => {
-  const said = takenCounts(takes)[i];
-  return TAKEN[t.table]?.[2] && t.names.length > 0 && t.count <= 5 ? `${said} (${t.names.join(", ")})` : said;
-});
 
 // What deleting a product takes with it. Its features go too: left without a
 // product they would count as ours.

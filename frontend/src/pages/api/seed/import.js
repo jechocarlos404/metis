@@ -543,7 +543,10 @@ class UpstreamApi {
   /** For endpoints an older instance may not have yet: absent reads as []. */
   async getOptional(route) {
     const { status, body } = await this.request("GET", route);
-    return status === 200 ? body : [];
+    if (status === 200) return body;
+    // Only "not there" is empty; any other failure must not read as "none".
+    if (status === 404) return [];
+    throw new Error(`GET ${route} returned ${status}: ${JSON.stringify(body)}`);
   }
 
   async post(route, payload) {

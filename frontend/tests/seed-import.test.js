@@ -569,6 +569,16 @@ describe("dry run and re-import", () => {
     assert.match(body.warnings[0], /^This file names a product metis already has and adds 1 feature whose name doesn't match/);
   });
 
+  test("a guesses read that fails stops the import instead of reading as no guesses", async () => {
+    use(new FakeMetis());
+    metis.guessesStatus = 503;
+    const doc = fresh();
+    doc.features[0].capability_guesses = [{ capability_ref: "c-plan", confidence: "low", basis: "probe" }];
+    const { status, body } = await importSeed(doc, { dryRun: false });
+    assert.equal(status, 500);
+    assert.match(body.detail, /GET \/api\/guesses returned 503/);
+  });
+
   test("a failure before anything is written says only what failed", async () => {
     use(new FakeMetis());
     metis.failing.set("GET /api/goals", [503, { detail: "upstream down" }]);

@@ -599,7 +599,12 @@ class Api:
     def get_optional(self, path):
         """For endpoints an older instance may not have yet: absent reads as []."""
         status, body = self.request("GET", path)
-        return body if status == 200 else []
+        if status == 200:
+            return body
+        # Only "not there" is empty; any other failure must not read as "none".
+        if status == 404:
+            return []
+        sys.exit(f"error: GET {path} returned {status}: {body}")
 
     def post(self, path, payload):
         return self.request("POST", path, payload)

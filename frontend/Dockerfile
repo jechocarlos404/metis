@@ -17,6 +17,8 @@ ENV HOST=0.0.0.0 PORT=4321 NODE_ENV=production
 
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
+# The image's unprivileged user; the server writes no files.
+USER node
 
 EXPOSE 4321
 CMD ["node", "./dist/server/entry.mjs"]

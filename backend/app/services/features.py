@@ -8,7 +8,7 @@ marked dirty and rebuilt lazily — never the other way around.
 import uuid
 
 from fastapi import HTTPException
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
@@ -21,6 +21,11 @@ from app.models import (
     Product,
 )
 from app.schemas.feature import EdgeCreate, FeatureCreate, FeatureUpdate
+from app.services.graph_service import cycle_chain, precedence
+
+#: Advisory lock key serializing feature-edge writes (any fixed bigint; the
+#: tech plane has its own, `technologies.EDGE_LOCK`).
+EDGE_LOCK = 0x6D6574697301
 
 
 async def list_features(session: AsyncSession, q: str | None = None) -> list[Feature]:
@@ -146,15 +151,28 @@ async def create_edge(session: AsyncSession, data: EdgeCreate, graph=None) -> Fe
             raise HTTPException(404, f"Feature {fid} not found")
     # Precedence edges (DEPENDS_ON, BLOCKS) are rejected at write time if they
     # would close a cycle — the invariant lives here, not at topo time.
-    if graph is not None and data.kind != EdgeKind.RELATES_TO:
-        await graph.ensure_fresh()
-        chain = graph.would_create_cycle(data.src_id, data.dst_id, data.kind)
+    if data.kind != EdgeKind.RELATES_TO:
+        # Check and insert are one step: the lock is held until this
+        # transaction ends, so "A needs B" and "B needs A" sent together can't
+        # both pass. The check reads Postgres, not the in-memory graph, which
+        # hears of another request's edge only after that request commits.
+        await session.execute(text("select pg_advisory_xact_lock(:key)"), {"key": EDGE_LOCK})
+        rows = await session.execute(
+            select(FeatureEdge.src_id, FeatureEdge.dst_id, FeatureEdge.kind).where(
+                FeatureEdge.kind.in_((EdgeKind.DEPENDS_ON, EdgeKind.BLOCKS))
+            )
+        )
+        chain = cycle_chain(precedence(rows), data.src_id, data.dst_id, data.kind)
         if chain:
             # Name the chain it would close, in plain words: people and agents
             # both need to know which link to remove.
             rows = await session.scalars(select(Feature).where(Feature.id.in_(chain)))
             names = {f.id: f"“{f.name}”" for f in rows}
             through = f" through {', '.join(names[n] for n in chain[1:-1])}" if len(chain) > 2 else ""
+            # End the transaction, and with it the lock: a Chat turn keeps its
+            # session open across tool calls. Commit, not rollback, which would
+            # expire everything the session holds.
+            await session.commit()
             raise HTTPException(
                 422,
                 f"That would make a circular dependency: {names[chain[0]]} already needs "
@@ -168,6 +186,7 @@ async def create_edge(session: AsyncSession, data: EdgeCreate, graph=None) -> Fe
         )
     )
     if existing is not None:
+        await session.commit()  # releases the lock, as above
         return existing
     edge = FeatureEdge(**data.model_dump())
     session.add(edge)

@@ -1,6 +1,7 @@
 // A product's picture as one self-contained, read-only HTML file, for someone
 // without a metis login. Built only from what the profile already loaded, and
-// only from named fields: no ids, no links, no guesses, no repo paths.
+// only from named fields: no ids, no links, no guesses, no repo paths. The
+// goal codes (OG-60) are shown, as the page shows them.
 import {
   CLOSEST_TITLE, DONE_WHEN, NEED, NOTHING_TO_SCORE, VERDICT, andList, closestGroups, closestNote, count, gapNote, gapsTitle,
   incompleteNote, scoreGroups, scoreHeadline, slugify, statusLabel,
@@ -31,6 +32,7 @@ ul { margin: 6px 0; padding-left: 20px; }
 .row { display: flex; gap: 12px; justify-content: space-between; padding: 3px 0; }
 .row .name { min-width: 0; overflow-wrap: anywhere; }
 .row .status { color: var(--muted); font-size: 13px; white-space: nowrap; }
+.code { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--muted); }
 .num { font-variant-numeric: tabular-nums; font-weight: 600; color: var(--accent); }
 footer { margin-top: 40px; padding-top: 12px; border-top: 1px solid var(--line); color: var(--muted); font-size: 13px; }
 @media print {
@@ -41,14 +43,25 @@ footer { margin-top: 40px; padding-top: 12px; border-top: 1px solid var(--line);
 
 const dateText = (d) => d.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
 
+/**
+ * The line over a product's features by capability, here and on the profile's
+ * "What it does" (R-WHATITDOES): the count, and when a feature names more
+ * than one capability (`repeats`), that the list shows it under each.
+ */
+export function featureCountNote(n, repeats) {
+  return `${count(n, "feature")}${repeats ? ". A feature appears under each capability it uses, so some show more than once." : ""}`;
+}
+
 // Features grouped by capability, the way the profile's "What it does" does it.
 function groupFeatures(features, capabilities) {
   const capById = new Map(capabilities.map((c) => [c.id, c]));
   const groups = new Map();
   const unnamed = [];
+  let repeats = false;
   for (const f of features) {
     const caps = (f.capability_ids ?? []).filter((id) => capById.has(id));
     if (caps.length === 0) unnamed.push(f);
+    if (caps.length > 1) repeats = true;
     for (const id of caps) {
       if (!groups.has(id)) groups.set(id, []);
       groups.get(id).push(f);
@@ -57,11 +70,13 @@ function groupFeatures(features, capabilities) {
   const grouped = [...groups.entries()]
     .map(([id, list]) => ({ cap: capById.get(id), list }))
     .sort((a, b) => b.list.length - a.list.length || a.cap.name.localeCompare(b.cap.name));
-  return { grouped, unnamed };
+  return { grouped, unnamed, repeats };
 }
 
 // The goal trees the product's Goals tab draws (productGoalTrees()): each
 // head goal, then the goals under it (A43).
+const code = (goal) => (goal.display_id ? `<span class="code">${esc(goal.display_id)}</span> ` : "");
+
 function goalSection(product, goals) {
   const trees = productGoalTrees(product, goals);
   if (trees.length === 0) return "";
@@ -69,11 +84,11 @@ function goalSection(product, goals) {
   const cards = trees.map(({ goal, children }) => {
     const parent = goals.find((g) => g.id === goal.parent_goal_id);
     return `<div class="card">
-  <h3>${esc(goal.title)} <span class="tag">${esc(statusLabel(goal.status))}</span></h3>
+  <h3>${code(goal)}${esc(goal.title)} <span class="tag">${esc(statusLabel(goal.status))}</span></h3>
   ${goal.description ? `<p>${esc(goal.description)}</p>` : ""}
   ${goal.success_criteria ? `<p class="muted">${esc(DONE_WHEN)}: ${esc(goal.success_criteria)}</p>` : ""}
   ${parent ? `<p class="muted">Part of: ${esc(parent.title)}</p>` : ""}
-  ${children.map(({ goal: g, depth }) => `<div class="row"${depth > 1 ? ` style="padding-left: ${(depth - 1) * 16}px"` : ""}><span class="name">${esc(g.title)}</span><span class="status">${esc(statusLabel(g.status))}</span></div>`).join("")}
+  ${children.map(({ goal: g, depth }) => `<div class="row"${depth > 1 ? ` style="padding-left: ${(depth - 1) * 16}px"` : ""}><span class="name">${code(g)}${esc(g.title)}</span><span class="status">${esc(statusLabel(g.status))}</span></div>`).join("")}
 </div>`;
   });
   return `<h2>${total > 1 ? "Goals" : "Goal"}</h2>
@@ -120,7 +135,7 @@ function featureRows(list, showStatus) {
     .join("");
 }
 
-function doesSection(product, features, grouped, unnamed) {
+function doesSection(product, features, grouped, unnamed, repeats) {
   if (features.length === 0) return `<h2>What it does</h2><p class="muted">No features recorded yet.</p>`;
   const showStatus = !product.external;
   const cards = grouped.map(({ cap, list }) => `<div class="card">
@@ -131,7 +146,7 @@ function doesSection(product, features, grouped, unnamed) {
     cards.push(`<div class="card"><h3 class="muted">No capability named yet</h3>${featureRows(unnamed, showStatus)}</div>`);
   }
   return `<h2>What it does</h2>
-<p class="muted">${esc(count(features.length, "feature"))}, grouped by the capability each one uses.</p>
+<p class="muted">${esc(featureCountNote(features.length, repeats))}</p>
 ${cards.join("\n")}`;
 }
 
@@ -159,7 +174,7 @@ function sharedSection(product, grouped) {
 /** The snapshot HTML. Inputs are the profile's own API responses. */
 export function snapshotHtml({ product, goals, features, capabilities, score, now = new Date() }) {
   const date = dateText(now);
-  const { grouped, unnamed } = groupFeatures(features, capabilities);
+  const { grouped, unnamed, repeats } = groupFeatures(features, capabilities);
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -177,7 +192,7 @@ export function snapshotHtml({ product, goals, features, capabilities, score, no
 ${product.summary ? `<p>${esc(product.summary)}</p>` : ""}
 ${goalSection(product, goals)}
 ${scoreSection(product, score)}
-${doesSection(product, features, grouped, unnamed)}
+${doesSection(product, features, grouped, unnamed, repeats)}
 ${sharedSection(product, grouped)}
 <footer>Snapshot from metis, ${esc(date)}. Read-only; it does not update.</footer>
 </main>

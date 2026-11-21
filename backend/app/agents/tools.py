@@ -48,6 +48,11 @@ class ToolError(Exception):
     pass
 
 
+def _said(detail) -> str:
+    """A refusal's sentence: a dict detail (a name clash) says it under `message`."""
+    return detail["message"] if isinstance(detail, dict) and "message" in detail else str(detail)
+
+
 # ---- reference resolution (agents may pass UUIDs, display IDs, or names) ----
 
 async def _resolve(session, model, ref: str, prefix: str, name_column=None):
@@ -560,7 +565,7 @@ async def create_feature(
         )
         feature = await feature_service.create_feature(ctx.session, data, ctx.graph)
     except HTTPException as e:
-        raise ToolError(str(e.detail)) from None
+        raise ToolError(_said(e.detail)) from None
     except ValueError as e:
         raise ToolError(str(e)) from None
     return ToolResult(_dump(_feature_dict(feature)))
@@ -581,7 +586,7 @@ async def update_feature(ctx: ToolContext, feature: str, **fields) -> ToolResult
         data = FeatureUpdate(**{k: v for k, v in fields.items() if v not in (None, "")})
         updated = await feature_service.update_feature(ctx.session, feature_obj.id, data, ctx.graph)
     except HTTPException as e:
-        raise ToolError(str(e.detail)) from None
+        raise ToolError(_said(e.detail)) from None
     except ValueError as e:
         raise ToolError(str(e)) from None
     return ToolResult(_dump(_feature_dict(updated)))

@@ -1,6 +1,6 @@
 import React from "react";
 import { PageHeader } from "../shell/PageHeader.jsx";
-import { Badge, Input, Tabs } from "../../ds";
+import { Badge, Input, Tabs, tabId } from "../../ds";
 import { api } from "../../lib/api.js";
 import {
   CARD,
@@ -225,7 +225,7 @@ export default function TechCatalogIsland({ initialView = "catalog", initialQuer
         }
       />
       <div style={{ padding: "12px 24px 0", flex: "none" }}>
-        <Tabs tabs={[{ value: "catalog", label: "Catalog" }, { value: "exposure", label: "Exposure" }]} value={view} onChange={setView} />
+        <Tabs tabs={[{ value: "catalog", label: "Catalog" }, { value: "exposure", label: "Exposure" }]} value={view} onChange={setView} label="Technology view" panelId="tech-panel" />
       </div>
 
       {error && (
@@ -234,6 +234,7 @@ export default function TechCatalogIsland({ initialView = "catalog", initialQuer
         </div>
       )}
 
+      <div id="tech-panel" role="tabpanel" aria-labelledby={tabId("tech-panel", view)} style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, minWidth: 0 }}>
       {noTech ? (
         <div style={{ padding: "var(--space-5)" }}>
           <div style={{ ...EMPTY, margin: 0 }}>{noTechWords}</div>
@@ -394,6 +395,7 @@ export default function TechCatalogIsland({ initialView = "catalog", initialQuer
           </div>
         </div>
       )}
+      </div>
     </div>
   );
 }

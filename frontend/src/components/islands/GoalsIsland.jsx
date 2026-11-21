@@ -1,6 +1,6 @@
 import React from "react";
 import { PageHeader } from "../shell/PageHeader.jsx";
-import { Button, Dialog, Icon, IconButton, Input, PriorityBadge, Select, StatusBadge, Tabs, Toast, DeleteConfirm } from "../../ds";
+import { Button, Dialog, Icon, IconButton, Input, PriorityBadge, Select, StatusBadge, Tabs, Toast, DeleteConfirm, tabId } from "../../ds";
 import { api } from "../../lib/api.js";
 import { readParam, useParamRestore, writeParams } from "../../lib/url-state.js";
 import { GoalNetworkView } from "../graph/GoalNetworkView.jsx";
@@ -245,8 +245,9 @@ export default function GoalsIsland({ canWrite = true }) {
         }
       />
       <div style={{ padding: "12px 24px 0", flex: "none" }}>
-        <Tabs tabs={[{ value: "list", label: "List" }, { value: "network", label: "Network" }]} value={view} onChange={changeView} />
+        <Tabs tabs={[{ value: "list", label: "List" }, { value: "network", label: "Network" }]} value={view} onChange={changeView} label="Goals view" panelId="goals-panel" />
       </div>
+      <div id="goals-panel" role="tabpanel" aria-labelledby={tabId("goals-panel", view)} style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, minWidth: 0 }}>
       {view === "network" ? (
         goals == null ? (
           <div style={{ padding: 24, color: "var(--text-secondary)", fontSize: "var(--text-sm)" }}>{error ?? "Loading goals…"}</div>
@@ -324,6 +325,7 @@ export default function GoalsIsland({ canWrite = true }) {
         </div>
       </div>
       )}
+      </div>
 
       {notice && (
         <div style={{ position: "fixed", right: 20, bottom: 20, zIndex: 200 }}>

@@ -8,6 +8,7 @@ deliberate act, the same rule `technologies.slug` already lives under.
 """
 
 import re
+import unicodedata
 import uuid
 
 from fastapi import HTTPException
@@ -18,9 +19,14 @@ _NON_ALNUM = re.compile(r"[^a-z0-9]+")
 
 
 def slugify(value: str) -> str:
-    """Lowercase kebab. Returns '' when nothing survives — callers fall back to
-    the sequence number rather than inventing a name."""
-    return _NON_ALNUM.sub("-", value.strip().lower()).strip("-")
+    """Lowercase kebab, accents folded first, so "Café" and "Cafe" are one
+    name. Returns '' when nothing survives — callers fall back to the sequence
+    number rather than inventing a name. A slug stored before the fold
+    ("r-sum-parsing") stays: lookups also derive one from the current name."""
+    folded = "".join(
+        c for c in unicodedata.normalize("NFKD", value) if not unicodedata.category(c).startswith("M")
+    )
+    return _NON_ALNUM.sub("-", folded.strip().lower()).strip("-")
 
 
 def valid_slug(name: str, requested: str | None = None) -> str:

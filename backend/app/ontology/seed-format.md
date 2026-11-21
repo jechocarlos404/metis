@@ -108,8 +108,9 @@ then copy it over both.
   "ref": "cap-graph",
   "parent_ref": null,              // another capability ref (PART_OF, single parent)
   "name": "Feature Graph",         // required; durable noun
-  "slug": "feature-graph",         // optional; default: the name lowercased, each run of
-                                   // characters outside a-z 0-9 turned into one "-", ends trimmed
+  "slug": "feature-graph",         // optional; default: the name with accents dropped
+                                   // ("Café" -> "Cafe") and lowercased, each run of characters
+                                   // outside a-z 0-9 turned into one "-", ends trimmed
   "description": "…",
   "maturity": "planned",           // "planned" | "alpha" | "beta" | "ga" | "deprecated" | "retired"
   "facets": { "layer": "service" },        // string -> string only
@@ -250,8 +251,9 @@ satisfies. A technology is shared across products, like a capability.
 {
   "ref": "tech-postgres",
   "name": "PostgreSQL",            // required
-  "slug": "postgresql",            // optional; default: the name lowercased, each run of
-                                   // characters outside a-z and 0-9 turned into one "-", ends trimmed
+  "slug": "postgresql",            // optional; default: the name with accents dropped
+                                   // and lowercased, each run of characters outside a-z
+                                   // and 0-9 turned into one "-", ends trimmed
   "kind": "service",               // required: "language" | "framework" | "library" | "runtime"
                                    //   | "service" | "model" | "protocol"
   "layer": "data",                 // optional: "data" | "api" | "web" | "agent" | "infra" | "ops"
@@ -308,7 +310,7 @@ satisfies. A technology is shared across products, like a capability.
 - A capability matches by slug: its explicit `slug`, else the slug its name
   derives. A rename in metis keeps the old slug, so when no slug matches, the
   derived slug is also compared with each capability's current name, slugified
-  the same way. Case and punctuation never make a second capability. Every
+  the same way. Case, accents and punctuation never make a second capability. Every
   capability the file would create is listed by name in the dry run, with the
   closest existing names, so a near-duplicate can be caught before the import.
 - An existing feature (matched by (product, name)) is reused, and its confirmed

@@ -1,6 +1,6 @@
 export const prerender = false;
 
-import { EDGE, andList, count } from "../../../lib/words.js";
+import { EDGE, andList, count, slugify } from "../../../lib/words.js";
 
 const backend = () =>
   (process.env.API_INTERNAL_URL || "http://localhost:8000").replace(/\/$/, "");
@@ -56,14 +56,13 @@ class UpstreamApi {
  * rule applied to the name. */
 function techSlug(tech) {
   if (tech.slug != null) return tech.slug;
-  return String(tech.name ?? "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  return slugify(tech.name);
 }
 
 /** The importer's capability identity: the explicit slug, then the slug the
  * name derives, then that derived slug against each row's current name (a
  * rename keeps the old slug), preferring the row with exactly that name. */
 function capabilityResolver(instance) {
-  const slugify = (value) => techSlug({ name: value });
   const bySlug = new Map(instance.map((capability) => [capability.slug, capability]));
   const byName = new Map();
   for (const capability of instance) {

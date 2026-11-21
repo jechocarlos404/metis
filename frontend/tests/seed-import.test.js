@@ -6,9 +6,9 @@ import assert from "node:assert/strict";
 import { POST, validateSeed } from "../src/pages/api/seed/import.js";
 import { POST as unseedPOST } from "../src/pages/api/seed/unseed.js";
 import { GET as exportGET } from "../src/pages/api/seed/export.js";
+import { slugify } from "../src/lib/words.js";
 
 const HOST = "http://metis.test";
-const slugify = (value) => value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
 
 /** Just enough of the metis API for the importer. Every request is recorded. */
 class FakeMetis {
@@ -332,6 +332,15 @@ describe("capability identity is the slug", () => {
     assert.equal(metis.capabilities.length, 1);
   });
 
+  test("an accented capability, whose slug predates accent folding, is found by its name", async () => {
+    use(existing({ capability: { name: "Résumé Parsing", slug: "r-sum-parsing" } }));
+    for (const name of ["Résumé Parsing", "Resume Parsing"]) {
+      const { body } = await importSeed(seed({ capabilities: [{ ref: "c-search", name }] }), { dryRun: false });
+      assert.deepEqual(body.counts.capabilities, { reused: 1 }, name);
+    }
+    assert.equal(metis.capabilities.length, 1);
+  });
+
   test("an explicit slug no row has falls back to the name", async () => {
     use(existing({ capability: { name: "Authentication" } }));
     const doc = seed({ capabilities: [{ ref: "c-search", name: "Authentication", slug: "auth" }] });
@@ -505,6 +514,14 @@ describe("unseed uses the importer's capability identity", () => {
     use(existing({ capability: { name: "Keyword Search", slug: "search" } }));
     const { body } = await unseed(seed({ capabilities: [{ ref: "c-search", name: "Keyword Search" }] }));
     assert.deepEqual(wouldDelete(body), ['would delete capability "Keyword Search"']);
+  });
+
+  test("an accented capability, whose slug predates accent folding, is found by its name", async () => {
+    use(existing({ capability: { name: "Résumé Parsing", slug: "r-sum-parsing" } }));
+    for (const name of ["Résumé Parsing", "Resume Parsing"]) {
+      const { body } = await unseed(seed({ capabilities: [{ ref: "c-search", name }] }));
+      assert.deepEqual(wouldDelete(body), ['would delete capability "Résumé Parsing"'], name);
+    }
   });
 
   test("each capability of a slugged -2 pair targets its own row", async () => {

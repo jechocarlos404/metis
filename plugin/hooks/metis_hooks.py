@@ -23,6 +23,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import unicodedata
 from datetime import datetime
 import urllib.parse
 import urllib.request
@@ -35,8 +36,11 @@ _NON_ALNUM = re.compile(r"[^a-z0-9]+")
 
 
 def slugify(value):
-    """Same rule as backend/app/services/slugs.py."""
-    return _NON_ALNUM.sub("-", value.strip().lower()).strip("-")
+    """Same rule as backend/app/services/slugs.py: accents folded first."""
+    folded = "".join(
+        c for c in unicodedata.normalize("NFKD", value) if not unicodedata.category(c).startswith("M")
+    )
+    return _NON_ALNUM.sub("-", folded.strip().lower()).strip("-")
 
 
 # ---- local state ----

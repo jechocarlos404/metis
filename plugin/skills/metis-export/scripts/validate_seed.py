@@ -16,6 +16,7 @@ import argparse
 import json
 import re
 import sys
+import unicodedata
 
 GOAL_TYPES = {"org", "product"}
 WORK_STATUSES = {"pending", "in_progress", "done"}
@@ -29,8 +30,12 @@ TECH_FITS = {"native", "partial", "workaround"}
 
 
 def slugify(value):
-    """The backend's slug rule: lowercase kebab, '' when nothing survives."""
-    return re.sub(r"[^a-z0-9]+", "-", value.strip().lower()).strip("-")
+    """The backend's slug rule: accents folded ("Café" is "Cafe"), then
+    lowercase kebab, '' when nothing survives."""
+    folded = "".join(
+        c for c in unicodedata.normalize("NFKD", value) if not unicodedata.category(c).startswith("M")
+    )
+    return re.sub(r"[^a-z0-9]+", "-", folded.strip().lower()).strip("-")
 
 
 def tech_slug(tech):

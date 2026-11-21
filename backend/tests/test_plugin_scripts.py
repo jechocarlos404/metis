@@ -149,6 +149,49 @@ def test_every_validator_gives_the_same_errors():
 
 
 UNSEED = SKILLS / "metis-unseed" / "scripts" / "unseed_instance.py"
+WORDS = ROOT / "frontend" / "src" / "lib" / "words.js"
+
+#: The slug rule, which every copy must give exactly: accents folded (NFKD,
+#: every combining mark dropped) before lowercasing, then lowercase kebab.
+#: test_slugs checks the backend's own copy against the same list.
+SLUG_VECTORS = [
+    ("Résumé Parsing", "resume-parsing"),
+    ("Café", "cafe"),
+    ("Crème brûlée", "creme-brulee"),
+    ("İstanbul", "istanbul"),
+    # ß has no decomposition, so it goes like any other letter outside a-z.
+    ("Straße", "stra-e"),
+    ("🚀🎉", ""),
+    ("Semantic Search", "semantic-search"),
+    ("  PM Export — ticket delivery  ", "pm-export-ticket-delivery"),
+    ("OAuth 2.1", "oauth-2-1"),
+    ("Ｗｉｄｅ ﬁle", "wide-file"),
+]
+
+
+def test_every_slug_rule_copy_gives_the_same_slugs():
+    """The hooks and each script keep their own copy (stdlib only, no
+    backend); the app's copy is words.js, which every frontend caller imports."""
+    expected = [slug for _, slug in SLUG_VECTORS]
+    names = [name for name, _ in SLUG_VECTORS]
+    for path in (HOOKS, VALIDATE, LOADER, UNSEED, SKILLS / "metis-fill-gaps" / "scripts" / "find_gaps.py"):
+        assert [_load(path, path.stem).slugify(n) for n in names] == expected, path.name
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is not installed; the JS copy is checked where it is")
+    script = (
+        f"import {{ slugify }} from {json.dumps(WORDS.as_uri())};"
+        "let s = ''; process.stdin.on('data', (c) => (s += c));"
+        "process.stdin.on('end', () => console.log(JSON.stringify(JSON.parse(s).map(slugify))));"
+    )
+    result = subprocess.run(
+        [node, "--input-type=module", "-e", script], input=json.dumps(names),
+        capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == expected
+
+
 #: The two 403 bodies the API sends, as the wire has them.
 ROLE_403 = {"detail": "Requires editor or admin role"}
 SURFACE_403 = {"detail": {"error": "human_action_required", "message": "A human action.", "href": "/tech"}}

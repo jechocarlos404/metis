@@ -19,12 +19,17 @@ import os
 import re
 import subprocess
 import sys
+import unicodedata
 import urllib.error
 import urllib.request
 
 
 def slugify(value):
-    return re.sub(r"[^a-z0-9]+", "-", value.strip().lower()).strip("-")
+    """The backend's slug rule: accents folded, then lowercase kebab."""
+    folded = "".join(
+        c for c in unicodedata.normalize("NFKD", value) if not unicodedata.category(c).startswith("M")
+    )
+    return re.sub(r"[^a-z0-9]+", "-", folded.strip().lower()).strip("-")
 
 
 def get(base, path, token):

@@ -1,14 +1,12 @@
 export const prerender = false;
 
+import { slugify } from "../../../lib/words.js";
+
 const backend = () =>
   (process.env.API_INTERNAL_URL || "http://localhost:8000").replace(/\/$/, "");
 
 function slug(value) {
-  return String(value || "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 40) || "item";
+  return slugify(value).slice(0, 40) || "item";
 }
 
 function flattenCapabilities(nodes, depth = 0, parentId = null, out = []) {

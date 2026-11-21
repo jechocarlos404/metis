@@ -1,6 +1,6 @@
 export const prerender = false;
 
-import { EDGE, andList, count, statusLabel } from "../../../lib/words.js";
+import { EDGE, andList, count, slugify, statusLabel } from "../../../lib/words.js";
 
 const backend = () =>
   (process.env.API_INTERNAL_URL || "http://localhost:8000").replace(/\/$/, "");
@@ -14,11 +14,6 @@ const CONFIDENCES = new Set(["low", "medium", "high"]);
 const TECH_KINDS = new Set(["language", "framework", "library", "runtime", "service", "model", "protocol"]);
 const TECH_LAYERS = new Set(["data", "api", "web", "agent", "infra", "ops"]);
 const TECH_FITS = new Set(["native", "partial", "workaround"]);
-
-/** The backend's slug rule: lowercase kebab, "" when nothing survives. */
-function slugify(value) {
-  return String(value).trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
-}
 
 /** A technology's identity: its explicit slug, else one derived from its name. */
 function techSlug(tech) {

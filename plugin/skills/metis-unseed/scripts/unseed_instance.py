@@ -55,6 +55,7 @@ import os
 import json
 import re
 import sys
+import unicodedata
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -144,21 +145,26 @@ def _and(names):
     return "".join(names) if len(names) <= 1 else f"{', '.join(names[:-1])} and {names[-1]}"
 
 
+def slugify(value):
+    """The backend's slug rule: accents folded, then lowercase kebab."""
+    folded = "".join(
+        c for c in unicodedata.normalize("NFKD", value) if not unicodedata.category(c).startswith("M")
+    )
+    return re.sub(r"[^a-z0-9]+", "-", folded.strip().lower()).strip("-")
+
+
 def tech_slug(tech):
     """The loader's technology identity: explicit slug, else the backend's
     slug rule applied to the name."""
     if tech.get("slug") is not None:
         return tech["slug"]
-    return re.sub(r"[^a-z0-9]+", "-", str(tech.get("name", "")).strip().lower()).strip("-")
+    return slugify(str(tech.get("name", "")))
 
 
 def capability_resolver(instance):
     """The loader's capability identity: the explicit slug, then the slug the
     name derives, then that derived slug against each row's current name (a
     rename keeps the old slug), preferring the row with exactly that name."""
-    def slugify(value):
-        return tech_slug({"name": value})
-
     by_slug = {c["slug"]: c for c in instance}
     by_name = {}
     for c in instance:

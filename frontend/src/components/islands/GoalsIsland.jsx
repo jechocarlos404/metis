@@ -154,6 +154,20 @@ export default function GoalsIsland({ canWrite = true }) {
     }
   };
 
+  // Keep puts focus back on Delete: the button it was on goes, and focus left
+  // on the page would take Escape out of the dialog's reach (A51).
+  const deleteRef = React.useRef(null);
+  const refocusDelete = React.useRef(false);
+  const keep = () => {
+    refocusDelete.current = true;
+    setConfirmingDelete(false);
+  };
+  React.useEffect(() => {
+    if (confirmingDelete || !refocusDelete.current) return;
+    refocusDelete.current = false;
+    deleteRef.current?.querySelector("button")?.focus();
+  }, [confirmingDelete]);
+
   // Arming reloads, so the note names what the delete removes now, not at page load.
   const armDelete = () => {
     setConfirmingDelete(true);
@@ -272,8 +286,11 @@ export default function GoalsIsland({ canWrite = true }) {
                     )}
                     {org.description && <div style={{ fontSize: "var(--text-sm)", color: "var(--ink-3)", marginTop: 4 }}>{org.description}</div>}
                     {org.success_criteria && <div style={{ fontSize: "var(--text-xs)", color: "var(--ink-3)", marginTop: 2 }}>{DONE_WHEN}: {org.success_criteria}</div>}
-                    {/* The same count the Network panel shows (goal-facts.js). */}
-                    <div style={{ fontSize: "var(--text-xs)", color: "var(--ink-3)", marginTop: 4 }}>{capabilityCount(org, goals, capsByGoal).text}</div>
+                    {/* The same count the Network panel shows (goal-facts.js), then the direct links by name (A52). */}
+                    <LinkedCapabilities goal={org} caps={capsByGoal[org.id] ?? []} linking={linking} inverse>
+                      <span>{capabilityCount(org, goals, capsByGoal).text}{(capsByGoal[org.id] ?? []).length > 0 && ":"}</span>
+                      <CapabilityLinks caps={capsByGoal[org.id] ?? []} inverse />
+                    </LinkedCapabilities>
                   </div>
                   <StatusBadge status={org.status} />
                   {canWrite && (
@@ -321,8 +338,10 @@ export default function GoalsIsland({ canWrite = true }) {
         footer={
           <>
             {dialog?.mode === "edit" && (
-              <DeleteConfirm armed={confirmingDelete} onArm={armDelete} onCancel={() => setConfirmingDelete(false)} onConfirm={remove} disabled={saving}
-                label="Delete" confirmLabel={"Delete goal"} style={{ marginRight: "auto" }} />
+              <span ref={deleteRef} style={{ display: "inline-flex", marginRight: "auto" }}>
+                <DeleteConfirm armed={confirmingDelete} onArm={armDelete} onCancel={keep} onConfirm={remove} disabled={saving}
+                  label="Delete" confirmLabel={"Delete goal"} />
+              </span>
             )}
             {/* While a delete is armed, Keep is the one way back: Cancel would do the same, and Save is another act. */}
             {!confirmingDelete && <>
@@ -436,8 +455,71 @@ function DeleteWhat({ goal, effects: { capabilities, products, children } }) {
   );
 }
 
+// A goal card's capability links, named, each a link; the comma sits outside the link's name.
+function CapabilityLinks({ caps, inverse = false }) {
+  const link = inverse ? { color: "var(--aegean-4)", textDecoration: "underline" } : undefined;
+  return caps.map((c, i) => (
+    <span key={c.id}>
+      <a href={`/capabilities/${c.slug}`} style={link}>{c.name}</a>
+      {c.need !== "ours" && <span title={NEED[c.need].hint}> ({NEED[c.need].label})</span>}
+      {i < caps.length - 1 ? "," : ""}
+    </span>
+  ));
+}
+
+// The line under a goal saying what it links, and its "Link a capability":
+// opening it puts focus in the field, in view (A50); linking, Cancel or
+// Escape give focus back to the button. The same on org and product goals,
+// as the capability page links either (A52). `inverse`: on the org card's dark surface.
+function LinkedCapabilities({ goal, caps, linking, inverse = false, children }) {
+  const [open, setOpen] = React.useState(false);
+  const buttonRef = React.useRef(null);
+  const panelRef = React.useRef(null);
+  const wasOpen = React.useRef(false);
+  const fieldId = `goal-${goal.id}-link`;
+  React.useEffect(() => {
+    if (open) {
+      document.getElementById(fieldId)?.focus({ preventScroll: true });
+      panelRef.current?.scrollIntoView({ block: "nearest" });
+    } else if (wasOpen.current) buttonRef.current?.focus();
+    wasOpen.current = open;
+  }, [open]);
+  const choices = linking ? linking.options.filter((o) => !caps.some((c) => c.id === o.id)) : [];
+  const muted = inverse ? "var(--ink-3)" : "var(--text-secondary)";
+  return (
+    <>
+      <div style={{ fontSize: "var(--text-xs)", color: muted, marginTop: 4, display: "flex", gap: 6, flexWrap: "wrap" }}>
+        {children}
+        {linking && !open && (
+          <button ref={buttonRef} type="button" onClick={() => setOpen(true)}
+            style={{ border: "none", background: "none", padding: 0, cursor: "pointer", font: "inherit", color: inverse ? "var(--aegean-4)" : "var(--text-accent)", textDecoration: inverse ? "underline" : undefined }}>
+            Link a capability
+          </button>
+        )}
+      </div>
+      {linking && open && (
+        // Typing brings the list of names into view as well, so the last card's shows too.
+        <div ref={panelRef}
+          onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); setOpen(false); } }}
+          onInput={() => requestAnimationFrame(() => panelRef.current?.querySelector("[role=listbox]")?.scrollIntoView({ block: "nearest" }))}
+          style={{ marginTop: 6, display: "flex", gap: 8, alignItems: "flex-start", ...(inverse ? { background: "var(--surface-card)", padding: 8, borderRadius: "var(--radius-md)" } : null) }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <CapabilityPicker id={fieldId} label={`Capability ${goal.display_id} needs`} value={[]}
+              options={choices}
+              onChange={(names) => {
+                const picked = choices.find((o) => o.name === names[names.length - 1]);
+                if (picked) linking.onLink(goal, picked);
+                setOpen(false);
+              }} placeholder="Type a capability…" />
+          </div>
+          <Button size="sm" variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>
+        </div>
+      )}
+    </>
+  );
+}
+
 function GoalList({ goals, productById, capsByGoal, highlightStyle, editButton, emptyText, canWrite, linking }) {
-  const [linkingId, setLinkingId] = React.useState(null); // the goal whose "Link a capability" is open
   return (
     <>
       <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "16px 0 10px", fontFamily: "var(--font-mono)", fontSize: "var(--text-2xs)", letterSpacing: "var(--tracking-caps)", textTransform: "uppercase", color: "var(--text-secondary)" }}>
@@ -447,10 +529,10 @@ function GoalList({ goals, productById, capsByGoal, highlightStyle, editButton, 
         {goals.map((g) => {
           const owner = productById[g.product_id];
           const caps = capsByGoal[g.id] || [];
-          const choices = linking ? linking.options.filter((o) => !caps.some((c) => c.id === o.id)) : [];
           return (
             <div key={g.id} id={`goal-${g.id}`} style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 14, background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", boxShadow: "var(--shadow-card)", padding: "14px 18px", ...highlightStyle(g.id) }}>
-              <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-secondary)", width: 46 }}>{g.display_id}</span>
+              {/* Level with the title's first line, not the card's middle. */}
+              <span style={{ alignSelf: "flex-start", marginTop: 4, fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-secondary)", width: 46 }}>{g.display_id}</span>
               <div style={{ flex: "1 1 220px", minWidth: 0 }}>
                 <div style={{ fontSize: "var(--text-md)", fontWeight: "var(--weight-semibold)", color: "var(--text-heading)" }}>{g.title}</div>
                 {owner && (
@@ -464,42 +546,16 @@ function GoalList({ goals, productById, capsByGoal, highlightStyle, editButton, 
                 {g.success_criteria && (
                   <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", marginTop: 2 }}>{DONE_WHEN}: {g.success_criteria}</div>
                 )}
-                <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", marginTop: 4, display: "flex", gap: 6, flexWrap: "wrap" }}>
+                <LinkedCapabilities goal={g} caps={caps} linking={linking}>
                   {caps.length === 0 ? (
                     <span>No capabilities linked.</span>
                   ) : (
                     <>
                       <span>{count(caps.length, "capability", "capabilities")}:</span>
-                      {caps.map((c, i) => (
-                        <a key={c.id} href={`/capabilities/${c.slug}`}>
-                          {c.name}
-                          {c.need !== "ours" && <span title={NEED[c.need].hint} style={{ color: "var(--text-secondary)" }}> ({NEED[c.need].label})</span>}
-                          {i < caps.length - 1 ? "," : ""}
-                        </a>
-                      ))}
+                      <CapabilityLinks caps={caps} />
                     </>
                   )}
-                  {linking && linkingId !== g.id && (
-                    <button type="button" onClick={() => setLinkingId(g.id)}
-                      style={{ border: "none", background: "none", padding: 0, cursor: "pointer", font: "inherit", color: "var(--text-accent)" }}>
-                      Link a capability
-                    </button>
-                  )}
-                </div>
-                {linking && linkingId === g.id && (
-                  <div style={{ marginTop: 6, display: "flex", gap: 8, alignItems: "flex-start" }}>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <CapabilityPicker id={`goal-${g.id}-link`} label={`Capability ${g.display_id} needs`} value={[]}
-                        options={choices}
-                        onChange={(names) => {
-                          const picked = choices.find((o) => o.name === names[names.length - 1]);
-                          if (picked) linking.onLink(g, picked);
-                          setLinkingId(null);
-                        }} placeholder="Type a capability…" />
-                    </div>
-                    <Button size="sm" variant="ghost" onClick={() => setLinkingId(null)}>Cancel</Button>
-                  </div>
-                )}
+                </LinkedCapabilities>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 10, marginLeft: "auto" }}>
                 {g.priority != null && <PriorityBadge priority={g.priority} rationale={PRIORITY_HINT} />}

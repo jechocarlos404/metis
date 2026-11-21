@@ -113,7 +113,9 @@ services:
       KEYCLOAK_REALM: metis
       METIS_WEB_CLIENT_ID: metis-web
       METIS_WEB_CLIENT_SECRET: ${METIS_WEB_CLIENT_SECRET:-dev-web-secret}
-      SESSION_SECRET: ${SESSION_SECRET:-dev-session-secret-change-me-32bytes!}
+      # With AUTH_ENABLED on, sign-in refuses an unset or default SESSION_SECRET.
+      SESSION_SECRET: ${SESSION_SECRET:-}
+      AUTH_ENABLED: ${AUTH_ENABLED:-true}
       PUBLIC_APP_URL: ${PUBLIC_APP_URL:-http://localhost:4321}
     ports:
       - "127.0.0.1:4321:4321"

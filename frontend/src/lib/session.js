@@ -11,10 +11,33 @@ const MANAGED_ROLES = ["admin", "editor", "viewer"];
 const CHUNK = 3500; // per-cookie value budget, safely under browsers' ~4KB
 const MAX_CHUNKS = 8;
 
-const key = () =>
-  createHash("sha256")
-    .update(process.env.SESSION_SECRET || "dev-session-secret-change-me-32bytes!")
-    .digest();
+// The secret seals the Keycloak tokens into the cookie, so anyone who knows it
+// can read a stolen cookie or forge one. The built-in default is public.
+const DEFAULT_SECRET = "dev-session-secret-change-me-32bytes!";
+// AUTH_ENABLED as the backend reads it (pydantic's false values); unset is on.
+const OFF = new Set(["false", "0", "no", "off", "f", "n"]);
+
+/** Why sign-in is refused, or null. With auth off the backend treats every
+ *  request as admin, so a weak secret guards nothing more and only warns. */
+export function sessionSecretProblem(env = process.env) {
+  const authOn = !OFF.has(String(env.AUTH_ENABLED ?? "true").trim().toLowerCase());
+  const secret = env.SESSION_SECRET;
+  if (!authOn || (secret && secret !== DEFAULT_SECRET)) return null;
+  return `Sign-in refused: SESSION_SECRET is ${secret ? "the public default" : "not set"} while AUTH_ENABLED is on. `
+    + "Set it to a long random value in .env (openssl rand -hex 32) and restart the frontend.";
+}
+
+let warned = false;
+const key = () => {
+  const problem = sessionSecretProblem();
+  if (problem) throw new Error(problem);
+  const secret = process.env.SESSION_SECRET;
+  if ((!secret || secret === DEFAULT_SECRET) && !warned) {
+    warned = true;
+    console.warn("SESSION_SECRET is unset or the public default. That is allowed only because AUTH_ENABLED is false.");
+  }
+  return createHash("sha256").update(secret || DEFAULT_SECRET).digest();
+};
 
 // Secure flag follows the app's scheme: off for http://localhost dev, on for https.
 const SECURE = (process.env.PUBLIC_APP_URL || "http://localhost:4321").startsWith("https");

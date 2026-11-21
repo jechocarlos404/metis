@@ -31,6 +31,10 @@ then copy it over both.
 
 - `format` is required and must be exactly `"metis-seed/v1"`.
 - `source` is free-form provenance metadata; the loader ignores it.
+- Every object takes only the keys this document shows for it. Any other key
+  is refused by name, with where it is (`features[3] (f-plan): unknown key
+  'stauts'`), so a misspelling never drops data without a word. `source` and
+  `facets` are free-form, so their keys are not checked.
 - Every collection is optional; omit or leave empty what you don't have.
 - Entities reference each other by `ref` — a short local string handle, unique within
   its own collection. Refs never reach the instance; the loader resolves them to real
@@ -108,8 +112,9 @@ then copy it over both.
   "ref": "cap-graph",
   "parent_ref": null,              // another capability ref (PART_OF, single parent)
   "name": "Feature Graph",         // required; durable noun
-  "slug": "feature-graph",         // optional; default: the name lowercased, each run of
-                                   // characters outside a-z 0-9 turned into one "-", ends trimmed
+  "slug": "feature-graph",         // optional; default: the name with accents dropped
+                                   // ("Café" -> "Cafe") and lowercased, each run of characters
+                                   // outside a-z 0-9 turned into one "-", ends trimmed
   "description": "…",
   "maturity": "planned",           // "planned" | "alpha" | "beta" | "ga" | "deprecated" | "retired"
   "facets": { "layer": "service" },        // string -> string only
@@ -250,8 +255,9 @@ satisfies. A technology is shared across products, like a capability.
 {
   "ref": "tech-postgres",
   "name": "PostgreSQL",            // required
-  "slug": "postgresql",            // optional; default: the name lowercased, each run of
-                                   // characters outside a-z and 0-9 turned into one "-", ends trimmed
+  "slug": "postgresql",            // optional; default: the name with accents dropped
+                                   // and lowercased, each run of characters outside a-z
+                                   // and 0-9 turned into one "-", ends trimmed
   "kind": "service",               // required: "language" | "framework" | "library" | "runtime"
                                    //   | "service" | "model" | "protocol"
   "layer": "data",                 // optional: "data" | "api" | "web" | "agent" | "infra" | "ops"
@@ -297,6 +303,10 @@ satisfies. A technology is shared across products, like a capability.
   or (capability, technology) pair takes the file's `confidence` and `basis`.
   The only row that goes away is a guess the file confirms. Re-running the same
   file is safe: the second run changes nothing.
+- A load is not one transaction: each row is its own API call, so a load that
+  fails partway keeps what it wrote before the failure. Both loaders then say
+  what that is, and loading the same file again finishes the job, since
+  everything already written is found by name and slug.
 - After a load that writes (not a dry run), the loader records that every product
   in the file was just seeded; metis shows that time as how fresh the product's
   map is. This is bookkeeping, not a change to the product.
@@ -308,9 +318,11 @@ satisfies. A technology is shared across products, like a capability.
 - A capability matches by slug: its explicit `slug`, else the slug its name
   derives. A rename in metis keeps the old slug, so when no slug matches, the
   derived slug is also compared with each capability's current name, slugified
-  the same way. Case and punctuation never make a second capability. Every
+  the same way. Case, accents and punctuation never make a second capability. Every
   capability the file would create is listed by name in the dry run, with the
-  closest existing names, so a near-duplicate can be caught before the import.
+  closest existing names, so a near-duplicate can be caught before the import
+  (a name over 100 characters is listed without them; if the lookup fails, the
+  dry run says so).
 - An existing feature (matched by (product, name)) is reused, and its confirmed
   links only grow: every `capability_refs` entry it does not realize yet is
   added, and a link the file leaves out is never removed. A product's own seed

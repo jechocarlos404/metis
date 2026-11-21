@@ -33,11 +33,52 @@ VALID = {
     "capabilities": [{"ref": "c1", "name": "Route Planning"}],
     "motivations": [{"goal_ref": "g1", "capability_ref": "c1"}],
     "features": [
-        {"ref": "f1", "name": "Plan a route", "capability_refs": ["c1"]},
-        {"ref": "f2", "name": "Share a route", "capability_refs": ["c1"]},
+        {"ref": "f1", "product_ref": "p1", "name": "Plan a route", "capability_refs": ["c1"]},
+        {"ref": "f2", "product_ref": "p1", "name": "Share a route", "capability_refs": ["c1"]},
     ],
     "edges": [{"src_ref": "f2", "dst_ref": "f1", "kind": "DEPENDS_ON"}],
-    "products": [{"ref": "p1", "name": "Saddlebag", "feature_refs": ["f1", "f2"]}],
+    # A feature names its product (product_ref); a product lists none.
+    "products": [{"ref": "p1", "name": "Saddlebag"}],
+}
+
+
+#: Every key the format allows, on every kind of object. Each validator must
+#: take it clean, which holds their key lists together.
+EVERY_KEY = {
+    "format": "metis-seed/v1",
+    "source": {"name": "every key", "generated_by": "test"},
+    "goals": [
+        {"ref": "g1", "goal_type": "org", "parent_ref": None, "title": "Riders climb more",
+         "description": "d", "success_criteria": "s", "priority": 1, "status": "pending"},
+    ],
+    "capabilities": [
+        {"ref": "c1", "parent_ref": None, "name": "Route Planning", "slug": "route-planning",
+         "description": "d", "maturity": "ga", "facets": {"area": "maps"}, "evidence_anchors": ["src/route.py"]},
+        {"ref": "c2", "parent_ref": "c1", "name": "Elevation", "maturity": "beta"},
+    ],
+    "motivations": [{"goal_ref": "g1", "capability_ref": "c1"}],
+    "features": [
+        {"ref": "f1", "capability_refs": ["c1"], "unknown_capabilities": False,
+         "capability_guesses": [{"capability_ref": "c2", "confidence": "high", "basis": "b"}],
+         "product_ref": "p1", "name": "Plan a route", "description": "d", "facets": {"k": "v"},
+         "status": "done", "priority": 1, "priority_rationale": "r"},
+        {"ref": "f2", "capability_ref": "c1", "product_ref": "p1", "name": "Share a route"},
+    ],
+    "edges": [{"src_ref": "f2", "dst_ref": "f1", "kind": "DEPENDS_ON"}],
+    "products": [
+        {"ref": "p1", "goal_ref": "g1", "name": "Saddlebag", "summary": "s", "body": "b", "external": False,
+         "bundle_refs": ["c2"], "decomposition": {"summary": "s", "epics": [
+             {"title": "E", "acceptance_criteria": ["a"], "capability_ref": "c1", "stories": [
+                 {"title": "S", "description": "d", "feature_ref": "f1", "tickets": [
+                     {"title": "T", "description": "d", "technical_approach": "t", "acceptance_criteria": ["a"],
+                      "affected_files": ["src/route.py"], "context_budget": "M"}]}]}]}},
+    ],
+    "technologies": [
+        {"ref": "t1", "name": "Valhalla", "slug": "valhalla", "kind": "service", "layer": "api",
+         "products": ["p1"], "satisfies": [
+             {"capability_ref": "c1", "fit": "native"},
+             {"capability_ref": "c2", "fit": "partial", "confidence": "low", "basis": "b"}]},
+    ],
 }
 
 
@@ -50,6 +91,7 @@ def _broken(**changes):
 #: One valid document and one per kind of mistake the validators catch.
 DOCS = [
     VALID,
+    EVERY_KEY,
     _broken(format="metis-seed/v2"),
     _broken(capabilities=[{"ref": "c1", "name": "A"}, {"ref": "c1", "name": "B"}]),
     _broken(features=[{"ref": "f1", "name": "Plan", "capability_refs": ["nope"]}]),
@@ -62,7 +104,39 @@ DOCS = [
         ]
     ),
     _broken(goals=[{"ref": "g1", "goal_type": "team", "title": "x"}]),
+    # Misspelled keys: each is named, never dropped without a word.
+    _broken(
+        capabilites=[],
+        capabilities=[{"ref": "c1", "name": "Route Planning", "maturty": "ga"}],
+        features=[
+            {"ref": "f1", "name": "Plan a route", "capability_refs": ["c1"], "stauts": "done"},
+            {"ref": "f2", "name": "Share a route", "capability_refs": ["c1"],
+             "capability_guesses": [], "notes": "x"},
+        ],
+        products=[{"ref": "p1", "name": "Saddlebag", "externl": True, "decomposition": {
+            "epics": [{"title": "E", "stories": [{"title": "S", "tickets": [{"title": "T", "estimate": 3}]}]}],
+        }}],
+        technologies=[{"ref": "t1", "name": "Valhalla", "kind": "service",
+                       "satisfies": [{"capability_ref": "c1", "fit": "native", "note": "x"}]}],
+    ),
 ]
+
+
+def test_every_key_the_format_has_is_taken():
+    for path in (VALIDATE, LOADER):
+        assert _load(path, path.stem).validate(EVERY_KEY) == [], path
+
+
+def test_a_misspelled_key_is_named_with_where_it_is():
+    assert _load(VALIDATE, "validate_seed").validate(DOCS[-1]) == [
+        "the file: unknown key 'capabilites'",
+        "capabilities[0] (c1): unknown key 'maturty'",
+        "features[0] (f1): unknown key 'stauts'",
+        "features[1] (f2): unknown key 'notes'",
+        "products[0] (p1): unknown key 'externl'",
+        "products[0] (p1).epics[0].stories[0].tickets[0]: unknown key 'estimate'",
+        "technologies[0] (t1).satisfies[0]: unknown key 'note'",
+    ]
 
 
 def _load(path, name):
@@ -113,7 +187,7 @@ def test_every_script_starts(script):
 def test_validate_seed_accepts_a_good_file_and_names_what_is_wrong(tmp_path):
     good, bad = tmp_path / "good.json", tmp_path / "bad.json"
     good.write_text(json.dumps(VALID))
-    bad.write_text(json.dumps(DOCS[3]))
+    bad.write_text(json.dumps(DOCS[4]))
     result = _run(VALIDATE, good)
     assert result.returncode == 0, result.stderr
     assert "is valid: 1 goals, 1 capabilities, 1 motivations, 2 features, 1 edges" in result.stdout
@@ -129,7 +203,7 @@ def _unquoted(results):
 def test_every_validator_gives_the_same_errors():
     """Both Python copies and the desktop importer's JavaScript one."""
     expected = [_load(VALIDATE, "validate_seed").validate(d) for d in DOCS]
-    assert expected[0] == [] and all(expected[1:]), expected
+    assert expected[:2] == [[], []] and all(expected[2:]), expected
     assert [_load(LOADER, "seed_instance").validate(d) for d in DOCS] == expected
     node = shutil.which("node")
     if node is None:
@@ -149,6 +223,49 @@ def test_every_validator_gives_the_same_errors():
 
 
 UNSEED = SKILLS / "metis-unseed" / "scripts" / "unseed_instance.py"
+WORDS = ROOT / "frontend" / "src" / "lib" / "words.js"
+
+#: The slug rule, which every copy must give exactly: accents folded (NFKD,
+#: every combining mark dropped) before lowercasing, then lowercase kebab.
+#: test_slugs checks the backend's own copy against the same list.
+SLUG_VECTORS = [
+    ("Résumé Parsing", "resume-parsing"),
+    ("Café", "cafe"),
+    ("Crème brûlée", "creme-brulee"),
+    ("İstanbul", "istanbul"),
+    # ß has no decomposition, so it goes like any other letter outside a-z.
+    ("Straße", "stra-e"),
+    ("🚀🎉", ""),
+    ("Semantic Search", "semantic-search"),
+    ("  PM Export — ticket delivery  ", "pm-export-ticket-delivery"),
+    ("OAuth 2.1", "oauth-2-1"),
+    ("Ｗｉｄｅ ﬁle", "wide-file"),
+]
+
+
+def test_every_slug_rule_copy_gives_the_same_slugs():
+    """The hooks and each script keep their own copy (stdlib only, no
+    backend); the app's copy is words.js, which every frontend caller imports."""
+    expected = [slug for _, slug in SLUG_VECTORS]
+    names = [name for name, _ in SLUG_VECTORS]
+    for path in (HOOKS, VALIDATE, LOADER, UNSEED, SKILLS / "metis-fill-gaps" / "scripts" / "find_gaps.py"):
+        assert [_load(path, path.stem).slugify(n) for n in names] == expected, path.name
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is not installed; the JS copy is checked where it is")
+    script = (
+        f"import {{ slugify }} from {json.dumps(WORDS.as_uri())};"
+        "let s = ''; process.stdin.on('data', (c) => (s += c));"
+        "process.stdin.on('end', () => console.log(JSON.stringify(JSON.parse(s).map(slugify))));"
+    )
+    result = subprocess.run(
+        [node, "--input-type=module", "-e", script], input=json.dumps(names),
+        capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == expected
+
+
 #: The two 403 bodies the API sends, as the wire has them.
 ROLE_403 = {"detail": "Requires editor or admin role"}
 SURFACE_403 = {"detail": {"error": "human_action_required", "message": "A human action.", "href": "/tech"}}
@@ -246,3 +363,195 @@ def test_the_hooks_say_their_line_and_stay_silent_without_metis(tmp_path, metis)
                         ("user-prompt", {"cwd": str(repo), "prompt": "x"}),
                         ("stop", {"cwd": str(repo), "session_id": "s2"})):
         assert _hook(name, event, closed, tmp_path / "cold") is None, name
+
+
+def test_a_load_that_fails_partway_says_what_it_wrote_and_that_the_same_file_finishes_it(
+    tmp_path, monkeypatch, capsys
+):
+    module = _load(LOADER, "seed_instance")
+    made = []
+
+    class Api(module.Api):
+        """A fresh instance in memory: every list is empty, every write is
+        made, except that a feature can't be created."""
+        def request(self, method, path, payload=None):
+            if method == "POST" and path == "/api/features":
+                return 503, {"detail": "upstream down"}
+            if method == "POST":
+                made.append(path)
+                return 201, {"id": f"id-{len(made)}", **(payload or {})}
+            return 200, {"status": "ok"} if path == "/api/health" else []
+
+    monkeypatch.setattr(module, "Api", Api)
+    seed = tmp_path / "seed.json"
+    seed.write_text(json.dumps(VALID))
+    monkeypatch.setattr(sys, "argv", ["seed_instance.py", str(seed), "--base-url", "http://metis.test"])
+    with pytest.raises(SystemExit) as stop:
+        module.main()
+    assert str(stop.value.code) == (
+        "The load stopped partway. Before it stopped, it wrote: goals 1 created; capabilities 1 "
+        "created; motivations 1 created; products 1 created. Those stay. Loading this file again is safe: it finds those by "
+        "name and slug, and adds only the rest."
+    )
+    assert capsys.readouterr().err.startswith("error: POST /api/features for 'Plan a route' returned 503")
+
+
+def _lookup_loader(n, failing=False):
+    """The loader's dry run of a file adding n capabilities and one 120-character
+    name, against an instance holding "Keyword search" whose coverage read keeps
+    the backend's bounds (300 names a request, each at most 100 long)."""
+    module = _load(LOADER, "seed_instance")
+    asked = []
+
+    class Api(module.Api):
+        def request(self, method, path, payload=None):
+            if path != "/api/capabilities/coverage":
+                return 200, []
+            names = [c for f in payload["features"] for c in f["capabilities"]]
+            asked.append(len(names))
+            if failing:
+                return 503, {"detail": "upstream down"}
+            if len(names) > 300 or any(len(c) > 100 for c in names):
+                return 422, {"detail": "too many or too long"}
+            needs = [{"name": c, "candidates": [{"name": "Keyword search"}] if "search" in c else []}
+                     for c in names]
+            return 200, {"features": [{"name": "seed file", "capabilities": needs}]}
+
+    loader = module.Loader(Api("http://metis.test"), {}, dry_run=True)
+    names = [f"Probe {i} search" for i in range(n)] + ["x" * 120]
+    loader.list_added_capabilities(names)
+    return loader, asked
+
+
+def test_the_dry_run_looks_up_nearest_names_in_chunks_the_coverage_read_takes():
+    loader, asked = _lookup_loader(650)
+    assert asked == [300, 300, 50]
+    assert loader.warnings == []
+    for i in (0, 299, 300, 649):
+        assert f'new capability "Probe {i} search"; nearest existing: "Keyword search"' in loader.notes
+    assert f'new capability "{"x" * 120}"; not looked up for nearest names (over 100 characters)' in loader.notes
+
+
+def test_a_nearest_name_lookup_that_fails_is_said():
+    loader, _ = _lookup_loader(2, failing=True)
+    assert loader.warnings == [
+        "couldn't look up the nearest existing names for 2 new capabilities "
+        "(\"Probe 0 search\" to \"Probe 1 search\"): the lookup returned 503: {'detail': 'upstream down'}"
+    ]
+    assert 'new capability "Probe 0 search"' in loader.notes
+
+
+# ---- the unseed script against an instance in memory ----
+
+
+def _unseeder(routes, doc, failing=()):
+    """The unseed script's Unseeder over its own Api, whose requests are
+    answered from `routes` (path -> body): a path not there is a 404, one in
+    `failing` a 503. Returns the dry run's report as printed."""
+    module = _load(UNSEED, "unseed_instance")
+
+    class Api(module.Api):
+        def request(self, method, path, payload=None):
+            if path in failing:
+                return 503, {"detail": "upstream down"}
+            if method == "GET" and path in routes:
+                return 200, routes[path]
+            return 404, None
+
+    return module.Unseeder(Api("http://metis.test"), doc, dry_run=True)
+
+
+def _run_unseed(unseeder, capsys):
+    for step in ("remove_motivations", "remove_edges", "remove_features", "remove_products",
+                 "remove_technologies", "remove_capabilities", "remove_goals", "numbers_note"):
+        getattr(unseeder, step)()
+    unseeder.report()
+    return capsys.readouterr().out
+
+
+PROBE_SEED = {
+    "format": "metis-seed/v1",
+    "capabilities": [{"ref": "c", "name": "Probe Cap"}],
+    "products": [{"ref": "p", "name": "Probe"}],
+    "features": [{"ref": "f", "product_ref": "p", "name": "Probe feature", "capability_refs": ["c"]}],
+    "technologies": [{"ref": "t", "name": "Qdrant", "kind": "service", "products": ["p"],
+                      "satisfies": [{"capability_ref": "c", "fit": "native"}]}],
+}
+AT = "2026-11-20T10:00:00Z"
+
+
+def _probe(**extra):
+    """One product with one feature on one capability, a technology it uses
+    that satisfies it, a guess on the feature, a capability added by hand and
+    a plan: every kind the in-app removal tallies."""
+    routes = {
+        "/api/goals": [],
+        "/api/capabilities": [{"id": "cap1", "slug": "probe-cap", "name": "Probe Cap", "parent_id": None}],
+        "/api/features": [{"id": "f1", "product_id": "p1", "name": "Probe feature", "capability_ids": ["cap1"]}],
+        "/api/features/edges": [],
+        "/api/products": [{"id": "p1", "name": "Probe", "status": "draft"}],
+        "/api/motivations": [],
+        "/api/product-bundles": [{"product_id": "p1", "capability_id": "cap1"}],
+        "/api/tech/satisfactions": [{"id": "s1", "tech_id": "t1", "capability_id": "cap1", "fit": "native"}],
+        "/api/guesses": [{"id": "g1", "feature_id": "f1", "capability_id": "cap1", "confidence": "low"}],
+        "/api/tech?limit=200&offset=0": {"rows": [{"id": "t1", "slug": "qdrant", "name": "Qdrant", "used_by": 1}], "total": 1},
+        "/api/tech/qdrant": {"id": "t1", "name": "Qdrant", "encounters": [], "versions": [], "outgoing": [], "incoming": []},
+        "/api/stacks/usage?product_id=p1": [{"product_id": "p1", "tech_id": "t1"}],
+        "/api/tickets": [],
+        "/api/products/p1/decompositions": [{"id": "pd1", "product_id": "p1", "version": 1, "status": "draft"}],
+    }
+    routes.update(extra)
+    return routes
+
+
+def test_the_removal_line_names_tickets_a_re_import_wont_restore(capsys):
+    """The latest plan made ep1: tk1 is as it was made, tk2 moved on since
+    and tk3 was added by hand, so a re-import brings back neither of those."""
+    routes = _probe(**{
+        "/api/products/p1/decompositions": [
+            {"id": "pd2", "product_id": "p1", "version": 2, "status": "draft"},
+            {"id": "pd1", "product_id": "p1", "version": 1, "status": "draft"},
+        ],
+        "/api/products/p1/epics": [{"id": "ep1", "product_id": "p1", "decomposition_id": "pd2", "title": "Plan epic", "stories": []}],
+        "/api/tickets": [
+            {"id": "tk1", "product_id": "p1", "epic_id": "ep1", "created_at": AT, "updated_at": AT},
+            {"id": "tk2", "product_id": "p1", "epic_id": "ep1", "created_at": AT, "updated_at": "2026-11-21T09:00:00Z"},
+            {"id": "tk3", "product_id": "p1", "epic_id": None, "created_at": AT, "updated_at": AT},
+        ],
+    })
+    out = _run_unseed(_unseeder(routes, PROBE_SEED), capsys)
+    line = next(l for l in out.splitlines() if l.startswith("  would delete product 'Probe'"))
+    assert "3 ticket(s)" in line
+    assert line.endswith(
+        "importing this file again won't bring back 1 older plan document(s) "
+        "and 2 ticket(s) as they are now (changed or added since its plan was written)"
+    ), line
+
+
+def test_the_summary_tallies_each_kind_as_the_in_app_removal_does(capsys):
+    """What a delete takes with it is counted under its own kind too, as the
+    in-app removal's counts do (unseed.js): a product's technology use, hand
+    added capabilities and plan documents, a feature's guesses, a
+    technology's links and guesses."""
+    out = _run_unseed(_unseeder(_probe(), PROBE_SEED), capsys)
+    summary = {l.split()[0]: l.split(None, 1)[1] for l in out.splitlines()
+               if l.startswith("  ") and not l.startswith(("  would", "  note", "  kept", "  can't"))}
+    assert summary == {
+        "features": "1 would delete",
+        "products": "1 would delete",
+        "bundles": "1 would delete",
+        "decompositions": "1 would delete",
+        "technologies": "1 would delete",
+        "tech_usage": "1 would delete",
+        "satisfactions": "1 would delete",
+        "guesses": "1 would delete",
+        "capabilities": "1 would delete",
+    }, out
+
+
+def test_a_technology_list_that_fails_to_read_is_unreadable_not_empty(capsys):
+    """Read as none, the technologies would match nothing and their links
+    would be judged against an empty list."""
+    unseeder = _unseeder(_probe(), PROBE_SEED, failing={"/api/tech?limit=200&offset=0"})
+    assert unseeder.unreadable == ["technologies"]
+    assert "can't tell" in _run_unseed(unseeder, capsys)

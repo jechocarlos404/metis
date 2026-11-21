@@ -220,9 +220,11 @@ export function plain(dict, value) {
   return dict[value] ?? String(value).replace(/_/g, " ").toLowerCase();
 }
 
-/** The backend's slug rule (services/slugs.py): lowercase kebab. Capability
- *  identity is the slug, so "Route Import" and "route import" are one name. */
-export const slugify = (value) => String(value ?? "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+/** The backend's slug rule (services/slugs.py): lowercase kebab, accents
+ *  folded first. Capability identity is the slug, so "Route Import", "route
+ *  import" and "Café" / "Cafe" are each one name. */
+export const slugify = (value) =>
+  String(value ?? "").normalize("NFKD").replace(/\p{M}/gu, "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
 
 // A guessed capability link (capability_guesses). Never counted until confirmed.
 export const CONFIDENCE = {

@@ -8,9 +8,10 @@ import pytest
 from fastapi import HTTPException
 
 from app.models import Capability, Product
-from app.schemas.capability import CapabilityCreate, CapabilityUpdate
+from app.schemas.capability import CapabilityCreate, CapabilityUpdate, CoverageRequest
 from app.services import capabilities as capability_service
 from app.services.slugs import slugify, unique_slug
+from tests.test_plugin_scripts import SLUG_VECTORS
 
 
 def test_slugify_is_lowercase_kebab():
@@ -18,6 +19,29 @@ def test_slugify_is_lowercase_kebab():
     assert slugify("  PM Export — ticket delivery  ") == "pm-export-ticket-delivery"
     assert slugify("OAuth 2.1") == "oauth-2-1"
     assert slugify("!!!") == ""
+
+
+@pytest.mark.parametrize("name,slug", SLUG_VECTORS)
+def test_slugify_folds_accents_as_every_copy_does(name, slug):
+    """"Café" and "Cafe" are one name. The plugin's copies and the app's are
+    held to the same list in test_plugin_scripts."""
+    assert slugify(name) == slug
+
+
+@pytest.mark.asyncio
+async def test_a_slug_stored_before_the_fold_is_still_found_by_its_name(db):
+    """Stored slugs are never re-derived: "Résumé Parsing" keeps the
+    `r-sum-parsing` it got before accents folded, and a lookup by name finds
+    it through the slug its name derives now, as it finds a renamed one."""
+    async with db() as session:
+        session.add(Capability(name="Résumé Parsing", slug="r-sum-parsing"))
+        await session.commit()
+        for name in ("Résumé Parsing", "Resume Parsing", "r-sum-parsing"):
+            report = await capability_service.coverage(
+                session, CoverageRequest(features=[{"name": "Import a CV", "capabilities": [name]}])
+            )
+            match = report.features[0].capabilities[0].match
+            assert match is not None and match.slug == "r-sum-parsing", name
 
 
 @pytest.mark.asyncio

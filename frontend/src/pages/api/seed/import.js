@@ -1,6 +1,6 @@
 export const prerender = false;
 
-import { EDGE, andList, count, statusLabel } from "../../../lib/words.js";
+import { EDGE, andList, count, slugify, statusLabel } from "../../../lib/words.js";
 
 const backend = () =>
   (process.env.API_INTERNAL_URL || "http://localhost:8000").replace(/\/$/, "");
@@ -14,11 +14,46 @@ const CONFIDENCES = new Set(["low", "medium", "high"]);
 const TECH_KINDS = new Set(["language", "framework", "library", "runtime", "service", "model", "protocol"]);
 const TECH_LAYERS = new Set(["data", "api", "web", "agent", "infra", "ops"]);
 const TECH_FITS = new Set(["native", "partial", "workaround"]);
-
-/** The backend's slug rule: lowercase kebab, "" when nothing survives. */
-function slugify(value) {
-  return String(value).trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
-}
+// The coverage read's bounds (backend MAX_IDEA_NAMES, MAX_CAPABILITY_NAME).
+const COVERAGE_NAMES = 300;
+const COVERAGE_NAME_LENGTH = 100;
+// Each kind an import counts, in the words the Settings page counts it in.
+const KINDS = {
+  goals: ["goal", "goals"],
+  capabilities: ["capability", "capabilities"],
+  motivations: ["goal link", "goal links"],
+  features: ["feature", "features"],
+  edges: ["link between features", "links between features"],
+  products: ["product", "products"],
+  bundles: ["capability added by hand", "capabilities added by hand"],
+  decompositions: ["plan document", "plan documents"],
+  technologies: ["technology", "technologies"],
+  tech_usage: ["technology in use", "technologies in use"],
+  satisfactions: ["technology link", "technology links"],
+  guesses: ["guess", "guesses"],
+};
+// Every key the format has, per kind of object. Any other key is refused by
+// name: a misspelled one ("stauts") would otherwise be dropped without a word.
+// `source` and `facets` are free-form, so their keys are not checked.
+const KEYS = Object.fromEntries(Object.entries({
+  file: ["format", "source", "goals", "capabilities", "motivations", "features", "edges", "products", "technologies"],
+  goals: ["ref", "goal_type", "parent_ref", "title", "description", "success_criteria", "priority", "status"],
+  capabilities: ["ref", "parent_ref", "name", "slug", "description", "maturity", "facets", "evidence_anchors"],
+  motivations: ["goal_ref", "capability_ref"],
+  features: [
+    "ref", "capability_refs", "capability_ref", "unknown_capabilities", "capability_guesses", "product_ref",
+    "name", "description", "facets", "status", "priority", "priority_rationale",
+  ],
+  capability_guesses: ["capability_ref", "confidence", "basis"],
+  edges: ["src_ref", "dst_ref", "kind"],
+  products: ["ref", "goal_ref", "name", "summary", "body", "external", "bundle_refs", "decomposition"],
+  decomposition: ["summary", "epics"],
+  epics: ["title", "acceptance_criteria", "capability_ref", "stories"],
+  stories: ["title", "description", "feature_ref", "tickets"],
+  tickets: ["title", "description", "technical_approach", "acceptance_criteria", "affected_files", "context_budget"],
+  technologies: ["ref", "name", "slug", "kind", "layer", "products", "satisfies"],
+  satisfies: ["capability_ref", "fit", "confidence", "basis"],
+}).map(([kind, keys]) => [kind, new Set(keys)]));
 
 /** A technology's identity: its explicit slug, else one derived from its name. */
 function techSlug(tech) {
@@ -109,6 +144,44 @@ function featureCapabilityRefs(feature) {
   if (feature.capability_ref != null) return [feature.capability_ref];
   if (feature.unknown_capabilities === true) return []; // declared unknown: none named yet
   return null;
+}
+
+/** Each object's keys against KEYS, named by the object's path. */
+function checkKeys(errors, doc) {
+  const isObject = (item) => item !== null && typeof item === "object" && !Array.isArray(item);
+  const check = (where, item, kind) => {
+    if (!isObject(item)) return {};
+    for (const key of Object.keys(item)) {
+      if (!KEYS[kind].has(key)) errors.push(`${where}: unknown key ${JSON.stringify(key)}`);
+    }
+    return item;
+  };
+  const each = (items) => (Array.isArray(items) ? items.entries() : []);
+
+  check("the file", doc, "file");
+  for (const collection of ["goals", "capabilities", "motivations", "features", "edges", "products", "technologies"]) {
+    for (const [i, raw] of each(doc[collection])) {
+      const ref = isObject(raw) ? raw.ref : undefined;
+      const where = ["motivations", "edges"].includes(collection) ? `${collection}[${i}]` : `${collection}[${i}] (${ref})`;
+      const item = check(where, raw, collection);
+      if (collection === "features") {
+        for (const [j, guess] of each(item.capability_guesses)) check(`${where}.capability_guesses[${j}]`, guess, "capability_guesses");
+      }
+      if (collection === "technologies") {
+        for (const [j, link] of each(item.satisfies)) check(`${where}.satisfies[${j}]`, link, "satisfies");
+      }
+      if (collection === "products") {
+        const decomposition = check(`${where}.decomposition`, item.decomposition, "decomposition");
+        for (const [j, epic] of each(decomposition.epics)) {
+          const ewhere = `${where}.epics[${j}]`;
+          for (const [k, story] of each(check(ewhere, epic, "epics").stories)) {
+            const swhere = `${ewhere}.stories[${k}]`;
+            for (const [t, ticket] of each(check(swhere, story, "stories").tickets)) check(`${swhere}.tickets[${t}]`, ticket, "tickets");
+          }
+        }
+      }
+    }
+  }
 }
 
 function validateSeed(doc) {
@@ -401,6 +474,7 @@ function validateSeed(doc) {
     }
   }
 
+  checkKeys(errors, doc);
   return errors;
 }
 
@@ -517,6 +591,23 @@ class Loader {
     return JSON.stringify(item?.name ?? ref);
   }
 
+  /** What a real import has written so far, in plain words ("1 goal and 2
+   * capabilities"), and the same as counts: rows created, features updated. */
+  written() {
+    const said = { created: [], updated: [] };
+    const counts = {};
+    for (const [kind, [one, many]] of Object.entries(KINDS)) {
+      for (const [action, n] of Object.entries(this.count(kind))) {
+        const verb = action === "created" ? "created" : ["updated", "linked"].includes(action) ? "updated" : null;
+        if (!verb) continue;
+        said[verb].push(count(n, one, many));
+        (counts[kind] ??= {})[action] = n;
+      }
+    }
+    const words = [said.created.length > 0 && `created ${andList(said.created)}`, said.updated.length > 0 && `updated ${andList(said.updated)}`];
+    return { words: andList(words.filter(Boolean)), counts };
+  }
+
   count(collection) {
     return Object.fromEntries(
       Object.entries(this.counts)
@@ -616,22 +707,34 @@ class Loader {
    * existing names, so a near-duplicate is caught before the import. */
   async listAddedCapabilities(names) {
     if (names.length === 0) return;
-    let nearest = new Map();
-    if (this.dryRun) {
+    const nearest = new Map();
+    // The coverage read takes at most COVERAGE_NAMES names a request, each at
+    // most COVERAGE_NAME_LENGTH long, so the names go in chunks and a longer
+    // name isn't looked up. A chunk that fails is said, never dropped.
+    const lookup = this.dryRun ? names.filter((name) => name.trim().length <= COVERAGE_NAME_LENGTH) : [];
+    for (let start = 0; start < lookup.length; start += COVERAGE_NAMES) {
+      const chunk = lookup.slice(start, start + COVERAGE_NAMES);
       const { status, body } = await this.api.post("/api/capabilities/coverage", {
-        features: [{ name: "seed file", capabilities: names }],
+        features: [{ name: "seed file", capabilities: chunk }],
       });
-      if (status === 200) {
-        nearest = new Map(
-          (body.features?.[0]?.capabilities || []).map((need) => [need.name, (need.candidates || []).map((c) => c.name)]),
+      if (status !== 200) {
+        this.warnings.push(
+          `couldn't look up the nearest existing names for ${count(chunk.length, "new capability", "new capabilities")} ` +
+            `(${JSON.stringify(chunk[0])} to ${JSON.stringify(chunk[chunk.length - 1])}): the lookup returned ${status}: ${JSON.stringify(body)}`,
         );
+        continue;
+      }
+      for (const need of body.features?.[0]?.capabilities || []) {
+        nearest.set(need.name, (need.candidates || []).map((c) => c.name));
       }
     }
     for (const name of names) {
       const near = nearest.get(name.trim()) || [];
+      const tooLong = this.dryRun && name.trim().length > COVERAGE_NAME_LENGTH;
       this.notes.push(
         `new capability ${JSON.stringify(name)}` +
-          (near.length > 0 ? `; nearest existing: ${near.map((n) => JSON.stringify(n)).join(", ")}` : ""),
+          (near.length > 0 ? `; nearest existing: ${near.map((n) => JSON.stringify(n)).join(", ")}` : "") +
+          (tooLong ? `; not looked up for nearest names (over ${COVERAGE_NAME_LENGTH} characters)` : ""),
       );
     }
   }
@@ -724,6 +827,11 @@ class Loader {
     // (product, name): another product's "Sign in" is a different feature.
     const instance = await this.api.get("/api/features");
     const existing = new Map(instance.map((feature) => [featureKey(feature.product_id, feature.name), feature]));
+    // A feature of the file's products that the file doesn't name may be one
+    // of its new features under an old name.
+    const productIds = new Set(this.productIds.values());
+    const named = new Set((this.doc.features || []).map((f) => featureKey(this.productIds.get(f.product_ref), f.name)));
+    this.unnamedFeatures = instance.some((f) => productIds.has(f.product_id) && !named.has(featureKey(f.product_id, f.name)));
     for (const feature of this.doc.features || []) {
       const key = featureKey(this.productIds.get(feature.product_ref), feature.name);
       if (existing.has(key)) {
@@ -1083,7 +1191,9 @@ class Loader {
     const products = this.count("products");
     const features = this.count("features");
     const added = (features["would create"] ?? 0) + (features.created ?? 0);
-    if ((products.reused ?? 0) > 0 && added > 0) {
+    // Only a feature the file doesn't name can be one of its new ones under an
+    // old name (rerunning a file that failed partway has none).
+    if ((products.reused ?? 0) > 0 && added > 0 && this.unnamedFeatures) {
       this.warnings.push(
         `This file names a product metis already has and adds ${added === 1 ? "1 feature whose name doesn't" : `${added} features whose names don't`} match its existing ones. ` +
           "If they describe features it already has under new wording, importing creates duplicates: compare with the product's feature list first.",
@@ -1157,14 +1267,22 @@ export async function POST({ request, locals }) {
     });
   }
 
+  const loader = new Loader(new UpstreamApi(locals.accessToken), doc, dryRun);
   try {
-    const result = await new Loader(new UpstreamApi(locals.accessToken), doc, dryRun).run();
+    const result = await loader.run();
     return new Response(JSON.stringify(result), {
       status: 200,
       headers: { "content-type": "application/json" },
     });
   } catch (error) {
-    return new Response(JSON.stringify({ detail: String(error.message || error) }), {
+    // Each row is its own API call, so a failure partway leaves what came
+    // before it. Say what that is, and that the same file finishes the job.
+    const { words, counts } = dryRun ? { words: "" } : loader.written();
+    const detail = String(error.message || error) + (words
+      ? `\nThe import stopped partway. Before it stopped, it ${words}; those stay. ` +
+        "Importing this file again is safe: it finds those by name and slug, and adds only the rest."
+      : "");
+    return new Response(JSON.stringify({ detail, ...(words ? { partial: true, counts } : {}) }), {
       status: 500,
       headers: { "content-type": "application/json" },
     });

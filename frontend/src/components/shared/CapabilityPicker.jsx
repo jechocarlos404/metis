@@ -5,8 +5,9 @@ import { NEED, slugify } from "../../lib/words.js";
 /**
  * Pick capabilities by exact name — recognition, not recall, and never a fuzzy
  * auto-match (PRODUCT.md). Type to filter the inventory; Enter or click picks
- * the highlighted existing name. With allowNew, Enter on text that matches
- * nothing, or only once accents are ignored, adds it verbatim as a name nobody has yet (it will read "not built yet").
+ * the highlighted existing name; a name typed whole but for case or accents is
+ * that name. With allowNew, Enter on text that matches nothing, or only part of a
+ * name once accents are ignored, adds it verbatim as a name nobody has yet (it will read "not built yet").
  *
  *   options:  [{ id, name, slug, hint?, need? }]   the inventory to pick from;
  *             need (a NEED key) tones a picked chip the way the verdict below
@@ -24,7 +25,8 @@ export function CapabilityPicker({ id = "capability-picker", options, value, onC
   // suggestion: what counts as the same name (exact, picked) stays exact.
   const fold = (s) => s.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
   const fq = fold(q);
-  const literal = (o) => o.name.toLowerCase().includes(q);
+  // The whole name but for case or accents is the name itself (one slug).
+  const literal = (o) => o.name.toLowerCase().includes(q) || slugify(o.name) === slugify(q);
   const matches = q
     ? options
         .filter((o) => !picked.has(slugify(o.name)) && fold(o.name).includes(fq))

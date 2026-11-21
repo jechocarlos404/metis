@@ -55,6 +55,7 @@ import os
 import json
 import re
 import sys
+import unicodedata
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -144,21 +145,26 @@ def _and(names):
     return "".join(names) if len(names) <= 1 else f"{', '.join(names[:-1])} and {names[-1]}"
 
 
+def slugify(value):
+    """The backend's slug rule: accents folded, then lowercase kebab."""
+    folded = "".join(
+        c for c in unicodedata.normalize("NFKD", value) if not unicodedata.category(c).startswith("M")
+    )
+    return re.sub(r"[^a-z0-9]+", "-", folded.strip().lower()).strip("-")
+
+
 def tech_slug(tech):
     """The loader's technology identity: explicit slug, else the backend's
     slug rule applied to the name."""
     if tech.get("slug") is not None:
         return tech["slug"]
-    return re.sub(r"[^a-z0-9]+", "-", str(tech.get("name", "")).strip().lower()).strip("-")
+    return slugify(str(tech.get("name", "")))
 
 
 def capability_resolver(instance):
     """The loader's capability identity: the explicit slug, then the slug the
     name derives, then that derived slug against each row's current name (a
     rename keeps the old slug), preferring the row with exactly that name."""
-    def slugify(value):
-        return tech_slug({"name": value})
-
     by_slug = {c["slug"]: c for c in instance}
     by_name = {}
     for c in instance:
@@ -364,6 +370,9 @@ class Unseeder:
         while True:
             status, page = self.api.request("GET", f"/api/tech?limit=200&offset={offset}")
             if status != 200:
+                # Absent (404) is none; any other failure is a list it can't read.
+                if status != 404 and "technologies" not in self.unreadable:
+                    self.unreadable.append("technologies")
                 return rows
             rows.extend(page["rows"])
             offset += 200
@@ -380,24 +389,32 @@ class Unseeder:
                 matched[item["ref"]] = inst
         return matched
 
-    def note(self, collection, action):
-        self.counts[(collection, action)] = self.counts.get((collection, action), 0) + 1
+    def note(self, collection, action, n=1):
+        self.counts[(collection, action)] = self.counts.get((collection, action), 0) + n
 
-    def remove(self, collection, path, label, unsure=False):
+    def remove(self, collection, path, label, unsure=False, cascades=None):
         """`unsure`: the delete depends on a capability or technology that a
         list this token can't read might keep, so a dry run says so instead
-        of claiming it."""
+        of claiming it. `cascades`: rows of other kinds the delete takes with
+        it, {kind: n}, tallied under their own kind as the in-app removal
+        does, so the summary undoes an import's counts kind by kind."""
+        def tally(action):
+            self.note(collection, action)
+            for kind, n in (cascades or {}).items():
+                if n:
+                    self.note(kind, action, n)
+
         if self.dry_run:
             if unsure and self.unreadable:
-                self.note(collection, "can't tell")
+                tally("can't tell")
                 print(f"  can't tell whether {label} goes")
                 return
-            self.note(collection, "would delete")
+            tally("would delete")
             print(f"  would delete {label}")
             return
         status, body = self.api.delete(path)
         if status == 204:
-            self.note(collection, "deleted")
+            tally("deleted")
             print(f"  deleted {label}")
         elif status == 404:
             self.note(collection, "absent")
@@ -705,12 +722,13 @@ class Unseeder:
                     [f"{foreign[prod['id']]} feature(s) outside the seed belong to it"],
                 )
                 continue
-            self.remove("products", f"/api/products/{prod['id']}", self._product_line(prod))
+            label, cascades = self._product_line(prod)
+            self.remove("products", f"/api/products/{prod['id']}", label, cascades=cascades)
 
     def _product_line(self, prod):
         """A product's delete takes its plan, stacks and the rest of its own
         rows with it; each is counted here. What only pointed at it stays,
-        and says so."""
+        and says so. Returns the line and the rows of kinds an import counts."""
         pid = prod["id"]
         epics = [e for e in self.inst_epics if e["product_id"] == pid]
         epic_ids = {e["id"] for e in epics}
@@ -805,12 +823,18 @@ class Unseeder:
         if lost:
             after.append(f"importing this file again won't bring back {_and(lost)}")
         head = f"product {prod['name']!r}" + (f" (cascades {_and(parts)})" if parts else "")
-        return "; ".join([head, *after])
+        cascades = {
+            "tech_usage": len(self.inst_usage.get(pid, [])),
+            "bundles": sum(1 for b in self.inst_bundles if b["product_id"] == pid),
+            "decompositions": len(plans),
+        }
+        return "; ".join([head, *after]), cascades
 
     def _feature_line(self, feat):
         """A feature's delete takes its capability links and guesses, each
         counted, and a link the seed doesn't declare named. Another product's
-        story and a journey step that pointed at it stay."""
+        story and a journey step that pointed at it stay. Returns the line and
+        the rows of kinds an import counts."""
         parts = []
         links = feat.get("capability_ids") or []
         ref = next((r for r, f in self.feats.items() if f["id"] == feat["id"]), None)
@@ -844,11 +868,12 @@ class Unseeder:
             if steps:
                 after.append(f"journey {j['name']!r} keeps its {steps} step(s), no longer linked to it")
         head = f"feature {feat['name']!r}" + (f" (cascades {_and(parts)})" if parts else "")
-        return "; ".join([head, *after])
+        return "; ".join([head, *after]), {"guesses": guesses}
 
     def remove_features(self):
         for feat in self.feats.values():
-            self.remove("features", f"/api/features/{feat['id']}", self._feature_line(feat))
+            label, cascades = self._feature_line(feat)
+            self.remove("features", f"/api/features/{feat['id']}", label, cascades=cascades)
 
     def remove_technologies(self):
         """Deletable technologies go, with their links to capabilities, each
@@ -878,6 +903,7 @@ class Unseeder:
                 f"/api/tech/{urllib.parse.quote(tech['slug'], safe='')}",
                 f"technology {tech['name']!r}" + (f" (cascades {_and(parts)})" if parts else "") + lost,
                 unsure=True,
+                cascades={"satisfactions": len(sats), "guesses": len(guesses)},
             )
         dead_techs, dead_caps = self._dead("techs"), self._dead("caps")
         for s in self.inst_sats:
@@ -912,6 +938,7 @@ class Unseeder:
                 f"/api/capabilities/{cap['id']}",
                 f"capability {cap['name']!r}" + (f" (cascades the guess(es) that {who} satisfy it)" if guesses else ""),
                 unsure=True,
+                cascades={"guesses": len(guesses)},
             )
 
     def numbers_note(self):
@@ -930,9 +957,10 @@ class Unseeder:
             self.remove("goals", f"/api/goals/{goal['id']}", f"goal {goal['title']!r}")
 
     def report(self):
+        # Every kind the in-app removal counts, in its order (unseed.js).
         order = [
-            "motivations", "edges", "features", "products", "technologies",
-            "satisfactions", "capabilities", "goals",
+            "motivations", "edges", "features", "products", "bundles", "decompositions",
+            "technologies", "tech_usage", "satisfactions", "guesses", "capabilities", "goals",
         ]
         for collection in order:
             actions = {a: n for (c, a), n in self.counts.items() if c == collection}

@@ -2,7 +2,7 @@ import React from "react";
 import { PageHeader } from "../shell/PageHeader.jsx";
 import { Badge, Button, DeleteConfirm, Input } from "../../ds";
 import { api } from "../../lib/api.js";
-import { MATURITY, NEED, VERDICT, andList, count, needKey, plain, statusLabel, verdictOf } from "../../lib/words.js";
+import { MATURITY, NEED, VERDICT, andList, count, needKey, plain, slugify, statusLabel, verdictOf } from "../../lib/words.js";
 import { readParam, useParamRestore, writeParams } from "../../lib/url-state.js";
 import { CoverageReport } from "../shared/coverage.jsx";
 import { CapabilityPicker } from "../shared/CapabilityPicker.jsx";
@@ -601,9 +601,6 @@ function StepCard({ step, x, dim, h, text, whereY, labelRef, whereRef, onEnter, 
     : <g tabIndex={0} onFocus={onEnter} onBlur={onLeave} onClick={onEnter}>{card}</g>;
 }
 
-// Mirrors the backend's slugify: step needs resolve by exact slug.
-const slugify = (v) => v.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
-
 // The analysis's rule, while composing: live, else by what its capabilities are.
 function needsVerdict(entries, incomplete) {
   if (entries.length === 0) return "unknown";
@@ -619,7 +616,9 @@ function JourneyEditor({ base, draft: start, features, productById, inventory, o
   const [confirmDiscard, setConfirmDiscard] = React.useState(false);
   const featureById = React.useMemo(() => new Map(features.map((f) => [f.id, f])), [features]);
   const byId = React.useMemo(() => new Map(inventory.map((c) => [c.id, c])), [inventory]);
-  const bySlug = React.useMemo(() => new Map(inventory.map((c) => [c.slug, c])), [inventory]);
+  // Step needs resolve as coverage resolves them: by exact slug, the stored
+  // one first, else the one the current name derives (a rename keeps the old).
+  const bySlug = React.useMemo(() => new Map([...inventory.map((c) => [slugify(c.name), c]), ...inventory.map((c) => [c.slug, c])]), [inventory]);
   const options = React.useMemo(() => inventory.map((c) => ({
     id: c.id, name: c.name, slug: c.slug, need: needKey(c), hint: NEED[needKey(c)].label,
   })), [inventory]);

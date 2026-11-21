@@ -510,7 +510,7 @@ const takenWords = (takes) => takenRows(takes).map((t, i) => {
 const KEPT = {
   journey_steps: ["journey step", "journey steps", "stays as a gap in its journey", "stay as gaps in their journeys"],
   stories: ["story in another product's plan", "stories in other products' plans", "loses its feature", "lose their feature"],
-  encounters: ["record of who used a technology on it", "records of who used a technology on it", "loses its product", "lose their product"],
+  encounters: ["record of a technology used on it", "records of technologies used on it", "loses its product", "lose their product"],
   tickets: ["ticket in another product", "tickets in other products", "loses its story", "lose their story"],
   product_technologies: ["technology use recorded elsewhere", "technology uses recorded elsewhere", "loses its stack slot", "lose their stack slot"],
   stack_concern_answers: ["answer to a stack concern", "answers to stack concerns", "loses its slot", "lose their slot"],

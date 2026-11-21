@@ -457,7 +457,6 @@ async def _named_where(session: AsyncSession, model: type, ids: set[uuid.UUID]) 
             TechStack.id == StackSlot.stack_id,
         ),
         JourneyStep: (JourneyStep.label, Journey.name, Journey, Journey.id == JourneyStep.journey_id),
-        Encounter: (Encounter.person, Technology.name, Technology, Technology.id == Encounter.tech_id),
     }.get(model)
     if model is ProductBundle:
         # The product that added it by hand; the capability is the one deleted.
@@ -477,6 +476,13 @@ async def _named_where(session: AsyncSession, model: type, ids: set[uuid.UUID]) 
             row_id: f"\u201c{a}\u201d {EDGE_WORDS.get(getattr(kind, 'value', kind), kind)} \u201c{b}\u201d"
             for row_id, a, kind, b in rows
         }
+    if model is Encounter:
+        # The technology only: who used it is a person, named only behind the
+        # people throttle (questions.tech_encounters), never by a plain read.
+        rows = await session.execute(
+            select(model.id, Technology.name).join(Technology, Technology.id == model.tech_id).where(model.id.in_(ids))
+        )
+        return dict(rows.all())
     if model is ProductDecomposition:
         rows = await session.execute(select(model.id, model.version).where(model.id.in_(ids)))
         return {row_id: f"version {version}" for row_id, version in rows}
@@ -560,7 +566,8 @@ async def closure_detaches(session: AsyncSession, entity: str, row_id: uuid.UUID
         out.append(
             NamedCount(
                 table=model.__tablename__, label=label, plane=plane, count=len(ids),
-                names=sorted(names.values(), key=str.lower),
+                # Each name once: two records of one technology read "SQLite".
+                names=sorted(set(names.values()), key=str.lower),
             )
         )
     return sorted(out, key=lambda t: (-t.count, t.label))

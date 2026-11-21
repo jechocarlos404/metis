@@ -179,8 +179,11 @@ async def test_a_product_delete_names_what_it_keeps_but_unlinks(app_graph, db):
     assert said == {
         "journey_steps": (1, ["Write a note (A ride)"]),
         "stories": (1, ["Borrowed story (Ride epic)"]),
-        "encounters": (1, ["ana (SQLite)"]),
+        "encounters": (1, ["SQLite"]),
     }
+    # Who used a technology is a person: named only behind the people
+    # throttle (questions.tech_encounters), never by this any-reader read.
+    assert "ana" not in res.text
     deletes = {t["table"]: t["names"] for t in (await http.get(f"/api/products/{trail_id}/deletes")).json()}
     assert deletes["stories"] == ["Own story"]
     # /data's cascade preview counts the same rows: one helper finds them.

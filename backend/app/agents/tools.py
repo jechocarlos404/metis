@@ -101,11 +101,8 @@ async def _resolve_capabilities(session, refs: list[str]) -> list[uuid.UUID]:
                 )
             )
         if found is None:
-            score = capability_service.name_closeness(Capability.name, ref)
-            near = await session.scalars(
-                select(Capability.name).where(score > 0.3).order_by(score.desc()).limit(3)
-            )
-            hint = ", ".join(f"`{n}`" for n in near) or "none — create it first"
+            near = (await capability_service.near_names(session, Capability, [ref]))[ref]
+            hint = ", ".join(f"`{c.name}`" for c in near) or "none — create it first"
             raise ToolError(f"No capability named `{ref}`. Near names: {hint}.")
         ids.append(found.id)
     return ids
@@ -275,7 +272,7 @@ def score_text(score) -> str:
         return "\n".join(lines)
     lines.append(
         f"We have {report.existing} of the {report.needed} capabilities needed · "
-        f"{report.mature} proven (beta or stable)"
+        f"{report.mature} in use (beta or stable)"
     )
     if not score.buildable and score.partly:
         lines.append(

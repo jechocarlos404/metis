@@ -13,11 +13,13 @@ from datetime import datetime, timedelta, timezone
 from collections import defaultdict
 
 from fastapi import HTTPException
-from sqlalchemy import func, or_, select
+from sqlalchemy import Text, func, literal, or_, select, true
+from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
     Capability,
+    CapabilityGuess,
     CapabilityMaturity,
     Feature,
     FeatureCapability,
@@ -482,6 +484,47 @@ def name_closeness(column, name: str):
     )
 
 
+#: How near a name must be to be offered. At 0.3 one shared word or word
+#: fragment qualified ("Ride group chat" offered "Ride Prep Checklist" at 0.33,
+#: "Repair Booking" offered "Bookmarking" at 0.54). Real near names score well
+#: above it: "Auth" for "User Authentication" 0.80, "Payments" for "Payment
+#: Processing" 0.78, the typo "Authentcation" 0.71, a case-only difference 1.
+NEAR = 0.6
+
+
+async def near_names(session: AsyncSession, model, names: list[str]) -> dict[str, list]:
+    """Per typed name, up to three rows of `model` whose name is near it,
+    nearest first (closeness over NEAR, then oldest): candidates for someone
+    to confirm, never a match. One statement for all the names, so a long
+    idea costs one round trip; the work is still per name, which is why the
+    coverage body is bounded (schemas.capability)."""
+    if not names:
+        return {}
+    typed = func.unnest(literal(list(names), ARRAY(Text))).table_valued("name").alias("typed")
+    score = name_closeness(model.name, typed.c.name)
+    near = (
+        select(model.id, score.label("score"), model.seq)
+        .where(score > NEAR)
+        .order_by(score.desc(), model.seq)
+        .limit(3)
+        .lateral("near")
+    )
+    pairs = (
+        await session.execute(
+            select(typed.c.name, near.c.id)
+            .select_from(typed.join(near, true()))
+            .order_by(typed.c.name, near.c.score.desc(), near.c.seq)
+        )
+    ).all()
+    out: dict[str, list] = {name: [] for name in names}
+    if not pairs:
+        return out
+    rows = {r.id: r for r in await session.scalars(select(model).where(model.id.in_({p.id for p in pairs})))}
+    for name, row_id in pairs:
+        out[name].append(rows[row_id])
+    return out
+
+
 def ours_clause():
     """Our features: a feature is ours unless its product is external. A
     feature with no product is internal work, so ours. Any status — this is
@@ -615,21 +658,22 @@ async def coverage(
             external_products=u.external_products,
         )
 
-    async def candidates(name: str) -> list[CapabilityMatch]:
-        score = name_closeness(Capability.name, name)
-        stmt = (
-            select(Capability)
-            .where(score > 0.3)
-            .order_by(score.desc(), Capability.seq)
-            .limit(3)
-        )
-        return [as_match(c) for c in await session.scalars(stmt)]
+    asked = [
+        list(dict.fromkeys(n.strip() for n in idea.capabilities if n.strip()))
+        for idea in request.features
+    ]
+    # Every unmatched name searched once, all in one statement.
+    near = await near_names(
+        session,
+        Capability,
+        list(dict.fromkeys(n for names in asked for n in names if slugify(n) not in by_slug)),
+    )
 
     features: list[FeatureCoverage] = []
     seen: dict[str, Capability | None] = {}
-    for idea in request.features:
+    for idea, names in zip(request.features, asked):
         needs: list[CapabilityNeed] = []
-        for name in dict.fromkeys(n.strip() for n in idea.capabilities if n.strip()):
+        for name in names:
             key = slugify(name)
             found = by_slug.get(key)
             seen.setdefault(key, found)
@@ -637,7 +681,7 @@ async def coverage(
                 CapabilityNeed(
                     name=name,
                     match=as_match(found) if found else None,
-                    candidates=[] if found else await candidates(name),
+                    candidates=[] if found else [as_match(c) for c in near[name]],
                 )
             )
         features.append(
@@ -711,13 +755,25 @@ async def health(session: AsyncSession) -> list[HealthFinding]:
         m.goal_id for m in (await session.scalars(select(Motivation))).all()
     }
 
+    # Guesses, by whose feature: a guess on someone else's product is no more
+    # our promise than a confirmed link there is.
+    guessed: dict[bool, set[uuid.UUID]] = defaultdict(set)
+    for capability_id, external in await session.execute(
+        select(CapabilityGuess.capability_id, Product.external.is_(True))
+        .join(Feature, Feature.id == CapabilityGuess.feature_id)
+        .outerjoin(Product, Product.id == Feature.product_id)
+    ):
+        guessed[external].add(capability_id)
+
     usage = await _usage(session)
     for capability in capabilities:
-        # Known only from someone else's product: not our promise to keep.
-        # One nothing realizes isn't ours either, but is still ours to explain,
-        # and so is one we're still building.
+        # Known only from someone else's product, linked or guessed: not our
+        # promise to keep. One nothing realizes isn't ours either, but is still
+        # ours to explain, and so is one we're still building or guessing at.
         u = usage[capability.id]
-        if not u.features and u.external_products:
+        submap = _submap_ids(capability.id, children)
+        elsewhere = u.external_products or (submap & guessed[True] and not submap & guessed[False])
+        if not u.features and elsewhere:
             continue
         in_scope = sum(
             counts_by_capability.get(cid, 0)

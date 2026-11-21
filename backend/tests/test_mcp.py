@@ -24,7 +24,13 @@ from app.mcp.server import PROMPTS, RESOURCE_TEMPLATES, RESOURCES, TOOLS, _hard_
 from app.models import CapabilityMaturity, Goal, GoalType, Product, TechKind, WorkStatus
 from app.models.enums import Surface
 from app.models.stack import TechStack
-from app.schemas.capability import CapabilityCreate
+from app.schemas.capability import (
+    MAX_CAPABILITY_NAME,
+    MAX_IDEA_FEATURES,
+    MAX_IDEA_NAMES,
+    MAX_NAME,
+    CapabilityCreate,
+)
 from app.schemas.envelope import Question
 from app.schemas.feature import EdgeCreate, FeatureCreate
 from app.schemas.journey import JourneyCreate, JourneyStepIn
@@ -94,6 +100,47 @@ def test_tool_names_are_the_question_keys():
     assert len(TOOLS) == 17
     assert len(RESOURCES) + len(RESOURCE_TEMPLATES) == 4
     assert len(PROMPTS) == 3
+
+
+async def test_the_tech_tools_are_listed_once_the_catalog_has_a_technology(api):
+    """The technology plane stays hidden until it has data: with an empty
+    catalog only the inventory tools are listed, and a tech tool called by
+    name still answers. A catalog that can't be read hides nothing."""
+    import mcp.types as types
+
+    _, db = api
+    listed = server.server.request_handlers[types.ListToolsRequest]
+
+    async def names():
+        return {t.name for t in (await listed(types.ListToolsRequest(method="tools/list"))).root.tools}
+
+    assert await names() == INVENTORY_TOOLS
+    assert server.TECH_TOOLS | INVENTORY_TOOLS == {t.name for t in TOOLS}
+    # Through the SDK's own handler, as a client calls it: an unlisted tool
+    # must still run, not be refused.
+    called = server.server.request_handlers[types.CallToolRequest]
+    answer = (
+        await called(
+            types.CallToolRequest(
+                method="tools/call",
+                params=types.CallToolRequestParams(name="tech_search", arguments={"q": "redis"}),
+            )
+        )
+    ).root
+    assert not answer.isError
+    assert "No technology is recorded yet" in answer.content[0].text
+
+    async with db() as s:
+        await tech_service.create_technology(
+            s, TechnologyCreate(slug="redis", name="Redis", kind=TechKind.service)
+        )
+    assert await names() == {t.name for t in TOOLS}
+
+    async def unreachable(*args, **kwargs):
+        raise server.SetupError("Cannot reach the metis API.")
+
+    server.client.get = unreachable
+    assert await names() == {t.name for t in TOOLS}
 
 
 def test_no_tool_mutates():
@@ -516,6 +563,30 @@ async def test_products_lists_ours_and_external(api):
     assert rows == {"can-i-climb": "2026-11-01T12:00:00Z", "rival": "never"}
 
 
+async def test_products_given_one_lists_its_features_for_the_tools_that_take_one(api):
+    """No tool needed a name to list a product's features, yet feature_why
+    and recheck need one. products with a product lists them, with status
+    and the id the next call takes."""
+    w = await _world(*api)
+    text = await server._dispatch("products", {"product": "can-i-climb"})
+    _conventions(text)
+    lines = text.splitlines()
+    assert lines[0] == "2 feature(s) of can-i-climb (ours): 1 done, 1 pending."
+    rows = {line.split("  ")[1].strip(): line.split()[-2:] for line in lines[2:4]}
+    assert rows["Estimate climb power"][0] == "done"
+    assert rows["Show ride history"] == ["pending", str(w["forecast"].id)]
+    assert lines[-1] == f"Open: /features?product={w['climb'].id}"
+    why = await server._dispatch("feature_why", {"feature": rows["Show ride history"][1]})
+    assert not why.startswith("0 features")
+
+    by_id = await server._dispatch("products", {"product": str(w["rival"].id)})
+    assert by_id.startswith("3 feature(s) of rival (external): 3 pending.")
+    assert (await server._dispatch("products", {"product": "Rival"})).splitlines()[1] == (
+        'Near names, unconfirmed: rival "Rival"'
+    )
+    assert (await server._dispatch("products", {})).startswith("2 product(s): 1 ours, 1 external.")
+
+
 async def test_a_products_stacks_resource_holds_only_its_own_stacks(api):
     app, db = api
     w = await _world(app, db)
@@ -567,7 +638,7 @@ async def test_check_idea_never_counts_a_near_name(api):
     )
     _conventions(text)
     assert text.startswith(
-        "1/3 distinct capabilit(ies) are ours, 1 of them proven (beta or ga); 2 not ours."
+        "1/3 distinct capabilit(ies) are ours, 1 of them in use (beta or ga); 2 not ours."
     )
     lines = text.splitlines()
     assert any(line.strip().startswith("ours") and "strava-import (ga" in line for line in lines)
@@ -1231,6 +1302,125 @@ def test_real_writes_from_mcp_are_still_refused(method, path):
         )
     assert err.value.status_code == 403
     assert err.value.detail["error"] == "human_action_required"
+
+
+async def test_an_exact_miss_offers_near_names_and_never_picks_one(api):
+    """Products, features and journeys still match exactly. A miss offers
+    near names by the rule check_idea's candidates follow, each leading with
+    what the next call takes, and a case-only difference is always one."""
+    w = await _world(*api)
+    climb = w["climb"]
+
+    product = await server._dispatch("product_score", {"product": "Can I Climb"})
+    assert product.splitlines() == [
+        "0 products have id or slug 'Can I Climb'. Call `products` for ids and slugs.",
+        'Near names, unconfirmed: can-i-climb "Can I Climb"',
+        "Open: /products",
+    ]
+    for tool in ("tech_exposure", "stack_redundancy", "stack_recommend", "ready_features"):
+        assert await server._dispatch(tool, {"product": "Can I Climb"}) == product
+    assert 'rival "Rival"' in await server._dispatch("product_score", {"product": "RIVAL"})
+
+    for tool in ("feature_why", "recheck"):
+        feature = await server._dispatch(tool, {"feature": "estimate climb power"})
+        lines = feature.splitlines()
+        assert lines[0] == (
+            "0 features are named 'estimate climb power'. Matching is exact: pass an id or the exact name."
+        )
+        assert lines[1].startswith("Near names, unconfirmed: ")
+        offered = lines[1].removeprefix("Near names, unconfirmed: ").split(", ")
+        # Nearest first, the case-only one; each with its id and product.
+        assert offered[0].endswith('"Estimate climb power" (can-i-climb)')
+        assert lines[-1] == "Open: /features"
+    picked = await server._dispatch("recheck", {"feature": offered[0].split()[0]})
+    assert not picked.startswith("0 features")
+
+    journey = await server._dispatch("journeys", {"journey": "plan a CLIMB"})
+    assert journey.splitlines()[1] == f'Near names, unconfirmed: {w["journey"].id} "Plan a climb"'
+
+    # Nothing near, or an id: the miss alone, as before.
+    assert await server._dispatch("product_score", {"product": "zzzz"}) == (
+        "0 products have id or slug 'zzzz'. Call `products` for ids and slugs.\nOpen: /products"
+    )
+    assert "Near names" not in await server._dispatch("journeys", {"journey": "qqqq xxxx"})
+
+
+async def test_the_list_reads_offer_near_names_on_request(api):
+    """`near` on the product, feature and journey lists: three at most,
+    nearest first, case ignored, nothing for a name far from every row, and a
+    name longer than any name refused."""
+    app, _ = api
+    await _world(*api)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as http:
+        async def names(path, near):
+            res = await http.get(path, params={"near": near})
+            assert res.status_code == 200, res.text
+            return [r["name"] for r in res.json()]
+
+        assert await names("/api/products", "can i climb") == ["Can I Climb"]
+        near = await names("/api/features", "RIVAL")
+        assert len(near) == 3 and all(n.startswith("Rival") for n in near)
+        assert await names("/api/journeys", "PLAN A CLIMB") == ["Plan a climb"]
+        assert await names("/api/products", "zzzz") == []
+        res = await http.get("/api/products", params={"near": "n" * (MAX_NAME + 1)})
+        assert res.status_code == 422 and f"at most {MAX_NAME} characters" in res.json()["detail"]
+        # Without it, the whole list as before.
+        assert len((await http.get("/api/products")).json()) == 2
+
+
+async def test_check_idea_takes_the_api_s_bounds_and_says_which_one(api):
+    """check_idea's schema carries the coverage body's limits, so an agent is
+    told before any request; the one across all features only the API checks,
+    and its 422 still reads as a sentence with the limit in it. A capability
+    asked for by a name too long to be one is refused the same way, since its
+    miss would post that name to coverage."""
+    await _world(*api)
+
+    async def call(name, arguments):
+        result = await server.call_tool(name, arguments)
+        return result.content[0].text.splitlines() if not isinstance(result, list) else None
+
+    one = {"name": "f", "capabilities": ["Strava import"]}
+    assert await call("check_idea", {"features": [one] * MAX_IDEA_FEATURES}) is None
+    refused = await call("check_idea", {"features": [one] * (MAX_IDEA_FEATURES + 1)})
+    assert refused == [
+        f"Arguments refused at features: at most {MAX_IDEA_FEATURES} items, got {MAX_IDEA_FEATURES + 1}.",
+        "Open: /home",
+    ]
+    names = [f"name {i}" for i in range(MAX_IDEA_NAMES + 1)]
+    refused = await call(
+        "check_idea",
+        {"features": [{"name": "a", "capabilities": names[:150]}, {"name": "b", "capabilities": names[150:]}]},
+    )
+    assert refused == [
+        f"Refused (422): body: Value error, at most {MAX_IDEA_NAMES} capability names per "
+        f"request across all features, got {MAX_IDEA_NAMES + 1}",
+        "Open: /home",
+    ]
+    long = "c" * (MAX_CAPABILITY_NAME + 1)
+    for tool, arg in (("capability", "slug"), ("capability_supply", "capability")):
+        refused = await call(tool, {arg: long})
+        assert refused[0] == (
+            f"Arguments refused at {arg}: at most {MAX_CAPABILITY_NAME} characters, "
+            f"got {MAX_CAPABILITY_NAME + 1}."
+        )
+
+
+async def test_a_product_with_more_features_than_a_body_may_carry_is_still_scored(api):
+    """The bounds are on the body a caller sends; a stored product's features
+    are scored in-process, whatever their number."""
+    app, db = api
+    async with db() as s:
+        cap = await capability_service.create_capability(s, CapabilityCreate(name="Search"))
+        big = Product(name="Big rival", slug="big-rival", external=True)
+        s.add(big)
+        await s.commit()
+        for i in range(MAX_IDEA_FEATURES + 1):
+            await feature_service.create_feature(
+                s, FeatureCreate(name=f"Rival feature {i}", product_id=big.id, capability_ids=[cap.id])
+            )
+    text = await server._dispatch("product_score", {"product": "big-rival"})
+    assert text.startswith(f"0/{MAX_IDEA_FEATURES + 1} feature(s) of big-rival buildable")
 
 
 async def test_sdk_and_resource_errors_end_with_an_open_line(api):

@@ -103,6 +103,35 @@ async def test_what_we_are_still_building_stays_ours_to_explain(db):
 
 
 @pytest.mark.asyncio
+async def test_what_only_a_guess_on_someone_else_s_product_names_is_not_ours_to_explain(db):
+    """A capability whose only evidence is a guess on an external product's
+    feature is skipped as a confirmed link there is. A guess on a feature of
+    ours keeps it on our list."""
+    from app.models import CapabilityGuess
+    from app.models.guess import Confidence
+
+    async with db() as session:
+        s = await estate(session)
+        funnels = await cap(session, "Funnel analysis")
+        exports = await cap(session, "Data export")
+        beacon = (await feature_service.list_features(session, "Beacon live tracking"))[0]
+        ours = await feature_service.create_feature(
+            session,
+            FeatureCreate(name="Our exports", product_id=s["ours"].id, capability_ids=[], unknown_capabilities=True),
+        )
+        session.add_all([
+            CapabilityGuess(capability_id=funnels.id, feature_id=beacon.id, confidence=Confidence.medium),
+            CapabilityGuess(capability_id=exports.id, feature_id=beacon.id, confidence=Confidence.medium),
+            CapabilityGuess(capability_id=exports.id, feature_id=ours.id, confidence=Confidence.low),
+        ])
+        await session.commit()
+        findings = {(f.kind, f.subject_name) for f in await capability_service.health(session)}
+    assert not {name for _, name in findings} & {"Funnel analysis", "Segment leaderboards"}
+    assert ("unmotivated_capability", "Data export") in findings
+    assert ("aspirational_gap", "Data export") in findings
+
+
+@pytest.mark.asyncio
 async def test_inventory_separates_ours_from_external(db):
     async with db() as session:
         await estate(session)

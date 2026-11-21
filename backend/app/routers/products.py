@@ -1,6 +1,6 @@
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -8,7 +8,7 @@ from app.auth import Principal, current_user
 from app.auth.deps import author
 from app.db import get_db
 from app.models import Feature, Goal, Product
-from app.schemas.capability import CapabilityRead, ProductCoverage
+from app.schemas.capability import MAX_NAME, CapabilityRead, ProductCoverage
 from app.schemas.product import (
     DecompositionCreate,
     DecompositionRead,
@@ -27,7 +27,13 @@ router = APIRouter(prefix="/api", tags=["products"])
 
 
 @router.get("/products", response_model=list[ProductRead])
-async def list_products(session: AsyncSession = Depends(get_db)):
+async def list_products(
+    near: str | None = Query(None, max_length=MAX_NAME), session: AsyncSession = Depends(get_db)
+):
+    """Every product. With `near`, only those whose name is near it (three at
+    most, nearest first): candidates after an exact miss, never a match."""
+    if near is not None:
+        return (await capability_service.near_names(session, Product, [near]))[near]
     return (await session.scalars(select(Product).order_by(Product.seq))).all()
 
 

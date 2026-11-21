@@ -223,7 +223,9 @@ Seventeen tools — the six `question` keys, plus `tech_search` (navigation: eve
 else takes a slug it returns) and `propose_binding` (a hand-off that persists nothing),
 and nine that answer inventory questions: `products`, `capability_inventory`,
 `check_idea`, `product_score`, `capability`, `feature_why`, `journeys`,
-`ready_features` and `recheck`.
+`ready_features` and `recheck`. The technology ones (the `question` keys, `tech_search`
+and `propose_binding`) are listed only once the catalog holds a technology; called by
+name, they answer anyway.
 Four resources: `metis://ontology/model` and `metis://policy/adoptions` serve the same
 files as `GET /api/ontology/model` and `/api/ontology/adoptions`; `metis://tech/{slug}`
 and `metis://stacks/{product}` are templated. Three prompts.
@@ -314,6 +316,8 @@ linkable. Only `/ontology` earns its own entry, in the Help position.
 
 `/stacks` carries the only mutation in the buy plane: binding a slot. It is a button a
 human presses, and nothing else in the system presses it.
+Stacks, slots, concerns and constraints have no form: an editor records them through the
+API (`POST /api/stacks`, `/api/stacks/instantiate`); seed files never carry them.
 
 ## Not built
 

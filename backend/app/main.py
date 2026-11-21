@@ -73,8 +73,10 @@ async def lifespan(app: FastAPI):
 
 #: Request bodies over these are refused with 413 before they are parsed. The
 #: reads-by-POST (coverage, recommend, mvp-cut) are open to viewers and the MCP
-#: token, and their near-name search costs time per byte, so they get a small
-#: cap; a real idea or a seed file's new names fit in a few KB. Writes need an
+#: token, so they get a small cap; a real idea or a seed file's new names fit
+#: in a few KB. Bytes alone don't bound coverage's near-name search (it costs
+#: per name and per character), so its body also has counts and lengths in its
+#: schema (schemas.capability.CoverageBody), which a 422 names. Writes need an
 #: editor on the desktop and send one row each (the largest stored value in a
 #: full instance is about 3 KB), so their cap only stops a runaway.
 MAX_READ_BODY = 64_000

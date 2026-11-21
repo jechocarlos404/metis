@@ -41,6 +41,7 @@ from app.models import (
     FeatureCapability,
     FeatureEdge,
     Goal,
+    Journey,
     JourneyStep,
     Motivation,
     Product,
@@ -425,6 +426,55 @@ class NamedCount(TableCount):
 
 class NamedPreview(CascadePreview):
     total_deletes: list[NamedCount]
+
+
+async def _named_where(session: AsyncSession, model: type, ids: set[uuid.UUID]) -> dict[uuid.UUID, str]:
+    """A row a delete keeps but unlinks, by its name and where it sits: a
+    story's title alone says little. Other rows as `_names` names them."""
+    where = {
+        Epic: (Epic.title, Product.name, Product, Product.id == Epic.product_id),
+        Story: (Story.title, Epic.title, Epic, Epic.id == Story.epic_id),
+        StackSlot: (
+            func.concat(StackSlot.layer, "::", StackSlot.role),
+            TechStack.name,
+            TechStack,
+            TechStack.id == StackSlot.stack_id,
+        ),
+        JourneyStep: (JourneyStep.label, Journey.name, Journey, Journey.id == JourneyStep.journey_id),
+    }.get(model)
+    if where is None:
+        return await _names(session, model, ids)
+    name, place, joined, on = where
+    rows = await session.execute(select(model.id, name, place).join(joined, on).where(model.id.in_(ids)))
+    return {row_id: f"{a} ({b})" for row_id, a, b in rows}
+
+
+async def detaches(session: AsyncSession, model: type, row_id: uuid.UUID) -> list[NamedCount]:
+    """What deleting this one row keeps but unlinks: the rows its `detach`
+    specs point at (ON DELETE SET NULL), each named. Only the row's own
+    foreign keys, never the closure: the guarded deletes (a capability's, a
+    feature's) remove one row, and say this before anyone confirms."""
+    out: list[NamedCount] = []
+    for spec in CHILDREN.get(model, ()):
+        if spec.action != "detach":
+            continue
+        ids = set(
+            await session.scalars(select(spec.model.id).where(getattr(spec.model, spec.fk) == row_id))
+        )
+        if not ids:
+            continue
+        label, plane = LABELS[spec.model]
+        names = await _named_where(session, spec.model, ids)
+        out.append(
+            NamedCount(
+                table=spec.model.__tablename__,
+                label=label,
+                plane=plane,
+                count=len(ids),
+                names=sorted(names.values(), key=str.lower),
+            )
+        )
+    return out
 
 
 async def preview(session: AsyncSession, refs: list[RowRef]) -> NamedPreview:

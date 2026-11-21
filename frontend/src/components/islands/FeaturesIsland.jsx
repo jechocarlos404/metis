@@ -1,7 +1,7 @@
 import React from "react";
 import { PageHeader } from "../shell/PageHeader.jsx";
 import { Button, Checkbox, Dialog, Icon, IconButton, Input, PriorityBadge, Select, StatusBadge, Tabs, Tag, DeleteConfirm } from "../../ds";
-import { EDGE, EDGE_INCOMING, LAYER, PRIORITY_HINT, count, plain, priorityLabel, productOptions, statusLabel } from "../../lib/words.js";
+import { EDGE, EDGE_INCOMING, LAYER, PRIORITY_HINT, andList, count, plain, priorityLabel, productOptions, statusLabel } from "../../lib/words.js";
 import { Term } from "../shared/Term.jsx";
 import { CapabilityPicker } from "../shared/CapabilityPicker.jsx";
 import { Guesses } from "../shared/Guesses.jsx";
@@ -18,6 +18,13 @@ const GROUPS = [
   { value: "capability", label: "Capability" },
   { value: "goal", label: "Goal" },
 ];
+
+// Rows a delete keeps but leaves without the deleted one (the API's
+// detaches), by name: "story Plan (Search epic)", "2 journey steps: a (J), b (J)".
+// The API's table labels are plural, as on /data.
+const keptRows = (detaches) => andList(detaches.map((t) => (t.count === 1
+  ? `${t.label.replace(/ies$/, "y").replace(/s$/, "").toLowerCase()} ${t.names[0]}`
+  : `${t.count} ${t.label.toLowerCase()}: ${t.names.join(", ")}`)));
 
 export default function FeaturesIsland({ canWrite = true }) {
   const [tab, setTab] = React.useState("directory");
@@ -93,6 +100,7 @@ export default function FeaturesIsland({ canWrite = true }) {
   const narrowGraph = pageWidth != null && pageWidth - (phone ? 40 : 360) < 560;
   const [saving, setSaving] = React.useState(false);
   const [confirmingDelete, setConfirmingDelete] = React.useState(false);
+  const [detaches, setDetaches] = React.useState(null); // rows a delete keeps but leaves without it
   const [error, setError] = React.useState(null);
   const [notice, setNotice] = React.useState(null); // what the last write did, said in place
   const [cutTarget, setCutTarget] = React.useState("");
@@ -404,6 +412,13 @@ export default function FeaturesIsland({ canWrite = true }) {
     }
   };
 
+  // Read at arm, so the note names what this delete clears now.
+  const armDelete = () => {
+    setConfirmingDelete(true);
+    setDetaches(null);
+    api(`/features/${detail.id}/detaches`).then(setDetaches).catch(() => setDetaches(null));
+  };
+
   const removeFeature = async () => {
     setSaving(true);
     setError(null);
@@ -669,7 +684,7 @@ export default function FeaturesIsland({ canWrite = true }) {
         footer={
           <>
             {dialog?.mode === "edit" && (
-              <DeleteConfirm armed={confirmingDelete} onArm={() => setConfirmingDelete(true)} onCancel={() => setConfirmingDelete(false)} onConfirm={removeFeature} disabled={saving}
+              <DeleteConfirm armed={confirmingDelete} onArm={armDelete} onCancel={() => setConfirmingDelete(false)} onConfirm={removeFeature} disabled={saving}
                 label="Delete" confirmLabel={"Delete feature"} style={{ marginRight: "auto" }} />
             )}
             {!confirmingDelete && !canSave && (
@@ -690,6 +705,12 @@ export default function FeaturesIsland({ canWrite = true }) {
       >
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
           {error && <div role="alert" style={{ fontSize: "var(--text-sm)", color: "var(--danger-fg)" }}>{error}</div>}
+          {/* What stays but loses it: stories and journey steps that name it. */}
+          {confirmingDelete && detaches?.length > 0 && (
+            <div role="note" style={{ fontSize: "var(--text-sm)", color: "var(--text-body)" }}>
+              Deleting it clears it from {keptRows(detaches)}.
+            </div>
+          )}
           <Input label="Name (what the user gets, verb phrase)" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="Export tickets to Notion" />
           <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             <span style={{ fontSize: "var(--text-xs)", fontWeight: "var(--weight-medium)", color: "var(--text-heading)" }}>Description</span>

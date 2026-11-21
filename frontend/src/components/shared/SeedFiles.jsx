@@ -23,7 +23,7 @@ const COLLECTION_WORDS = {
   satisfactions: ["technology link", "technology links"],
   guesses: ["guess", "guesses"],
 };
-const ACTION_WORDS = { reused: "already in metis", absent: "not in metis" };
+const ACTION_WORDS = { reused: "already in metis", absent: "not in metis", "would reject": "would be rejected" };
 
 function formatCounts(collection, counts) {
   const entries = Object.entries(counts || {}).filter(([, value]) => value > 0);
@@ -40,6 +40,13 @@ function formatCounts(collection, counts) {
 const changesNothing = (counts) =>
   Object.values(counts || {}).every((actions) =>
     Object.entries(actions).every(([action, n]) => n === 0 || action === "reused" || action === "skipped"));
+
+/** What the import rejects (or, checked, would reject), in words: "1 link
+ * between features". Empty when nothing is. */
+const rejectedWords = (counts) => andList(Object.entries(counts || {}).flatMap(([collection, actions]) => {
+  const n = (actions["would reject"] ?? 0) + (actions.rejected ?? 0);
+  return n > 0 && COLLECTION_WORDS[collection] ? [count(n, ...COLLECTION_WORDS[collection])] : [];
+}));
 
 export const summarizeCounts = (counts) =>
   Object.keys(COLLECTION_WORDS)
@@ -278,10 +285,14 @@ export function SeedImportPanel({ onImported }) {
       </div>
       {error && <div role="alert" style={{ fontSize: "var(--text-xs)", color: "var(--danger-fg)", whiteSpace: "pre-line" }}>{error}</div>}
       {result && (
-        <ResultBox result={result} title={
-          changesNothing(result.counts)
-            ? `${result.dryRun ? "Check passed. " : ""}Nothing new: everything in this file ${result.dryRun ? "is" : "was"} already in metis.`
-            : result.dryRun ? "Check passed. This is what the import would do:" : "Imported"
+        <ResultBox result={result} tone={rejectedWords(result.counts) ? "danger" : undefined} title={
+          rejectedWords(result.counts)
+            ? result.dryRun
+              ? `Check found a problem: the import would reject ${rejectedWords(result.counts)}, named below. The rest is what it would do:`
+              : `Imported, except ${rejectedWords(result.counts)}, rejected as named below`
+            : changesNothing(result.counts)
+              ? `${result.dryRun ? "Check passed. " : ""}Nothing new: everything in this file ${result.dryRun ? "is" : "was"} already in metis.`
+              : result.dryRun ? "Check passed. This is what the import would do:" : "Imported"
         } />
       )}
       <SeedExport />

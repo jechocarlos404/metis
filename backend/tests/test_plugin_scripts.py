@@ -633,3 +633,83 @@ def test_a_viewer_hears_it_cannot_remove_in_the_app_either():
     assert "(Requires editor or admin role), so it can't delete, from a script or in the app" in said
     assert "an editor or admin can. Ask one to remove it in the app" in said
     assert "this script signs no one in" not in said
+
+
+#: B43: the instance holds "Plan a route" needs "Share a route"; a file adds
+#: "Export a route" and three links, two of which close a cycle with it.
+CYCLE_DOC = {
+    "features": [
+        {"ref": "f1", "name": "Plan a route"},
+        {"ref": "f2", "name": "Share a route"},
+        {"ref": "f3", "name": "Export a route"},
+    ],
+    "edges": [
+        {"src_ref": "f2", "dst_ref": "f1", "kind": "DEPENDS_ON"},
+        {"src_ref": "f2", "dst_ref": "f3", "kind": "DEPENDS_ON"},
+        {"src_ref": "f1", "dst_ref": "f3", "kind": "BLOCKS"},
+    ],
+}
+CYCLE_INSTANCE = [{"src_id": "F1", "dst_id": "F2", "kind": "DEPENDS_ON"}]
+CYCLE_SAID = [
+    "would be rejected: That would make a circular dependency: “Plan a route” already needs "
+    "“Share a route”. Remove a link in that chain first.",
+    "would be rejected: That would make a circular dependency: “Plan a route” already needs "
+    "“Export a route” through “Share a route”. Remove a link in that chain first.",
+]
+
+
+@pytest.mark.parametrize("dry_run", [True, False], ids=["dry run", "real run"])
+def test_the_loader_refuses_a_link_that_closes_a_cycle_with_the_instance(dry_run):
+    """The check passed a link the import then had refused (B43). Both runs
+    now run the API's cycle check against the instance's links, in the API's
+    words, and the real one never sends the refused link."""
+    module = _load(LOADER, "seed_instance")
+    posted = []
+
+    class Api(module.Api):
+        def request(self, method, path, payload=None):
+            if method == "GET" and path == "/api/features/edges":
+                return 200, CYCLE_INSTANCE
+            posted.append(payload)
+            return 201, {"id": "e"}
+
+    loader = module.Loader(Api("http://metis.test"), CYCLE_DOC, dry_run=dry_run)
+    loader.feat_ids = {"f1": "F1", "f2": "F2", "f3": "F3" if not dry_run else "dry-run:features:Export a route"}
+    loader.feat_names = {"F1": "Plan a route", "F2": "Share a route", "F3": "Export a route"}
+    loader.load_edges()
+    word = "would be rejected" if dry_run else "rejected"
+    assert loader.warnings == [
+        f"edge f2 -DEPENDS_ON-> f1 {CYCLE_SAID[0].replace('would be rejected', word)}",
+        f"edge f1 -BLOCKS-> f3 {CYCLE_SAID[1].replace('would be rejected', word)}",
+    ]
+    counts = {a: n for (c, a), n in loader.counts.items() if c == "edges"}
+    assert counts == ({"would reject": 2, "would create": 1} if dry_run else {"rejected": 2, "created": 1})
+    assert posted == ([] if dry_run else [{"src_id": "F2", "dst_id": "F3", "kind": "DEPENDS_ON"}])
+
+
+@pytest.mark.parametrize("dry_run", [True, False], ids=["dry run", "real run"])
+def test_the_in_app_check_refuses_a_link_that_closes_a_cycle_with_the_instance(dry_run):
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is not installed; the in-app importer is checked where it is")
+    script = (
+        f"import {{ Loader }} from {json.dumps(JS_IMPORTER.as_uri())};"
+        f"const dryRun = {json.dumps(dry_run)}; const posted = [];"
+        "const api = { get: async () => " + json.dumps(CYCLE_INSTANCE) + ","
+        "  post: async (route, payload) => { posted.push(payload); return { status: 201, body: { id: 'e' } }; } };"
+        f"const loader = new Loader(api, {json.dumps(CYCLE_DOC)}, dryRun);"
+        "loader.featureIds = new Map([['f1', 'F1'], ['f2', 'F2'], ['f3', dryRun ? 'dry-run:features:Export a route' : 'F3']]);"
+        "loader.featureNames = new Map([['F1', 'Plan a route'], ['F2', 'Share a route'], ['F3', 'Export a route']]);"
+        "await loader.loadEdges();"
+        "console.log(JSON.stringify({ warnings: loader.warnings, counts: loader.count('edges'), posted }));"
+    )
+    result = subprocess.run([node, "--input-type=module", "-e", script], capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, result.stderr
+    out = json.loads(result.stdout)
+    word = "would be rejected" if dry_run else "rejected"
+    assert out["warnings"] == [
+        f'link "Share a route" needs "Plan a route" {CYCLE_SAID[0].replace("would be rejected", word)}',
+        f'link "Plan a route" blocks "Export a route" {CYCLE_SAID[1].replace("would be rejected", word)}',
+    ]
+    assert out["counts"] == ({"would reject": 2, "would create": 1} if dry_run else {"rejected": 2, "created": 1})
+    assert out["posted"] == ([] if dry_run else [{"src_id": "F2", "dst_id": "F3", "kind": "DEPENDS_ON"}])

@@ -223,7 +223,9 @@ Seventeen tools — the six `question` keys, plus `tech_search` (navigation: eve
 else takes a slug it returns) and `propose_binding` (a hand-off that persists nothing),
 and nine that answer inventory questions: `products`, `capability_inventory`,
 `check_idea`, `product_score`, `capability`, `feature_why`, `journeys`,
-`ready_features` and `recheck`.
+`ready_features` and `recheck`. The technology ones (the `question` keys, `tech_search`
+and `propose_binding`) are listed only once the catalog holds a technology; called by
+name, they answer anyway.
 Four resources: `metis://ontology/model` and `metis://policy/adoptions` serve the same
 files as `GET /api/ontology/model` and `/api/ontology/adoptions`; `metis://tech/{slug}`
 and `metis://stacks/{product}` are templated. Three prompts.

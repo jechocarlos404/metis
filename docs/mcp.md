@@ -63,8 +63,10 @@ The inventory tools answer the portfolio questions:
 | `ready_features` | Our pending features whose dependencies are all done. Optionally limited to one of our products; an external one is declined, since its features are never our work. When nothing is ready it says whether anything is pending at all and points to `check_idea`. | `GET /api/graph/ready`, and `GET /api/features` when nothing is ready |
 | `recheck` | If a feature changes, what else to recheck. Takes a feature id or its exact name (a name several features share is listed, not picked). Breaks: features that depend on it, through links of links. Retest (same product): features sharing a confirmed capability, rarest shared capability first. Broad (many features): capabilities used by more than half of the product (and at least 6 features), counted rather than listed. Same capability elsewhere (info only): our other products with the same capabilities; metis does not know whether they share code. Guesses are never counted. | `GET /api/graph/recheck/{id}` |
 
-The technology and buy tools, which stay hidden on the desktop until there is
-data for them:
+The technology and buy tools stay hidden on the desktop until there is data for
+them, and are listed here only once the catalog holds a technology (a client
+that listed tools before then sees them when it lists again). Called by name,
+each still answers:
 
 | Tool | What it answers |
 |---|---|

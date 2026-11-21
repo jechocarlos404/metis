@@ -102,6 +102,36 @@ def test_tool_names_are_the_question_keys():
     assert len(PROMPTS) == 3
 
 
+async def test_the_tech_tools_are_listed_once_the_catalog_has_a_technology(api):
+    """The technology plane stays hidden until it has data: with an empty
+    catalog only the inventory tools are listed, and a tech tool called by
+    name still answers. A catalog that can't be read hides nothing."""
+    import mcp.types as types
+
+    _, db = api
+    listed = server.server.request_handlers[types.ListToolsRequest]
+
+    async def names():
+        return {t.name for t in (await listed(types.ListToolsRequest(method="tools/list"))).root.tools}
+
+    assert await names() == INVENTORY_TOOLS
+    assert server.TECH_TOOLS | INVENTORY_TOOLS == {t.name for t in TOOLS}
+    result = await server.call_tool("tech_search", {"q": "redis"})
+    assert isinstance(result, list) and "No technology is recorded yet" in result[0].text
+
+    async with db() as s:
+        await tech_service.create_technology(
+            s, TechnologyCreate(slug="redis", name="Redis", kind=TechKind.service)
+        )
+    assert await names() == {t.name for t in TOOLS}
+
+    async def unreachable(*args, **kwargs):
+        raise server.SetupError("Cannot reach the metis API.")
+
+    server.client.get = unreachable
+    assert await names() == {t.name for t in TOOLS}
+
+
 def test_no_tool_mutates():
     """propose_binding is a hand-off, not a mutation. Nothing else even looks
     like a write."""

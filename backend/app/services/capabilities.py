@@ -484,11 +484,19 @@ def name_closeness(column, name: str):
     )
 
 
+#: How near a name must be to be offered. At 0.3 one shared word or word
+#: fragment qualified ("Ride group chat" offered "Ride Prep Checklist" at 0.33,
+#: "Repair Booking" offered "Bookmarking" at 0.54). Real near names score well
+#: above it: "Auth" for "User Authentication" 0.80, "Payments" for "Payment
+#: Processing" 0.78, the typo "Authentcation" 0.71, a case-only difference 1.
+NEAR = 0.6
+
+
 async def near_names(session: AsyncSession, model, names: list[str]) -> dict[str, list]:
     """Per typed name, up to three rows of `model` whose name is near it,
-    nearest first (closeness over 0.3, then oldest): candidates for someone to
-    confirm, never a match. One statement for all the names, so a long idea
-    costs one round trip; the work is still per name, which is why the
+    nearest first (closeness over NEAR, then oldest): candidates for someone
+    to confirm, never a match. One statement for all the names, so a long
+    idea costs one round trip; the work is still per name, which is why the
     coverage body is bounded (schemas.capability)."""
     if not names:
         return {}
@@ -496,7 +504,7 @@ async def near_names(session: AsyncSession, model, names: list[str]) -> dict[str
     score = name_closeness(model.name, typed.c.name)
     near = (
         select(model.id, score.label("score"), model.seq)
-        .where(score > 0.3)
+        .where(score > NEAR)
         .order_by(score.desc(), model.seq)
         .limit(3)
         .lateral("near")

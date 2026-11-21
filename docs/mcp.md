@@ -31,7 +31,7 @@ resource that can't be read come back the same way. A subject that doesn't exist
 is an answer, not an error: `0 features are named '…'`, with the features listed
 when several share the name. When none has it, up to three near names follow as
 unconfirmed candidates, each leading with what the next call takes, as
-`capability` and `check_idea` offer them (trigram closeness over 0.3; case is
+`capability` and `check_idea` offer them (trigram closeness over 0.6; case is
 ignored, so a case-only difference is always offered):
 
 ```

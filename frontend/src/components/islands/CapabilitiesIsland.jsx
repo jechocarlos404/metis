@@ -17,9 +17,11 @@ const FINDINGS = {
 };
 // "never imported from a seed file." → "Never imported from a seed file."
 const sentence = (text) => text.charAt(0).toUpperCase() + text.slice(1);
+// metis knows which products use a capability, not whether they share its code.
+const REUSE_NOTE = "Products: our products whose features use the capability, whether they share the code or each built it separately.";
 const VIEWS = [
   { value: "tree", label: "Tree" },
-  { value: "reused", label: "Most reused" },
+  { value: "reused", label: "Most reused", hint: REUSE_NOTE },
   { value: "attention", label: "Needs attention" },
 ];
 
@@ -221,7 +223,7 @@ export default function CapabilitiesIsland({ canWrite = true }) {
             style={{ flex: "1 1 240px", height: 32, padding: "0 10px", fontSize: "var(--text-sm)", fontFamily: "var(--font-body)", color: "var(--text-body)", background: "var(--surface-card)", border: "1px solid var(--border-control)", borderRadius: "var(--radius-sm)" }} />
           <div role="group" aria-label="View" style={{ display: "inline-flex", border: "1px solid var(--border-control)", borderRadius: "var(--radius-sm)", overflow: "hidden" }}>
             {VIEWS.map((v, i) => (
-              <button key={v.value} type="button" aria-pressed={view === v.value} onClick={() => changeView(v.value)}
+              <button key={v.value} type="button" aria-pressed={view === v.value} onClick={() => changeView(v.value)} title={v.hint}
                 style={{ height: 30, padding: "0 12px", font: "inherit", fontSize: "var(--text-xs)", cursor: "pointer", border: "none",
                   borderLeft: i ? "1px solid var(--border-control)" : "none",
                   background: view === v.value ? "var(--accent-wash)" : "var(--surface-card)",
@@ -237,6 +239,7 @@ export default function CapabilitiesIsland({ canWrite = true }) {
           )}
         </div>
 
+        {view === "reused" && <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>{REUSE_NOTE}</div>}
         {view === "attention" ? (
           <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
             {findingFilter !== "guesses" && !(groups.length === 0 && guessCount > 0) && (

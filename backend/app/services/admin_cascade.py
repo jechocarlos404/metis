@@ -472,6 +472,11 @@ async def _named_where(session: AsyncSession, model: type, ids: set[uuid.UUID]) 
             row_id: f"\u201c{a}\u201d {EDGE_WORDS.get(getattr(kind, 'value', kind), kind)} \u201c{b}\u201d"
             for row_id, a, kind, b in rows
         }
+    if model is ProductDecomposition:
+        rows = await session.execute(select(model.id, model.version).where(model.id.in_(ids)))
+        return {row_id: f"version {version}" for row_id, version in rows}
+    if model is TechStack:
+        return dict((await session.execute(select(model.id, model.name).where(model.id.in_(ids)))).all())
     if where is None:
         return await _names(session, model, ids)
     name, place, joined, on = where
@@ -508,6 +513,32 @@ async def detaches(session: AsyncSession, model: type, row_id: uuid.UUID) -> lis
             )
         )
     return out
+
+
+async def deletes(session: AsyncSession, entity: str, row_id: uuid.UUID) -> list[NamedCount]:
+    """What deleting this one row deletes with it, by table and name: the
+    closure the delete itself follows, less the row. A product's delete says
+    this before anyone confirms (B47): its plan, its stack, its links."""
+    to_delete, _, _ = await compute_closure(session, [RowRef(entity=entity, id=row_id)])
+    to_delete[ENTITY_MODELS[entity]].discard(row_id)
+    out = []
+    for model, ids in to_delete.items():
+        if not ids:
+            continue
+        label, plane = LABELS[model]
+        # Where these sit goes too, so each is named alone.
+        bare = {Epic: Epic.title, Story: Story.title, StackSlot: func.concat(StackSlot.layer, "::", StackSlot.role)}
+        if model in bare:
+            names = dict((await session.execute(select(model.id, bare[model]).where(model.id.in_(ids)))).all())
+        else:
+            names = await _named_where(session, model, ids)
+        out.append(
+            NamedCount(
+                table=model.__tablename__, label=label, plane=plane, count=len(ids),
+                names=sorted(names.values(), key=str.lower),
+            )
+        )
+    return sorted(out, key=lambda t: (-t.count, t.label))
 
 
 async def preview(session: AsyncSession, refs: list[RowRef]) -> NamedPreview:

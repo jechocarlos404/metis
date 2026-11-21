@@ -55,6 +55,23 @@ export default function HomeIsland({ canWrite = false, isAdmin = false }) {
       </>
     );
   }
+  // Get started is the steps an editor takes; a viewer has none to take, so
+  // their empty Home says what it is waiting for instead.
+  if (firstRun && !canWrite) {
+    return (
+      <>
+        <PageHeader title="Home" />
+        <div style={{ flex: 1, overflowY: "auto", padding: 24 }}>
+          <div style={{ maxWidth: 720, margin: "0 auto", display: "flex", flexDirection: "column", gap: 8 }}>
+            <h2 style={{ fontSize: "var(--text-lg)", fontWeight: "var(--weight-semibold)", color: "var(--text-heading)", margin: 0 }}>Nothing here yet</h2>
+            <p style={{ fontSize: "var(--text-sm)", color: "var(--text-body)", lineHeight: "var(--leading-body)", margin: 0 }}>
+              An editor needs to add the first product; once they do, this page shows what could be built from it.
+            </p>
+          </div>
+        </div>
+      </>
+    );
+  }
   if (firstRun) {
     return (
       <>

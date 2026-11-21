@@ -240,7 +240,9 @@ TOOLS = [
             "only elsewhere, not built yet (no finished feature realizes it), or "
             "no match with near names as candidates. Exact "
             "names only: a candidate is never counted as a match. Ends with an "
-            "Open: link that pre-fills Home's idea check; it saves nothing."
+            "Open: link that pre-fills Home's idea check; it saves nothing. "
+            "The request body is capped at 64,000 bytes (refused 413) before "
+            "the limits below are checked; every limit at once nearly fills it."
         ),
         inputSchema={
             "type": "object",

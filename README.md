@@ -66,9 +66,9 @@ derivations go stale, and a stale risk number is worse than none.
 ## Quick start
 
 ```sh
-cp .env.example .env      # optional: add LLM provider keys
-# required while auth is on: sign-in refuses while SESSION_SECRET is unset or the
-# public default, so set it in .env to the output of: openssl rand -hex 32
+cp .env.example .env      # required: sign-in reads SESSION_SECRET from it
+# set SESSION_SECRET in .env to the output of: openssl rand -hex 32 (sign-in
+# refuses while it is unset or the public default); LLM provider keys are optional
 docker compose up --build
 ```
 

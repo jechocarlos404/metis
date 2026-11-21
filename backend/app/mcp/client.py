@@ -74,8 +74,7 @@ class MetisClient:
             raise SetupError(
                 f"Keycloak refused to sign this server in as {who} "
                 f"({response.status_code}{_keycloak_reason(response)}). Check "
-                "KEYCLOAK_MCP_CLIENT_SECRET (compose sets it from "
-                "METIS_MCP_CLIENT_SECRET) and KEYCLOAK_REALM."
+                "METIS_MCP_CLIENT_SECRET and KEYCLOAK_REALM."
             )
         payload = response.json()
         self._token = payload["access_token"]

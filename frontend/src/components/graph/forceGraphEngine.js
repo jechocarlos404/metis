@@ -471,9 +471,8 @@ export function createForceGraph(opts) {
   }
 
   /**
-   * Frames a card picked outside the canvas with the cards in `near` (the
-   * ones it lights), so its lines are in view: centred on it when they fit
-   * around it at a readable scale, else all of them fitted (pickTransform()).
+   * Frames a picked card centred, never below the readable scale, with as
+   * many of the cards in `near` (the ones it lights) as fit (pickTransform()).
    * Never closer than scale 1, or the user's zoom when closer. Never
    * mid-drag, so a card pressed on the canvas stays under the pointer. While
    * the graph is still settling, it becomes what opens.

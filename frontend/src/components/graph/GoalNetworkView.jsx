@@ -88,10 +88,10 @@ export function GoalNetworkView({ goals, capsByGoal, selectedId, onSelect }) {
     }
   }, [data]);
 
-  // A goal picked in the side list (or by keyboard) is framed with the goals
-  // it lights, so its lines show (C39), centred when they fit around it
-  // (A10); stacked under the list, the canvas then scrolls into view. One
-  // pressed on the canvas stays under the pointer.
+  // A goal picked in the side list (or by keyboard) is centred where its name
+  // reads, with as many of the goals it lights as fit there (A49, C39);
+  // stacked under the list, the canvas then scrolls into view. One pressed on
+  // the canvas stays under the pointer (onPress above when zoomed out).
   useIsomorphicLayoutEffect(() => {
     const pressed = canvasPickRef.current === selectedId;
     canvasPickRef.current = null;

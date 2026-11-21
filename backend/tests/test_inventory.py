@@ -6,7 +6,7 @@ import pytest
 from fastapi import HTTPException
 from sqlalchemy import select
 
-from app.models import CapabilityMaturity, Feature, FeatureCapability, Product, WorkStatus
+from app.models import Capability, CapabilityMaturity, Feature, FeatureCapability, Product, WorkStatus
 from app.schemas.capability import CapabilityCreate, CapabilityUpdate, CoverageRequest
 from app.schemas.feature import FeatureCreate, FeatureUpdate
 from app.services import capabilities as capability_service
@@ -257,6 +257,83 @@ async def test_coverage_suggests_near_names_instead_of_guessing(db):
 
 
 @pytest.mark.asyncio
+async def test_one_statement_finds_the_near_names_each_name_would_alone(db):
+    """Coverage searches every unmatched name in one statement. It must give
+    what one query per name gave: closeness over NEAR, nearest first, ties to
+    the older capability, three at most, and a name repeated across features
+    gets the same candidates."""
+    async with db() as session:
+        for name in (
+            "Authentication", "Auth tokens", "Authorization", "Author profiles",
+            "Search", "Semantic search", "Full-text search", "Search filters", "Payments",
+        ):
+            await make_capability(session, name)
+        typed = ["Auth", "search", "Search engine", "Authentication service", "Nothing alike"]
+
+        async def alone(name):
+            score = capability_service.name_closeness(Capability.name, name)
+            stmt = (
+                select(Capability.name)
+                .where(score > capability_service.NEAR)
+                .order_by(score.desc(), Capability.seq)
+                .limit(3)
+            )
+            return list(await session.scalars(stmt))
+
+        expected = {name: await alone(name) for name in typed}
+        report = await capability_service.coverage(
+            session,
+            CoverageRequest.model_validate(
+                {"features": [
+                    {"name": "One", "capabilities": typed},
+                    {"name": "Two", "capabilities": ["Auth", "Nothing alike"]},
+                ]}
+            ),
+        )
+    got = [
+        {n.name: [c.name for c in n.candidates] for n in f.capabilities if n.match is None}
+        for f in report.features
+    ]
+    assert got[0] == {name: expected[name] for name in typed if name != "search"}
+    assert got[1] == {"Auth": expected["Auth"], "Nothing alike": expected["Nothing alike"]}
+    assert len(expected["Auth"]) == 3 and expected["Nothing alike"] == []
+
+
+@pytest.mark.asyncio
+async def test_one_shared_word_is_not_a_near_name(db):
+    """A did-you-mean must be near the whole name, not share a word or a
+    fragment of one. Abbreviations, plurals and typos still are."""
+    async with db() as session:
+        for name in ("Ride Prep Checklist", "Bookmarking", "User Authentication", "Payment Processing",
+                     "Route Planning", "Goal Planning", "Cafe Directory", "Web Search", "Web Analytics",
+                     "Work Breakdown Planning"):
+            await make_capability(session, name)
+        typed = ["Ride group chat", "Repair Booking", "Auth", "Payments", "Authentcation",
+                 # One long shared word clears the score alone (D45, R-DYM).
+                 "Sprint Planning", "Pod Directory", "Wiki Search", "Route Search", "Sleep Analytics",
+                 # A typo or a changed ending in a name of several words is still near.
+                 "Route Planing", "Work Breakdown Plans"]
+        report = await capability_service.coverage(
+            session, CoverageRequest.model_validate({"features": [{"name": "x", "capabilities": typed}]})
+        )
+    offered = {n.name: [c.name for c in n.candidates] for n in report.features[0].capabilities}
+    assert offered == {
+        "Ride group chat": [],
+        "Repair Booking": [],
+        "Auth": ["User Authentication"],
+        "Payments": ["Payment Processing"],
+        "Authentcation": ["User Authentication"],
+        "Sprint Planning": [],
+        "Pod Directory": [],
+        "Wiki Search": [],
+        "Route Search": [],
+        "Sleep Analytics": [],
+        "Route Planing": ["Route Planning"],
+        "Work Breakdown Plans": ["Work Breakdown Planning"],
+    }
+
+
+@pytest.mark.asyncio
 async def test_deleting_a_used_capability_is_refused(db):
     async with db() as session:
         s = await two_products(session)
@@ -307,3 +384,15 @@ async def test_agent_tool_links_exact_names_only(db):
         await tools.create_feature(ctx, name="Sign in", capabilities=["authentication"])
         feature = await session.scalar(select(Feature).where(Feature.name == "Sign in"))
         assert feature.capability_ids == [auth.id]
+
+
+async def test_a_long_typed_name_gets_its_near_names_not_an_error(db):
+    """D41: names longer than Postgres's 63-byte `name` type, accents counting
+    double, still come back keyed by what was typed."""
+    long_name = "Show a résumé's parsed skills next to every job posting it matches well"
+    async with db() as session:
+        await make_capability(session, long_name)
+        typed = long_name.upper()
+        near = await capability_service.near_names(session, Capability, [typed, "Nothing alike"])
+    assert [c.name for c in near[typed]] == [long_name]
+    assert near["Nothing alike"] == []

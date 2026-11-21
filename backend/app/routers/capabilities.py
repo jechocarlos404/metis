@@ -4,13 +4,14 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
+from app.models import Capability
 from app.schemas.capability import (
     CapabilityCreate,
     CapabilityNode,
     CapabilityRead,
     CapabilityUpdate,
+    CoverageBody,
     CoverageReport,
-    CoverageRequest,
     HealthFinding,
     InventoryEntry,
     MotivationCreate,
@@ -18,6 +19,7 @@ from app.schemas.capability import (
 )
 from app.schemas.feature import FeatureRead
 from app.schemas.goal import GoalRead
+from app.services import admin_cascade
 from app.services import capabilities as capability_service
 
 router = APIRouter(prefix="/api/capabilities", tags=["capabilities"])
@@ -54,8 +56,9 @@ async def inventory(session: AsyncSession = Depends(get_db)):
 
 
 @router.post("/coverage", response_model=CoverageReport)
-async def coverage(data: CoverageRequest, session: AsyncSession = Depends(get_db)):
-    """A read: the idea travels in the body, nothing is written."""
+async def coverage(data: CoverageBody, session: AsyncSession = Depends(get_db)):
+    """A read: the idea travels in the body, nothing is written. The body is
+    bounded (schemas.capability.MAX_IDEA_NAMES); over a limit is a 422 naming it."""
     return await capability_service.coverage(session, data)
 
 
@@ -74,6 +77,14 @@ async def update_capability(
 @router.delete("/{capability_id}", status_code=204)
 async def delete_capability(capability_id: uuid.UUID, session: AsyncSession = Depends(get_db)):
     await capability_service.delete_capability(session, capability_id)
+
+
+@router.get("/{capability_id}/detaches", response_model=list[admin_cascade.NamedCount])
+async def detaches(capability_id: uuid.UUID, session: AsyncSession = Depends(get_db)):
+    """What deleting it keeps but leaves without it (epics, stack slots),
+    named, so the delete can say so before anyone confirms."""
+    await capability_service.get_capability(session, capability_id)
+    return await admin_cascade.detaches(session, Capability, capability_id)
 
 
 @router.get("/{capability_id}/scope", response_model=list[FeatureRead])

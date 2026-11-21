@@ -35,6 +35,12 @@ from pydantic import AnyUrl
 
 from app.mcp import render
 from app.mcp.client import ApiError, MetisClient, SetupError
+from app.schemas.capability import (
+    MAX_CAPABILITY_NAME,
+    MAX_IDEA_FEATURES,
+    MAX_IDEA_NAMES,
+    MAX_NAME,
+)
 from app.services.slugs import slugify
 
 server = Server("metis")
@@ -92,7 +98,11 @@ TOOLS = [
         inputSchema={
             "type": "object",
             "properties": {
-                "capability": {"type": "string", "description": "Capability slug"},
+                "capability": {
+                    "type": "string",
+                    "maxLength": MAX_CAPABILITY_NAME,
+                    "description": "Capability slug",
+                },
                 "include_unadopted": {"type": "boolean", "default": True},
             },
             "required": ["capability"],
@@ -190,9 +200,18 @@ TOOLS = [
             "List products, ours and external, with id, slug, name and "
             "seeded_at (when its seed file was last imported, ISO, or never). The "
             "inventory's navigation tool — the other tools take an id or slug "
-            "it returns, so agents never guess."
+            "it returns, so agents never guess. Given one product, lists its "
+            "features instead: name, status and id, for feature_why and recheck."
         ),
-        inputSchema={"type": "object", "properties": {}},
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "product": {
+                    "type": "string",
+                    "description": "Product id or slug, optional: list its features",
+                }
+            },
+        },
     ),
     Tool(
         name="capability_inventory",
@@ -221,7 +240,9 @@ TOOLS = [
             "only elsewhere, not built yet (no finished feature realizes it), or "
             "no match with near names as candidates. Exact "
             "names only: a candidate is never counted as a match. Ends with an "
-            "Open: link that pre-fills Home's idea check; it saves nothing."
+            "Open: link that pre-fills Home's idea check; it saves nothing. "
+            "The request body is capped at 64,000 bytes (refused 413) before "
+            "the limits below are checked; every limit at once nearly fills it."
         ),
         inputSchema={
             "type": "object",
@@ -233,14 +254,18 @@ TOOLS = [
                 "features": {
                     "type": "array",
                     "minItems": 1,
+                    # The API's bounds (schemas.capability); the names cap
+                    # counts across all features, which only the API checks.
+                    "maxItems": MAX_IDEA_FEATURES,
                     "items": {
                         "type": "object",
                         "properties": {
-                            "name": {"type": "string"},
+                            "name": {"type": "string", "maxLength": MAX_NAME},
                             "capabilities": {
                                 "type": "array",
                                 "minItems": 1,
-                                "items": {"type": "string"},
+                                "maxItems": MAX_IDEA_NAMES,
+                                "items": {"type": "string", "maxLength": MAX_CAPABILITY_NAME},
                             },
                         },
                         "required": ["name", "capabilities"],
@@ -277,7 +302,11 @@ TOOLS = [
         inputSchema={
             "type": "object",
             "properties": {
-                "slug": {"type": "string", "description": "Capability slug or name"}
+                "slug": {
+                    "type": "string",
+                    "maxLength": MAX_CAPABILITY_NAME,
+                    "description": "Capability slug or name",
+                }
             },
             "required": ["slug"],
         },
@@ -293,7 +322,7 @@ TOOLS = [
         inputSchema={
             "type": "object",
             "properties": {
-                "feature": {"type": "string", "description": "Feature id or exact feature name"}
+                "feature": {"type": "string", "description": "Feature id or exact feature name; a miss offers near names, never picks one"}
             },
             "required": ["feature"],
         },
@@ -308,7 +337,7 @@ TOOLS = [
         inputSchema={
             "type": "object",
             "properties": {
-                "journey": {"type": "string", "description": "Journey id or exact name, optional"}
+                "journey": {"type": "string", "description": "Journey id or exact name, optional; a miss offers near names, never picks one"}
             },
         },
     ),
@@ -337,7 +366,7 @@ TOOLS = [
         inputSchema={
             "type": "object",
             "properties": {
-                "feature": {"type": "string", "description": "Feature id or exact feature name"}
+                "feature": {"type": "string", "description": "Feature id or exact feature name; a miss offers near names, never picks one"}
             },
             "required": ["feature"],
         },
@@ -347,6 +376,12 @@ TOOLS = [
 
 @server.list_tools()
 async def list_tools() -> list[Tool]:
+    """Every tool, always. The desktop hides the technology plane until it has
+    data, but a client lists tools once, when it connects, and this server
+    can't tell it the catalog filled (`listChanged` stays false: nothing here
+    notices a seed import), so a hidden tool stayed one the agent couldn't
+    call (D43). With an empty catalog no technology tool errors: each says it
+    found nothing and points to where a technology or stack gets recorded or looked up."""
     return TOOLS
 
 
@@ -386,7 +421,12 @@ def _check_arguments(name: str, arguments: dict) -> None:
         jsonschema.validate(instance=arguments, schema=tool.inputSchema)
     except jsonschema.ValidationError as exc:
         where = ".".join(str(part) for part in exc.absolute_path)
-        raise BadInput(f"Arguments refused{f' at {where}' if where else ''}: {exc.message}.") from None
+        said = exc.message
+        if exc.validator in ("maxItems", "maxLength"):
+            # Its own words echo the whole value; the limit is what helps.
+            unit = "items" if exc.validator == "maxItems" else "characters"
+            said = f"at most {exc.validator_value} {unit}, got {len(exc.instance)}"
+        raise BadInput(f"Arguments refused{f' at {where}' if where else ''}: {said}.") from None
 
 
 @server.call_tool(validate_input=False)
@@ -453,7 +493,7 @@ async def _dispatch(name: str, args: dict) -> str:
         if args.get("product"):
             product = await _product(args["product"])
             if product is None:
-                return render.no_product(args["product"])
+                return await _no_product(args["product"])
             slug = _safe_slug(product["slug"], "product")
         return render.tech_exposure(
             await client.get(
@@ -464,7 +504,7 @@ async def _dispatch(name: str, args: dict) -> str:
     if name == "stack_redundancy":
         product = await _product(args["product"])
         if product is None:
-            return render.no_product(args["product"])
+            return await _no_product(args["product"])
         return render.stack_redundancy(
             await client.get(f"/api/stacks/{_safe_slug(product['slug'], 'product')}/redundancy")
         )
@@ -479,7 +519,7 @@ async def _dispatch(name: str, args: dict) -> str:
         body = {k: args[k] for k in ("slot", "archetype") if args.get(k)}
         product = await _product(args["product"])
         if product is None:
-            return render.no_product(args["product"])
+            return await _no_product(args["product"])
         slug = _safe_slug(product["slug"], "product")
         return render.stack_recommend(await client.post(f"/api/stacks/{slug}/recommend", body))
 
@@ -487,7 +527,13 @@ async def _dispatch(name: str, args: dict) -> str:
         return await _propose(args)
 
     if name == "products":
-        return render.products(await client.get("/api/products"))
+        if not args.get("product"):
+            return render.products(await client.get("/api/products"))
+        product = await _product(args["product"])
+        if product is None:
+            return await _no_product(args["product"])
+        features = [f for f in await client.get("/api/features") if f["product_id"] == product["id"]]
+        return render.product_features(product, features)
 
     if name == "capability_inventory":
         return render.capability_inventory(
@@ -513,7 +559,7 @@ async def _dispatch(name: str, args: dict) -> str:
     if name == "product_score":
         product = await _product(args["product"])
         if product is None:
-            return render.no_product(args["product"])
+            return await _no_product(args["product"])
         if not product["external"]:
             return render.own_product(product)
         return render.product_score(
@@ -527,7 +573,7 @@ async def _dispatch(name: str, args: dict) -> str:
         products = await client.get("/api/products")
         feature_id, named = await _feature_id(args["feature"])
         if feature_id is None:
-            return render.no_feature(args["feature"], named, products)
+            return await _no_feature(args["feature"], named, products)
         try:
             why = await client.get(f"/api/features/{feature_id}/why")
         except ApiError as exc:
@@ -553,7 +599,8 @@ async def _dispatch(name: str, args: dict) -> str:
         except BadInput:
             named = [j for j in await client.get("/api/journeys") if j["name"] == value]
             if len(named) != 1:
-                return render.no_journey(value, named)
+                near = [] if named else await _near("/api/journeys", value)
+                return render.no_journey(value, named, near)
             journey = _safe_id(named[0]["id"])
         return await _or_absent(
             render.journey_analysis, f"/api/journeys/{journey}/analysis", render.no_journey(value, [])
@@ -565,7 +612,7 @@ async def _dispatch(name: str, args: dict) -> str:
         if args.get("product"):
             only = _match_product(products, args["product"])
             if only is None:
-                return render.no_product(args["product"])
+                return await _no_product(args["product"])
             if only["external"]:
                 return render.external_product_work(only)
         ready = (await client.get("/api/graph/ready"))["ready"]
@@ -587,12 +634,37 @@ async def _dispatch(name: str, args: dict) -> str:
 
 
 def _match_product(products: list[dict], value: str) -> dict | None:
-    """By id or by exact slug. Never by name: a near name is not a product."""
+    """By id or by exact slug. Never by name: a near name is not a product,
+    only offered after a miss (_no_product)."""
     return next((p for p in products if value in (p["id"], p["slug"])), None)
 
 
 async def _product(value: str) -> dict | None:
     return _match_product(await client.get("/api/products"), value)
+
+
+async def _near(path: str, value: str) -> list[dict]:
+    """Rows whose name is near a value that matched nothing exactly, by the
+    API's rule (the one check_idea's candidates follow): offered, never
+    picked. An id has no near name, nor does a value longer than any name."""
+    try:
+        _safe_id(value)
+        return []
+    except BadInput:
+        pass
+    if len(value) > MAX_NAME:
+        return []
+    return await client.get(path, {"near": value})
+
+
+async def _no_product(value: str) -> str:
+    return render.no_product(value, await _near("/api/products", value))
+
+
+async def _no_feature(value: str, named: list[dict], products: list[dict]) -> str:
+    """A name several features share lists them; a name none has, the near ones."""
+    near = [] if named else await _near("/api/features", value)
+    return render.no_feature(value, named, products, near)
 
 
 async def _feature_id(value: str) -> tuple[str | None, list[dict]]:
@@ -610,7 +682,7 @@ async def _recheck(value: str) -> str:
     products = await client.get("/api/products")
     feature_id, named = await _feature_id(value)
     if feature_id is None:
-        return render.no_feature(value, named, products)
+        return await _no_feature(value, named, products)
     return await _or_absent(
         lambda answer: render.recheck(answer, products),
         f"/api/graph/recheck/{feature_id}",

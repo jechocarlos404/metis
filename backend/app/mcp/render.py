@@ -194,6 +194,14 @@ def stack_redundancy(envelope: dict) -> str:
     )
     if rows:
         lines += ["", "Flagged, not resolved — two answers can be a deliberate decision."]
+    elif not envelope.get("unresolved"):
+        # Technologies are recorded and none overlap. Say what was compared:
+        # recorded uses, not a stack, so a product with none still answers (D39).
+        slug = envelope["subject"]["slug"]
+        lines.append(
+            f"No two technologies {slug} uses answer the same capability natively or "
+            "partly. This compares its recorded technology uses, so it needs no stack."
+        )
     return _tail(envelope, lines)
 
 
@@ -376,6 +384,20 @@ def products(rows: list[dict]) -> str:
     return _end(lines, "/products")
 
 
+def product_features(product: dict, features: list[dict]) -> str:
+    """One product's features, so an agent can pass one to feature_why or
+    recheck without guessing a name. Statuses raw, in the API's order."""
+    counts = {s: sum(1 for f in features if f["status"] == s) for s in ("done", "in_progress", "pending")}
+    said = ", ".join(f"{n} {s}" for s, n in counts.items() if n)
+    whose = "external" if product["external"] else "ours"
+    lines = [f"{len(features)} feature(s) of {product['slug']} ({whose}){': ' + said if said else ''}.", ""]
+    lines += _table([["  " + f["name"], f["status"], f["id"]] for f in features])
+    if not features:
+        lines.append("None recorded yet: features are added on the desktop or by a seed file.")
+    lines.append("")
+    return _end(lines, f"/features?product={product['id']}")
+
+
 def _through(entry: dict) -> str:
     """The feature count rolls up the submap; say how much of it is a
     sub-capability's link, as `capability` does."""
@@ -465,7 +487,7 @@ def check_idea(report: dict, idea: str) -> str:
     not_ours = report["missing"]
     lines = [
         f"{report['existing']}/{report['needed']} distinct capabilit(ies) are ours, "
-        f"{report['mature']} of them proven (beta or ga); {len(not_ours)} not ours.",
+        f"{report['mature']} of them in use (beta or ga); {len(not_ours)} not ours.",
         "",
     ]
     for feature in report["features"]:
@@ -531,7 +553,7 @@ def product_score(score: dict) -> str:
     if report:
         lines.append(
             f"Across its named capabilities: {report['existing']}/{report['needed']} ours, "
-            f"{report['mature']} proven (beta or ga)."
+            f"{report['mature']} in use (beta or ga)."
         )
         gaps = score["missing_capabilities"]
         if gaps:
@@ -570,9 +592,18 @@ def product_score(score: dict) -> str:
     return _end(lines, f"/products?product={product['id']}")
 
 
-def no_product(value: str) -> str:
+def _near(offered: list[str]) -> list[str]:
+    """Near names after an exact miss, as no_capability offers them: each
+    leads with what the next call takes. Unconfirmed, never picked."""
+    return [f"Near names, unconfirmed: {', '.join(offered)}"] if offered else []
+
+
+def no_product(value: str, near: list[dict] = ()) -> str:
     return _end(
-        [f"0 products have id or slug {value!r}. Call `products` for ids and slugs."],
+        [
+            f"0 products have id or slug {value!r}. Call `products` for ids and slugs.",
+            *_near([f'{p["slug"]} "{p["name"]}"' for p in near]),
+        ],
         "/products",
     )
 
@@ -941,14 +972,22 @@ def recheck(result: dict, products: list[dict]) -> str:
     return _end(lines, f"/features?feature={feature['id']}")
 
 
-def no_feature(value: str, named: list[dict], products: list[dict]) -> str:
-    """Exact names only. A name several features share is listed, not picked."""
+def no_feature(
+    value: str, named: list[dict], products: list[dict], near: list[dict] = ()
+) -> str:
+    """Exact names only. A name several features share is listed, not picked;
+    a name none has offers the near ones."""
+    by_id = {p["id"]: p["slug"] for p in products}
     if not named:
         return _end(
-            [f"0 features are named {value!r}. Matching is exact: pass an id or the exact name."],
+            [
+                f"0 features are named {value!r}. Matching is exact: pass an id or the exact name.",
+                *_near(
+                    [f'{f["id"]} "{f["name"]}" ({by_id.get(f["product_id"], "no product")})' for f in near]
+                ),
+            ],
             "/features",
         )
-    by_id = {p["id"]: p["slug"] for p in products}
     lines = [f"{len(named)} features are named {value!r}. Pass one id:", ""]
     lines += _table(
         [["  " + f["name"], by_id.get(f["product_id"], "(no product)"), f["id"]] for f in named]
@@ -957,13 +996,15 @@ def no_feature(value: str, named: list[dict], products: list[dict]) -> str:
     return _end(lines, "/features")
 
 
-def no_journey(value: str, named: list[dict]) -> str:
-    """The same rule as features: an id or the exact name, never a near one."""
+def no_journey(value: str, named: list[dict], near: list[dict] = ()) -> str:
+    """The same rule as features: an id or the exact name, never a near one,
+    which is only offered."""
     if not named:
         return _end(
             [
                 f"0 journeys are named {value!r}. Matching is exact: pass an id or the "
-                "exact name; journeys with no argument lists them."
+                "exact name; journeys with no argument lists them.",
+                *_near([f'{j["id"]} "{j["name"]}"' for j in near]),
             ],
             "/journeys",
         )

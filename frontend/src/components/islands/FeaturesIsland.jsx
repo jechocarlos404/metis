@@ -1,7 +1,7 @@
 import React from "react";
 import { PageHeader } from "../shell/PageHeader.jsx";
-import { Button, Checkbox, Dialog, Icon, IconButton, Input, PriorityBadge, Select, StatusBadge, Tabs, Tag, DeleteConfirm } from "../../ds";
-import { EDGE, EDGE_INCOMING, LAYER, PRIORITY_HINT, count, plain, priorityLabel, productOptions, statusLabel } from "../../lib/words.js";
+import { Button, Checkbox, Dialog, Icon, IconButton, Input, PriorityBadge, Select, StatusBadge, Tabs, Tag, DeleteConfirm, tabId } from "../../ds";
+import { EDGE, EDGE_INCOMING, LAYER, PRIORITY_HINT, andList, count, featureDeleteKept, plain, priorityLabel, productOptions, statusLabel } from "../../lib/words.js";
 import { Term } from "../shared/Term.jsx";
 import { CapabilityPicker } from "../shared/CapabilityPicker.jsx";
 import { Guesses } from "../shared/Guesses.jsx";
@@ -93,6 +93,7 @@ export default function FeaturesIsland({ canWrite = true }) {
   const narrowGraph = pageWidth != null && pageWidth - (phone ? 40 : 360) < 560;
   const [saving, setSaving] = React.useState(false);
   const [confirmingDelete, setConfirmingDelete] = React.useState(false);
+  const [detaches, setDetaches] = React.useState(null); // rows a delete keeps but leaves without it
   const [error, setError] = React.useState(null);
   const [notice, setNotice] = React.useState(null); // what the last write did, said in place
   const [cutTarget, setCutTarget] = React.useState("");
@@ -326,6 +327,7 @@ export default function FeaturesIsland({ canWrite = true }) {
       name: detail.name,
       description: detail.description ?? "",
       capabilityIds: detail.capability_ids,
+      newCapabilities: [],
       unknownCapabilities: detail.unknown_capabilities,
       productId: detail.product_id ?? "",
       layer: detail.facets?.layer ?? "service",
@@ -340,27 +342,47 @@ export default function FeaturesIsland({ canWrite = true }) {
 
   // The shared picker speaks names; the API takes ids. Names are not unique
   // (only slugs are), so keep the ids already linked and look up only new names.
-  const draftCapabilityNames = draft.capabilityIds.map((id) => capabilityById.get(id)?.name).filter(Boolean);
+  // A name nobody has yet waits in newCapabilities until Save creates it.
+  const draftCapabilityNames = [...draft.capabilityIds.map((id) => capabilityById.get(id)?.name).filter(Boolean), ...draft.newCapabilities];
   const setDraftCapabilityNames = (names) => setDraft((d) => {
     const wanted = new Set(names.map((n) => n.toLowerCase()));
     const kept = d.capabilityIds.filter((id) => wanted.has(capabilityById.get(id)?.name.toLowerCase()));
     const keptNames = new Set(kept.map((id) => capabilityById.get(id).name.toLowerCase()));
-    const added = names.filter((n) => !keptNames.has(n.toLowerCase()))
-      .map((n) => capabilityByName.get(n.toLowerCase())?.id).filter(Boolean);
-    return { ...d, capabilityIds: [...kept, ...added] };
+    const rest = names.filter((n) => !keptNames.has(n.toLowerCase()));
+    const added = rest.map((n) => capabilityByName.get(n.toLowerCase())?.id).filter(Boolean);
+    return { ...d, capabilityIds: [...kept, ...added], newCapabilities: rest.filter((n) => !capabilityByName.has(n.toLowerCase())) };
   });
 
   // At least one capability, unless the rest are declared unknown.
-  const canSave = Boolean(draft.name.trim()) && (draft.capabilityIds.length > 0 || draft.unknownCapabilities);
+  const canSave = Boolean(draft.name.trim()) && (draft.capabilityIds.length + draft.newCapabilities.length > 0 || draft.unknownCapabilities);
   const save = async () => {
     if (!canSave) return;
     setSaving(true);
     setError(null);
     try {
+      // New capabilities first, once each: one made is linked by id from here
+      // on, so Save again after a failed save doesn't make it twice.
+      const made = [];
+      try {
+        for (const name of draft.newCapabilities) made.push(await api("/capabilities", { method: "POST", body: { name } }));
+      } finally {
+        // Each one made is kept by id, even when the next one or the feature fails.
+        if (made.length) {
+          setCapabilities((cs) => [...cs, ...made]);
+          setDraft((d) => ({
+            ...d,
+            capabilityIds: [...d.capabilityIds, ...made.map((c) => c.id)],
+            newCapabilities: d.newCapabilities.filter((n) => !made.some((c) => c.name === n)),
+            added: [...(d.added ?? []), ...made.map((c) => c.name)],
+          }));
+        }
+      }
+      const added = [...(draft.added ?? []), ...made.map((c) => c.name)]; // said once the feature saves
+      const newLine = added.length ? ` New capability: ${andList(added)}.` : "";
       const body = {
         name: draft.name.trim(),
         description: draft.description.trim() || null,
-        capability_ids: draft.capabilityIds,
+        capability_ids: [...draft.capabilityIds, ...made.map((c) => c.id)],
         unknown_capabilities: draft.unknownCapabilities,
         product_id: draft.productId || null,
         priority: draft.priority === "" ? null : Number(draft.priority),
@@ -374,7 +396,7 @@ export default function FeaturesIsland({ canWrite = true }) {
         await load();
         selectFeature(created.id);
         const product = productById.get(created.product_id);
-        setNotice(`Created ${created.name}${product ? ` in ${product.name}` : ""}.`);
+        setNotice(`Created ${created.name}${product ? ` in ${product.name}` : ""}.${newLine}`);
       } else {
         // Said in place afterwards, as capabilities and goals do.
         const was = new Set(detail.capability_ids);
@@ -394,14 +416,24 @@ export default function FeaturesIsland({ canWrite = true }) {
         });
         await load();
         await refreshDetail(detail.id);
-        setNotice(changes.length ? `Saved ${body.name}: ${[...new Set(changes)].join(", ")}.` : `Saved ${body.name}. Nothing changed.`);
+        setNotice((changes.length ? `Saved ${body.name}: ${[...new Set(changes)].join(", ")}.` : `Saved ${body.name}. Nothing changed.`) + newLine);
       }
       setDialog(null);
     } catch (e) {
-      setError(String(e.message));
+      // A name the product already has links to that feature (B51).
+      setError(e instanceof ApiError && e.status === 409 && e.existing?.id
+        ? <>{e.detail}. <a href={`/features?feature=${e.existing.id}`}>Open {e.existing.name}</a></>
+        : String(e.message));
     } finally {
       setSaving(false);
     }
+  };
+
+  // Read at arm, so the note names what this delete clears now.
+  const armDelete = () => {
+    setConfirmingDelete(true);
+    setDetaches(null);
+    api(`/features/${detail.id}/detaches`).then(setDetaches).catch(() => setDetaches(null));
   };
 
   const removeFeature = async () => {
@@ -508,7 +540,8 @@ export default function FeaturesIsland({ canWrite = true }) {
       />
       <div ref={setWidthEl} style={{ padding: phone ? "12px 16px 0" : "12px 24px 0", flex: "none" }}>
         {phone && <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>{filters}</div>}
-        <Tabs tabs={[{ value: "directory", label: "Directory", count: directory.length }, { value: "graph", label: "Graph" }, ...(canPlan ? [{ value: "plan", label: "Plan" }] : [])]} value={shownTab} onChange={changeTab} />
+        <Tabs tabs={[{ value: "directory", label: "Directory", count: directory.length }, { value: "graph", label: "Graph" }, ...(canPlan ? [{ value: "plan", label: "Plan" }] : [])]} value={shownTab} onChange={changeTab}
+          label="Features view" panelId={noFeatures ? undefined : "features-panel"} />
       </div>
       {error && !dialog && <div role="alert" style={{ padding: "8px 24px", fontSize: "var(--text-sm)", color: "var(--danger-fg)" }}>{error}</div>}
       {notice && !error && <div role="status" style={{ padding: "8px 24px 0", fontSize: "var(--text-sm)", color: "var(--ok-fg)" }}>{notice}</div>}
@@ -521,7 +554,7 @@ export default function FeaturesIsland({ canWrite = true }) {
           {canWrite && <a href="/settings" style={{ fontSize: "var(--text-sm)", color: "var(--text-accent)", textDecoration: "none" }}>Get started</a>}
         </div>
       ) : (
-      <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
+      <div id="features-panel" role="tabpanel" aria-labelledby={tabId("features-panel", shownTab)} style={{ flex: 1, display: "flex", minHeight: 0 }}>
         {panelShown ? null : tab === "graph" ? (
           <div style={{ flex: 1, position: "relative", display: "flex", flexDirection: "column", margin: 20, background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", overflow: "hidden", minWidth: 0 }}>
             {group !== "order" && !hubs ? (
@@ -669,7 +702,7 @@ export default function FeaturesIsland({ canWrite = true }) {
         footer={
           <>
             {dialog?.mode === "edit" && (
-              <DeleteConfirm armed={confirmingDelete} onArm={() => setConfirmingDelete(true)} onCancel={() => setConfirmingDelete(false)} onConfirm={removeFeature} disabled={saving}
+              <DeleteConfirm armed={confirmingDelete} onArm={armDelete} onCancel={() => setConfirmingDelete(false)} onConfirm={removeFeature} disabled={saving}
                 label="Delete" confirmLabel={"Delete feature"} style={{ marginRight: "auto" }} />
             )}
             {!confirmingDelete && !canSave && (
@@ -690,6 +723,11 @@ export default function FeaturesIsland({ canWrite = true }) {
       >
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
           {error && <div role="alert" style={{ fontSize: "var(--text-sm)", color: "var(--danger-fg)" }}>{error}</div>}
+          {/* What stays but loses it: stories and journey steps that name it,
+              and the links to other features it drops (B46). */}
+          {confirmingDelete && featureDeleteKept(detaches) && (
+            <div role="note" style={{ fontSize: "var(--text-sm)", color: "var(--text-body)" }}>{featureDeleteKept(detaches)}</div>
+          )}
           <Input label="Name (what the user gets, verb phrase)" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="Export tickets to Notion" />
           <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             <span style={{ fontSize: "var(--text-xs)", fontWeight: "var(--weight-medium)", color: "var(--text-heading)" }}>Description</span>
@@ -701,7 +739,7 @@ export default function FeaturesIsland({ canWrite = true }) {
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             <span aria-hidden="true" style={{ fontSize: "var(--text-xs)", fontWeight: "var(--weight-medium)", color: "var(--text-heading)" }}>Built on</span>
             <CapabilityPicker id="feature-capabilities" label="Built on" options={capabilityOptions} value={draftCapabilityNames}
-              onChange={setDraftCapabilityNames} allowNew={false} placeholder="Type a capability…" />
+              onChange={setDraftCapabilityNames} allowNew placeholder="Type a capability…" />
             <Checkbox label="Some capabilities are unknown. Link only the ones you can name."
               checked={draft.unknownCapabilities} onChange={(on) => setDraft({ ...draft, unknownCapabilities: on })} />
           </div>
@@ -719,7 +757,7 @@ export default function FeaturesIsland({ canWrite = true }) {
   );
 }
 
-const EMPTY_DRAFT = { name: "", description: "", capabilityIds: [], unknownCapabilities: false, productId: "", layer: "service", priority: "3", status: "pending" };
+const EMPTY_DRAFT = { name: "", description: "", capabilityIds: [], newCapabilities: [], unknownCapabilities: false, productId: "", layer: "service", priority: "3", status: "pending" };
 
 // The relationship picker, one group per product: this feature's own first,
 // then the rest by name, "No product" last; features by name inside each.
@@ -780,6 +818,11 @@ function FeatureLink({ feature, onSelect, active, style }) {
 
 function FeaturePanel({ detail, canWrite, onEdit, onGuessConfirmed, onSelect, productIds, productById, capabilityById, journeys, why, goals, allNodes, edgeDraft, onEdgeDraft, edgeError, onAddEdge, onRemoveEdge, recheck, onRecheck, onClearRecheck }) {
   const layer = detail.facets?.layer;
+  // Typing narrows the other-feature list (487 on the real data); the pick stays exact, by id.
+  const [find, setFind] = React.useState("");
+  const narrowed = find.trim()
+    ? allNodes.filter((n) => n.id === edgeDraft.targetId || n.name.toLowerCase().includes(find.trim().toLowerCase()))
+    : allNodes;
   return (
     <>
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -855,15 +898,16 @@ function FeaturePanel({ detail, canWrite, onEdit, onGuessConfirmed, onSelect, pr
           <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 4 }}>
             <Select label="This feature" value={edgeDraft.kind} onChange={(e) => onEdgeDraft({ ...edgeDraft, kind: e.target.value })}
               options={EDGE_KINDS.map((k) => ({ value: k, label: plain(EDGE, k) }))} />
+            <Input aria-label="Narrow the feature list" value={find} onChange={(e) => setFind(e.target.value)} placeholder="Type to narrow the list…" />
             <Select aria-label="Other feature" value={edgeDraft.targetId} onChange={(e) => onEdgeDraft({ ...edgeDraft, targetId: e.target.value })}>
               <option value="">Pick a feature…</option>
-              {pickerGroups(allNodes, detail.id, productIds[0] ?? "", productById).map(([pid, label, nodes]) => (
+              {pickerGroups(narrowed, detail.id, productIds[0] ?? "", productById).map(([pid, label, nodes]) => (
                 <optgroup key={pid} label={label}>
                   {nodes.map((n) => <option key={n.id} value={n.id}>{n.name}</option>)}
                 </optgroup>
               ))}
             </Select>
-            <Button size="sm" variant="secondary" disabled={!edgeDraft.targetId} onClick={onAddEdge} style={{ gap: 6 }}>
+            <Button size="sm" variant="secondary" disabled={!edgeDraft.targetId} onClick={() => { onAddEdge(); setFind(""); }} style={{ gap: 6 }}>
               <Icon name="plus" size={13} />Add relationship
             </Button>
             {edgeError && <div role="alert" style={{ ...NOTE, color: "var(--danger-fg)" }}>{edgeError}</div>}
@@ -900,16 +944,23 @@ function RecheckList({ recheck, onSelect, onClear }) {
   );
   const retestRow = (f) => row(f, `shares ${f.shared.map((c) => c.name).join(", ")}`);
   const nothing = !breaks.length && !retest.length && !broad.length && !elsewhere.length;
+  // The button that asked is gone, and the answer opens at the panel's foot:
+  // take focus there and bring it up, so the click visibly did something (B50).
+  const headRef = React.useRef(null);
+  React.useEffect(() => {
+    headRef.current?.focus({ preventScroll: true });
+    headRef.current?.scrollIntoView({ block: "start" });
+  }, [recheck]);
   return (
     <>
       <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
-        <div style={CAPS_HEADER}>If this changes</div>
+        <div ref={headRef} tabIndex={-1} style={CAPS_HEADER}>If this changes</div>
         <button type="button" onClick={onClear} style={{ border: "none", background: "none", padding: 0, cursor: "pointer", font: "inherit", ...SMALL_NOTE }}>Clear</button>
       </div>
       {nothing && <div style={SMALL_NOTE}>Nothing depends on it and it shares no capability, so nothing else needs a recheck.</div>}
       {breaks.length > 0 && (
         <>
-          <div style={{ fontSize: "var(--text-xs)", fontWeight: "var(--weight-medium)", color: "var(--danger-fg)" }}>Breaks: {count(breaks.length, "feature")} need it</div>
+          <div style={{ fontSize: "var(--text-xs)", fontWeight: "var(--weight-medium)", color: "var(--danger-fg)" }}>Breaks: {count(breaks.length, "feature")} {breaks.length === 1 ? "needs" : "need"} it</div>
           {breaks.map((f) => row(f, via(f), f.via.join(" > ")))}
         </>
       )}

@@ -2,7 +2,7 @@ import React from "react";
 import { PageHeader } from "../shell/PageHeader.jsx";
 import { Badge, Button, DeleteConfirm, Input } from "../../ds";
 import { api } from "../../lib/api.js";
-import { MATURITY, NEED, VERDICT, andList, count, needKey, plain, statusLabel, verdictOf } from "../../lib/words.js";
+import { MATURITY, NEED, VERDICT, andList, count, needKey, plain, slugify, statusLabel, verdictOf } from "../../lib/words.js";
 import { readParam, useParamRestore, writeParams } from "../../lib/url-state.js";
 import { CoverageReport } from "../shared/coverage.jsx";
 import { CapabilityPicker } from "../shared/CapabilityPicker.jsx";
@@ -151,8 +151,9 @@ export default function JourneysIsland({ canWrite }) {
     await api(`/journeys/${id}`, { method: "DELETE" });
     await loadList(); // the selection falls back to the first one
     setNotice(`Deleted ${name}.`);
-    // Focus the list, not whatever button now sits where Delete was.
-    listHeading.current?.focus();
+    // Focus the list, not whatever button now sits where Delete was; with
+    // the last one gone there is no list, so the page itself.
+    requestAnimationFrame(() => (listHeading.current ?? document.getElementById("main"))?.focus());
   }
 
   return (
@@ -165,9 +166,12 @@ export default function JourneysIsland({ canWrite }) {
       {error && <div style={{ padding: "8px 24px", color: "var(--danger-fg)", fontSize: "var(--text-xs)" }}>{error}</div>}
       {notice && <div role="status" style={{ padding: "8px 24px 0", color: "var(--ok-fg)", fontSize: "var(--text-sm)" }}>{notice}</div>}
       <div style={{ flex: 1, minHeight: 0, overflowY: "auto", display: "flex", flexWrap: "wrap", alignItems: "flex-start", alignContent: "flex-start", gap: 16, padding: "16px 24px" }}>
-        <div style={{ flex: "1 0 260px", maxWidth: "100%" }}>
-          <JourneyList journeys={journeys} selected={selected} onSelect={select} headingRef={listHeading} />
-        </div>
+        {/* With nothing saved, the empty state says so once: no empty list beside it. */}
+        {(editing || journeys?.length !== 0) && (
+          <div style={{ flex: "1 0 260px", maxWidth: "100%" }}>
+            <JourneyList journeys={journeys} selected={selected} onSelect={select} headingRef={listHeading} />
+          </div>
+        )}
         <div style={{ flex: "999 1 420px", minWidth: 0 }}>
           {editing && (
             <JourneyEditor
@@ -601,9 +605,6 @@ function StepCard({ step, x, dim, h, text, whereY, labelRef, whereRef, onEnter, 
     : <g tabIndex={0} onFocus={onEnter} onBlur={onLeave} onClick={onEnter}>{card}</g>;
 }
 
-// Mirrors the backend's slugify: step needs resolve by exact slug.
-const slugify = (v) => v.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
-
 // The analysis's rule, while composing: live, else by what its capabilities are.
 function needsVerdict(entries, incomplete) {
   if (entries.length === 0) return "unknown";
@@ -619,7 +620,9 @@ function JourneyEditor({ base, draft: start, features, productById, inventory, o
   const [confirmDiscard, setConfirmDiscard] = React.useState(false);
   const featureById = React.useMemo(() => new Map(features.map((f) => [f.id, f])), [features]);
   const byId = React.useMemo(() => new Map(inventory.map((c) => [c.id, c])), [inventory]);
-  const bySlug = React.useMemo(() => new Map(inventory.map((c) => [c.slug, c])), [inventory]);
+  // Step needs resolve as coverage resolves them: by exact slug, the stored
+  // one first, else the one the current name derives (a rename keeps the old).
+  const bySlug = React.useMemo(() => new Map([...inventory.map((c) => [slugify(c.name), c]), ...inventory.map((c) => [c.slug, c])]), [inventory]);
   const options = React.useMemo(() => inventory.map((c) => ({
     id: c.id, name: c.name, slug: c.slug, need: needKey(c), hint: NEED[needKey(c)].label,
   })), [inventory]);

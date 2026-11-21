@@ -41,6 +41,7 @@ from app.models import (
     FeatureCapability,
     FeatureEdge,
     Goal,
+    Journey,
     JourneyStep,
     Motivation,
     Product,
@@ -289,24 +290,28 @@ async def compute_closure(
             to_delete[Feature] |= orphans
             frontier.append((Feature, orphans))
 
-    # Detach counts last, and only for rows that survive. A story whose epic is
-    # in the closure is deleted, not detached; counting it during expansion would
-    # report the same row under both headings.
-    detach: dict[type, int] = defaultdict(int)
-    for model, ids in list(to_delete.items()):
+    to_delete = {m: ids for m, ids in to_delete.items() if ids}
+    detach = {m: len(ids) for m, ids in (await _detached(session, to_delete)).items()}
+    return to_delete, detach, missing
+
+
+async def _detached(
+    session: AsyncSession, to_delete: dict[type, set[uuid.UUID]]
+) -> dict[type, set[uuid.UUID]]:
+    """The rows a closure keeps but unlinks: a `detach` spec's rows pointing
+    into it. Found last, and only rows that survive: a story whose epic is in
+    the closure is deleted, not detached; finding it during expansion would
+    report the same row under both headings."""
+    found: dict[type, set[uuid.UUID]] = defaultdict(set)
+    for model, ids in to_delete.items():
         for spec in CHILDREN.get(model, ()):
             if spec.action != "detach":
                 continue
-            stmt = (
-                select(func.count())
-                .select_from(spec.model)
-                .where(getattr(spec.model, spec.fk).in_(ids))
-            )
+            stmt = select(spec.model.id).where(getattr(spec.model, spec.fk).in_(ids))
             if to_delete.get(spec.model):
                 stmt = stmt.where(spec.model.id.notin_(to_delete[spec.model]))
-            detach[spec.model] += await session.scalar(stmt) or 0
-
-    return {m: ids for m, ids in to_delete.items() if ids}, dict(detach), missing
+            found[spec.model] |= set(await session.scalars(stmt))
+    return {m: ids for m, ids in found.items() if ids}
 
 
 async def _orphaned_features(
@@ -415,6 +420,18 @@ def _warnings(
     return out
 
 
+#: Links a guarded delete removes with the row, named before anyone confirms
+#: like the rows it detaches (B46): a product's hand-added capability, and a
+#: feature's links to other features, which are the other feature's too.
+DROPPED_LINKS: dict[type, tuple[type, ...]] = {
+    Capability: (ProductBundle,),
+    Feature: (FeatureEdge,),
+}
+
+#: A link between features in the words the feature page uses (words.js EDGE).
+EDGE_WORDS = {"DEPENDS_ON": "needs", "BLOCKS": "blocks", "RELATES_TO": "related to"}
+
+
 class NamedCount(TableCount):
     """A table's share of the closure. `names` lists every row by name for the
     tables whose rows have one, a link by its two ends (`_names`); the rest
@@ -425,6 +442,135 @@ class NamedCount(TableCount):
 
 class NamedPreview(CascadePreview):
     total_deletes: list[NamedCount]
+
+
+async def _named_where(session: AsyncSession, model: type, ids: set[uuid.UUID]) -> dict[uuid.UUID, str]:
+    """A row a delete keeps but unlinks, by its name and where it sits: a
+    story's title alone says little. Other rows as `_names` names them."""
+    where = {
+        Epic: (Epic.title, Product.name, Product, Product.id == Epic.product_id),
+        Story: (Story.title, Epic.title, Epic, Epic.id == Story.epic_id),
+        StackSlot: (
+            func.concat(StackSlot.layer, "::", StackSlot.role),
+            TechStack.name,
+            TechStack,
+            TechStack.id == StackSlot.stack_id,
+        ),
+        JourneyStep: (JourneyStep.label, Journey.name, Journey, Journey.id == JourneyStep.journey_id),
+    }.get(model)
+    if model is ProductBundle:
+        # The product that added it by hand; the capability is the one deleted.
+        rows = await session.execute(
+            select(model.id, Product.name).join(Product, Product.id == model.product_id).where(model.id.in_(ids))
+        )
+        return dict(rows.all())
+    if model is FeatureEdge:
+        src, dst = aliased(Feature), aliased(Feature)
+        rows = await session.execute(
+            select(model.id, src.name, model.kind, dst.name)
+            .join(src, src.id == model.src_id)
+            .join(dst, dst.id == model.dst_id)
+            .where(model.id.in_(ids))
+        )
+        return {
+            row_id: f"\u201c{a}\u201d {EDGE_WORDS.get(getattr(kind, 'value', kind), kind)} \u201c{b}\u201d"
+            for row_id, a, kind, b in rows
+        }
+    if model is Encounter:
+        # The technology only: who used it is a person, named only behind the
+        # people throttle (questions.tech_encounters), never by a plain read.
+        rows = await session.execute(
+            select(model.id, Technology.name).join(Technology, Technology.id == model.tech_id).where(model.id.in_(ids))
+        )
+        return dict(rows.all())
+    if model is ProductDecomposition:
+        rows = await session.execute(select(model.id, model.version).where(model.id.in_(ids)))
+        return {row_id: f"version {version}" for row_id, version in rows}
+    if model is TechStack:
+        return dict((await session.execute(select(model.id, model.name).where(model.id.in_(ids)))).all())
+    if where is None:
+        return await _names(session, model, ids)
+    name, place, joined, on = where
+    rows = await session.execute(select(model.id, name, place).join(joined, on).where(model.id.in_(ids)))
+    return {row_id: f"{a} ({b})" for row_id, a, b in rows}
+
+
+async def detaches(session: AsyncSession, model: type, row_id: uuid.UUID) -> list[NamedCount]:
+    """What deleting this one row keeps but unlinks: the rows its `detach`
+    specs point at (ON DELETE SET NULL), and the links it drops with it
+    (DROPPED_LINKS), each named. Only the row's own foreign keys, never the
+    closure: the guarded deletes (a capability's, a feature's) remove one
+    row, and say this before anyone confirms."""
+    found: dict[type, set[uuid.UUID]] = {}
+    for spec in CHILDREN.get(model, ()):
+        if spec.action != "detach" and spec.model not in DROPPED_LINKS.get(model, ()):
+            continue
+        found.setdefault(spec.model, set()).update(
+            await session.scalars(select(spec.model.id).where(getattr(spec.model, spec.fk) == row_id))
+        )
+    out: list[NamedCount] = []
+    for child, ids in found.items():
+        if not ids:
+            continue
+        label, plane = LABELS[child]
+        names = await _named_where(session, child, ids)
+        out.append(
+            NamedCount(
+                table=child.__tablename__,
+                label=label,
+                plane=plane,
+                count=len(ids),
+                names=sorted(names.values(), key=str.lower),
+            )
+        )
+    return out
+
+
+async def deletes(session: AsyncSession, entity: str, row_id: uuid.UUID) -> list[NamedCount]:
+    """What deleting this one row deletes with it, by table and name: the
+    closure the delete itself follows, less the row. A product's delete says
+    this before anyone confirms (B47): its plan, its stack, its links."""
+    to_delete, _, _ = await compute_closure(session, [RowRef(entity=entity, id=row_id)])
+    to_delete[ENTITY_MODELS[entity]].discard(row_id)
+    out = []
+    for model, ids in to_delete.items():
+        if not ids:
+            continue
+        label, plane = LABELS[model]
+        # Where these sit goes too, so each is named alone.
+        bare = {Epic: Epic.title, Story: Story.title, StackSlot: func.concat(StackSlot.layer, "::", StackSlot.role)}
+        if model in bare:
+            names = dict((await session.execute(select(model.id, bare[model]).where(model.id.in_(ids)))).all())
+        else:
+            names = await _named_where(session, model, ids)
+        out.append(
+            NamedCount(
+                table=model.__tablename__, label=label, plane=plane, count=len(ids),
+                names=sorted(names.values(), key=str.lower),
+            )
+        )
+    return sorted(out, key=lambda t: (-t.count, t.label))
+
+
+async def closure_detaches(session: AsyncSession, entity: str, row_id: uuid.UUID) -> list[NamedCount]:
+    """What deleting this one row keeps but unlinks, by table and name: the
+    rows outside the closure the delete follows whose key into it goes empty
+    (ON DELETE SET NULL). A product's delete says this before anyone confirms
+    (B47): a journey step on one of its features stays as a gap, another
+    product's story about one loses its feature."""
+    to_delete, _, _ = await compute_closure(session, [RowRef(entity=entity, id=row_id)])
+    out = []
+    for model, ids in (await _detached(session, to_delete)).items():
+        label, plane = LABELS[model]
+        names = await _named_where(session, model, ids)
+        out.append(
+            NamedCount(
+                table=model.__tablename__, label=label, plane=plane, count=len(ids),
+                # Each name once: two records of one technology read "SQLite".
+                names=sorted(set(names.values()), key=str.lower),
+            )
+        )
+    return sorted(out, key=lambda t: (-t.count, t.label))
 
 
 async def preview(session: AsyncSession, refs: list[RowRef]) -> NamedPreview:

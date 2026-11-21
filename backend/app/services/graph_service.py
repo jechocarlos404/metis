@@ -52,6 +52,38 @@ class GraphCycleError(Exception):
         super().__init__("Dependency cycle detected")
 
 
+def precedence(edges, nodes=()) -> nx.DiGraph:
+    """DEPENDS_ON ∪ reverse(BLOCKS) over ``(src, dst, kind)`` triples: edge
+    u->v means *u needs v*. RELATES_TO is left out."""
+    g = nx.DiGraph()
+    g.add_nodes_from(nodes)
+    for src, dst, kind in edges:
+        if str(kind) == str(EdgeKind.DEPENDS_ON):
+            g.add_edge(src, dst)
+        elif str(kind) == str(EdgeKind.BLOCKS):
+            g.add_edge(dst, src)
+    return g
+
+
+def cycle_chain(
+    need: nx.DiGraph, src: uuid.UUID, dst: uuid.UUID, kind: EdgeKind | str
+) -> list[uuid.UUID] | None:
+    """Would adding src --kind--> dst close a cycle in the precedence graph
+    ``need``? Returns the existing chain it would close (each feature needs
+    the next), else None. RELATES_TO never can. A feature with no precedence
+    edge can't be on a cycle yet."""
+    if str(kind) not in PRECEDENCE_KINDS:
+        return None
+    if not (need.has_node(src) and need.has_node(dst)):
+        return None
+    need_from, need_to = (src, dst) if str(kind) == str(EdgeKind.DEPENDS_ON) else (dst, src)
+    # Adding need_from -> need_to cycles iff need_to already reaches need_from.
+    try:
+        return nx.shortest_path(need, need_to, need_from)
+    except nx.NetworkXNoPath:
+        return None
+
+
 def _node_attrs(feature: Feature | Any) -> dict[str, Any]:
     return {
         "seq": feature.seq,
@@ -168,32 +200,18 @@ class FeatureGraph:
 
     def _precedence_subgraph(self) -> nx.DiGraph:
         """DEPENDS_ON ∪ reverse(BLOCKS): edge u->v means *u needs v*."""
-        g = nx.DiGraph()
-        g.add_nodes_from(self._g.nodes)
-        for src, dst, data in self._g.edges(data=True):
-            if data["kind"] == str(EdgeKind.DEPENDS_ON):
-                g.add_edge(src, dst)
-            elif data["kind"] == str(EdgeKind.BLOCKS):
-                g.add_edge(dst, src)
-        return g
+        return precedence(
+            ((src, dst, data["kind"]) for src, dst, data in self._g.edges(data=True)),
+            self._g.nodes,
+        )
 
     def would_create_cycle(
         self, src: uuid.UUID, dst: uuid.UUID, kind: EdgeKind | str
     ) -> list[uuid.UUID] | None:
-        """Write-time guard: would adding src --kind--> dst close a precedence
-        cycle? Returns the existing chain it would close (each feature needs
-        the next), else None. RELATES_TO never can. Unknown nodes can't be on
-        a cycle yet."""
-        if str(kind) not in PRECEDENCE_KINDS:
-            return None
-        if not (self._g.has_node(src) and self._g.has_node(dst)):
-            return None
-        need_from, need_to = (src, dst) if str(kind) == str(EdgeKind.DEPENDS_ON) else (dst, src)
-        # Adding need_from -> need_to cycles iff need_to already reaches need_from.
-        try:
-            return nx.shortest_path(self._precedence_subgraph(), need_to, need_from)
-        except nx.NetworkXNoPath:
-            return None
+        """`cycle_chain` over this graph. The write path doesn't use it: it
+        checks Postgres under a lock (`features.create_edge`), since this copy
+        learns of another request's edge only after that request commits."""
+        return cycle_chain(self._precedence_subgraph(), src, dst, kind)
 
     def impact(self, feature_id: uuid.UUID) -> dict[str, list[dict[str, Any]]]:
         """dependents = blast radius (who breaks); dependencies = what it needs."""

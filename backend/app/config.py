@@ -1,5 +1,6 @@
 from functools import lru_cache
 
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -27,7 +28,12 @@ class Settings(BaseSettings):
     # the desktop, because `azp` is signed.
     keycloak_desktop_client: str = "metis-web"
     keycloak_mcp_client: str = "metis-mcp"
-    keycloak_mcp_client_secret: str = "dev-mcp-secret"
+    # METIS_MCP_CLIENT_SECRET, the name .env.example and compose use, so the
+    # root .env reaches a stdio server too; the older name still works.
+    keycloak_mcp_client_secret: str = Field(
+        "dev-mcp-secret",
+        validation_alias=AliasChoices("metis_mcp_client_secret", "keycloak_mcp_client_secret"),
+    )
 
     # The MCP server calls the HTTP API rather than the services in-process, so
     # a chat transcript and an API log line up — and so the write boundary is
@@ -35,7 +41,15 @@ class Settings(BaseSettings):
     mcp_api_base_url: str = "http://localhost:8000"
     # Required to serve MCP over SSE. Empty means stdio only — a listening
     # socket with no gate would lend this process's API token to any caller.
-    mcp_sse_token: str = ""
+    # METIS_MCP_SSE_TOKEN, the name .env.example, compose and the docs use;
+    # the older MCP_SSE_TOKEN still works, and an empty new name (as
+    # .env.example leaves it) doesn't hide it.
+    metis_mcp_sse_token: str = ""
+    old_mcp_sse_token: str = Field("", validation_alias="mcp_sse_token")
+
+    @property
+    def mcp_sse_token(self) -> str:
+        return self.metis_mcp_sse_token or self.old_mcp_sse_token
 
     # LLM providers — presence of a credential marks the provider available.
     anthropic_api_key: str = ""

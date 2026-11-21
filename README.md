@@ -66,7 +66,9 @@ derivations go stale, and a stale risk number is worse than none.
 ## Quick start
 
 ```sh
-cp .env.example .env      # optional: add LLM provider keys
+cp .env.example .env      # required: sign-in reads SESSION_SECRET from it
+# set SESSION_SECRET in .env to the output of: openssl rand -hex 32 (sign-in
+# refuses while it is unset or the public default); LLM provider keys are optional
 docker compose up --build
 ```
 
@@ -356,6 +358,10 @@ Seventeen tools. Nine answer inventory questions: `products`, `capability_invent
 `check_idea`, `product_score`, `capability`, `feature_why`, `journeys`, `ready_features`,
 `recheck`. The other eight: the six `question` keys, plus `tech_search` (navigation — everything else
 takes a slug it returns) and `propose_binding` (a hand-off that persists nothing).
+All seventeen are always listed, though the desktop hides the technology plane until it
+has data: a client lists tools once, when it connects, and is never told the catalog
+filled. With no technology recorded none of those eight errors: each says it found
+nothing and points to where a technology or stack gets recorded or looked up.
 Four resources: `metis://ontology/model`, `metis://policy/adoptions`, and the templated
 `metis://tech/{slug}` and `metis://stacks/{product}`. Three prompts.
 
@@ -363,11 +369,14 @@ Tools return **text, not JSON** — an agent quotes text back to a user but para
 JSON, and paraphrase is where `workaround` quietly becomes "partial support."
 
 ```sh
-docker compose --profile mcp up -d mcp  # SSE on 127.0.0.1:8001
+# .env: METIS_MCP_SSE_TOKEN=<long random string>
+docker compose --profile mcp up -d --build mcp  # SSE on 127.0.0.1:8001
 ```
 
-The server refuses to start SSE without `MCP_SSE_TOKEN`: it holds an API token, and an
-open port would lend it to anyone who can reach the address.
+`--build` rebuilds the image from this checkout, so a stale one isn't served. The
+server refuses to start SSE without that token (compose hands `METIS_MCP_SSE_TOKEN` to
+it): it holds an API token, and an open port would lend it to anyone who can reach the
+address.
 
 **Claude Code plugin.** [`plugin/`](plugin/README.md) brings this server to a coding
 session in any repo, with eight skills (among them `metis-check-idea`,
@@ -446,7 +455,7 @@ place that overrides the domain invariants, for cleaning up orphaned seed data.
 
 ## Configuration
 
-All optional — see `.env.example`:
+All optional except `SESSION_SECRET` while auth is on — see `.env.example`:
 
 | Variable | Purpose |
 |---|---|
@@ -456,6 +465,7 @@ All optional — see `.env.example`:
 | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_REGION` | Bedrock (Claude models) |
 | `OLLAMA_BASE_URL` | Ollama; compose default reaches host Ollama at `host.docker.internal:11434` |
 | `AUTH_ENABLED` | `false` makes every request an admin on the desktop surface — scripts only |
+| `SESSION_SECRET` | Signs the web session cookie. Required while auth is on: sign-in refuses while it is unset or the public default (`openssl rand -hex 32`) |
 | `METIS_MCP_SSE_TOKEN` | Required for the MCP server's SSE mode |
 | `METIS_MCP_CLIENT_SECRET` | The `metis-mcp` Keycloak client's secret, which the MCP server signs in with (dev default `dev-mcp-secret`) |
 | `ANTHROPIC_MODELS` etc. | Override the model dropdowns (comma-separated) |
@@ -465,6 +475,8 @@ All optional — see `.env.example`:
 ```sh
 # settings, once: compose and the backend below both read this file
 cp .env.example .env
+# with auth on, set SESSION_SECRET in .env now (openssl rand -hex 32): sign-in
+# refuses while it is unset or the public default
 
 # database, and Keycloak: the backend checks every token against it and the
 # frontend signs in through it (or set AUTH_ENABLED=false in .env for scripts)
@@ -482,6 +494,9 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
 # frontend, in a second terminal from the repo root (uvicorn holds this one)
 cd frontend
 npm install
+# npm run dev reads SESSION_SECRET and AUTH_ENABLED (and the Keycloak settings)
+# from its environment, not from .env, so export the root file's first
+set -a; . ../.env; set +a
 npm run dev            # http://localhost:4321, proxies to localhost:8000
 ```
 

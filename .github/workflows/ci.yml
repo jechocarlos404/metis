@@ -42,7 +42,9 @@ jobs:
     # (plugin/README.md), and the seed format and its validator live in
     # hand-kept copies. The backend job runs the same file on 3.12; this runs
     # it alone, with no backend dependencies, on the floor version.
-    runs-on: ubuntu-latest
+    # Pinned: actions/python-versions builds 3.9 for ubuntu-24.04 but not
+    # 26.04, so this job would fail at setup when ubuntu-latest moves on.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7

@@ -2,6 +2,7 @@ import React from "react";
 import { Select, StatusBadge, Tag } from "../../ds";
 import { NOTHING_TO_SCORE, count } from "../../lib/words.js";
 import { BuildNext, CoverageReport, ProductScore } from "../shared/coverage.jsx";
+import { featureCountNote } from "./shareSnapshot.js";
 
 const heading = { fontSize: "var(--text-sm)", fontWeight: "var(--weight-semibold)", color: "var(--text-heading)", marginBottom: 8 };
 const muted = { fontSize: "var(--text-sm)", color: "var(--text-secondary)" };
@@ -19,9 +20,11 @@ export function WhatItDoes({ product, features, score, capabilities, journeys, b
   // A feature realizing several capabilities is listed under each.
   const groups = new Map();
   const unnamed = [];
+  let repeats = false;
   for (const f of features) {
     const caps = (f.capability_ids ?? []).filter((id) => capById.has(id));
     if (caps.length === 0) unnamed.push(f);
+    if (caps.length > 1) repeats = true;
     for (const id of caps) {
       if (!groups.has(id)) groups.set(id, []);
       groups.get(id).push(f);
@@ -88,6 +91,9 @@ export function WhatItDoes({ product, features, score, capabilities, journeys, b
           </div>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>
+              {featureCountNote(features.length, repeats)}
+            </div>
             {grouped.map(({ cap, list }) => {
               const n = sharedWith(cap);
               return (

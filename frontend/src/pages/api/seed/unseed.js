@@ -1,6 +1,7 @@
 export const prerender = false;
 
-import { EDGE, andList, count } from "../../../lib/words.js";
+import { EDGE, andList, count, slugify } from "../../../lib/words.js";
+import { checkKeys } from "./import.js";
 
 const backend = () =>
   (process.env.API_INTERNAL_URL || "http://localhost:8000").replace(/\/$/, "");
@@ -56,14 +57,13 @@ class UpstreamApi {
  * rule applied to the name. */
 function techSlug(tech) {
   if (tech.slug != null) return tech.slug;
-  return String(tech.name ?? "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  return slugify(tech.name);
 }
 
 /** The importer's capability identity: the explicit slug, then the slug the
  * name derives, then that derived slug against each row's current name (a
  * rename keeps the old slug), preferring the row with exactly that name. */
 function capabilityResolver(instance) {
-  const slugify = (value) => techSlug({ name: value });
   const bySlug = new Map(instance.map((capability) => [capability.slug, capability]));
   const byName = new Map();
   for (const capability of instance) {
@@ -123,6 +123,8 @@ class Unseeder {
     this.instTechs = [];
     for (let offset = 0; ; offset += 200) {
       const { status, body } = await this.api.request("GET", `/api/tech?limit=200&offset=${offset}`);
+      // Absent (404) is none; any other failure is a list this run can't read.
+      if (status !== 200 && status !== 404 && !this.unreadable.includes("technologies")) this.unreadable.push("technologies");
       if (status !== 200) break;
       this.instTechs.push(...body.rows);
       if (offset + 200 >= body.total || body.rows.length === 0) break;
@@ -144,9 +146,10 @@ class Unseeder {
       (product) => product.name,
       new Map(this.instProducts.map((product) => [product.name, product])),
     );
-    // A feature is its product's: identity is (product, name), so two products
-    // may each have a "Sign in" without one unseed taking both.
-    const featureKey = (productId, name) => `${productId ?? ""}\u0000${name}`;
+    // A feature is its product's: identity is (product, name ignoring case, as
+    // the API holds it), so two products may each have a "Sign in" without one
+    // unseed taking both.
+    const featureKey = (productId, name) => `${productId ?? ""}\u0000${(name ?? "").toLowerCase()}`;
     this.features = this.match(
       "features",
       (feature) => featureKey(this.products.get(feature.product_ref)?.id, feature.name),
@@ -948,6 +951,17 @@ export async function POST({ request, locals }) {
     return new Response(JSON.stringify({
       detail: "This is a metis-fill-gaps file. Removing it would delete the product's real features. Remove a single link on the feature instead.",
     }), { status: 400, headers: { "content-type": "application/json" } });
+  }
+
+  // The importer's key check: a misspelled collection ("featurse") would
+  // otherwise remove the rest and keep what it names, a half removal.
+  const keyErrors = [];
+  checkKeys(keyErrors, doc);
+  if (keyErrors.length > 0) {
+    return new Response(JSON.stringify({ detail: keyErrors.join("\n") }), {
+      status: 400,
+      headers: { "content-type": "application/json" },
+    });
   }
 
   try {

@@ -66,11 +66,11 @@ export function openTransform(bounds, w, h, inset = 0, maxK = 2.5, focus = null,
 const join = (a, b) => ({ x0: Math.min(a.x0, b.x0), y0: Math.min(a.y0, b.y0), x1: Math.max(a.x1, b.x1), y1: Math.max(a.y1, b.y1) });
 
 /**
- * The view for a goal picked outside the canvas (C39): its `box` and the
- * boxes of the goals it lights (`near`) all in view, so its lines are.
- * Centred on it (A10) when they fit around it at a readable scale;
- * otherwise all of them fitted, readable where they can be. Never closer
- * than `maxK`.
+ * The view for a picked goal: its `box` centred (A10), never below the
+ * readable scale, so its name shows (A49). As far out as that allows to
+ * bring in the goals it lights (`near`), so their lines show (C39); the ones
+ * that still don't fit stay off screen, their lines leading out to them.
+ * Fit is how to see them all. Never closer than `maxK`.
  */
 export function pickTransform(box, near, w, h, inset = 0, maxK = 1) {
   const all = near.reduce(join, box);
@@ -79,7 +79,7 @@ export function pickTransform(box, near, w, h, inset = 0, maxK = 1) {
   const hw = Math.max(cx - all.x0, all.x1 - cx);
   const hh = Math.max(cy - all.y0, all.y1 - cy);
   const around = fitTransform({ x0: cx - hw, y0: cy - hh, x1: cx + hw, y1: cy + hh }, w, h, inset, maxK);
-  return around.k >= READABLE_SCALE ? around : fitTransform(all, w, h, inset, maxK);
+  return centreTransform(box, Math.max(READABLE_SCALE, around.k), w, h, inset);
 }
 
 /**
@@ -242,8 +242,13 @@ export function wrapLabel(name, maxChars = 19, maxLines = 2) {
  *
  *   goals:      [{ id, goal_type, parent_goal_id, ... }]
  *   capsByGoal: { goalId: [{ id, name, slug }] }
+ *   room:       { w, h } px the canvas has (h: as tall as it may grow), or none
+ *
+ * In a canvas too narrow for the packed trees to read, they stack in one
+ * column instead, when the column reads whole in `room`; `height` is then
+ * the canvas px the column needs (C41).
  */
-export function buildGoalNetwork(goals, capsByGoal) {
+export function buildGoalNetwork(goals, capsByGoal, room = null) {
   const orgs = goals.filter((g) => g.goal_type === "org");
   const orgIds = new Set(orgs.map((o) => o.id));
   const clusters = orgs.map((o) => ({ center: o, members: goals.filter((g) => g.goal_type !== "org" && g.parent_goal_id === o.id) }));
@@ -264,7 +269,9 @@ export function buildGoalNetwork(goals, capsByGoal) {
   let rowH = 0;
   for (const c of clusters) {
     const d = side(c);
-    if (x > 0 && x + d > rowWidth) {
+    // A tree starts a new row once its centre would pass the row's width, so
+    // two small trees sit side by side rather than in one column (C41).
+    if (x > 0 && x + d / 2 > rowWidth) {
       x = 0;
       y += rowH;
       rowH = 0;
@@ -283,6 +290,8 @@ export function buildGoalNetwork(goals, capsByGoal) {
       anchor.set(g.id, { x: cx + r * Math.cos(a), y: cy + r * Math.sin(a) });
     });
   });
+  const column = room && goalColumn(clusters, anchor, room);
+  if (column) column.anchor.forEach((a, id) => anchor.set(id, a));
 
   const nodes = goals.map((g) => ({
     id: g.id,
@@ -326,7 +335,45 @@ export function buildGoalNetwork(goals, capsByGoal) {
     e.weight = e.capabilities.length;
     edges.push(e);
   }
-  return { nodes, edges };
+  return { nodes, edges, height: column?.height ?? null };
+}
+
+// The engine's Fit keeps 40 units clear around the cards (bounds()).
+const FIT_MARGIN = 40;
+// A stacked column aims a little above the readable scale: the settled
+// cards sit a few units off their anchors.
+const COLUMN_SCALE = 0.98;
+const COLUMN_PITCH = GOAL_H + 20; // clears the network's collision box (GOAL_H + 16)
+const COLUMN_GAP = 40; // between two trees, more than inside one
+const COLUMN_INDENT = 24; // product goals sit right of their org goal, as in the list
+
+/**
+ * The trees in one column, each org goal over its product goals, when the
+ * packed trees (`anchor`) are too wide for `room.w` at the readable scale
+ * and the column reads whole in `room`. Otherwise null, and the packing
+ * stays as it is.
+ */
+function goalColumn(clusters, anchor, room) {
+  if (!anchor.size) return null;
+  const xs = [...anchor.values()].map((a) => a.x);
+  const packedW = Math.max(...xs) - Math.min(...xs) + NODE_W + 2 * FIT_MARGIN;
+  if (packedW * READABLE_SCALE <= room.w) return null;
+  const column = new Map();
+  let y = 0;
+  let indent = 0;
+  for (const c of clusters) {
+    const cards = c.center ? [c.center, ...c.members] : c.members;
+    cards.forEach((g, i) => {
+      const dx = c.center && c.members.length ? (i === 0 ? -COLUMN_INDENT : COLUMN_INDENT) : 0;
+      if (dx) indent = COLUMN_INDENT;
+      column.set(g.id, { x: dx, y: y + i * COLUMN_PITCH });
+    });
+    y += cards.length * COLUMN_PITCH - (COLUMN_PITCH - GOAL_H) + COLUMN_GAP;
+  }
+  const w = NODE_W + 2 * indent + 2 * FIT_MARGIN;
+  const h = y - COLUMN_GAP + 2 * FIT_MARGIN;
+  if (w * COLUMN_SCALE > room.w || h * COLUMN_SCALE > room.h) return null;
+  return { anchor: column, height: Math.ceil(h * COLUMN_SCALE) };
 }
 
 /** Walks parent links up to the top goal (an org goal, or a loose product goal). */
@@ -460,7 +507,9 @@ export function buildHubGraph(features, { hubs, byFeature, empty, quietBroad = f
   const sideHubs = new Set([...sideOf.values()].flat());
   const byUse = (a, b) => (a === empty?.id) - (b === empty?.id)
     || usage.get(b) - usage.get(a) || hubById.get(a).name.localeCompare(hubById.get(b).name);
-  const placed = [...usage.keys()].filter((id) => !sideHubs.has(id)).sort(byUse);
+  // Placed by size, "linked to none" counted like the rest (B35).
+  const placed = [...usage.keys()].filter((id) => !sideHubs.has(id))
+    .sort((a, b) => usage.get(b) - usage.get(a) || byUse(a, b));
 
   // One block per hub (the hub, then the features it places alone) and one
   // per set of two or more hubs that place the same features.
@@ -485,6 +534,10 @@ export function buildHubGraph(features, { hubs, byFeature, empty, quietBroad = f
   // Each hub goes as near as it can to the hubs it shares features with, and
   // each shared block as near as it can to the mean of its hubs, once they
   // are all down. One free half cell around every block keeps groups apart.
+  // A hub that shares no feature with another ("linked to none", always)
+  // has nothing pulling it: it goes where it widens the spread of the hubs
+  // least, then as near the biggest hub as it can, under its own cards when
+  // that is nearer, so a grouped graph can open with it in view (B35).
   const together = new Map(placed.map((id) => [id, new Map()]));
   for (const mean of meanOf.values()) {
     for (const a of mean) for (const b of mean) {
@@ -500,36 +553,49 @@ export function buildHubGraph(features, { hubs, byFeature, empty, quietBroad = f
   // Extent of what is placed so far, in grid units, and how big it would
   // look in a wide frame: growing it costs as much as straying from `want`.
   let box = null;
+  let hubBox = null; // the hubs placed so far, in grid units
   const extent = (bx) => Math.max((bx.x1 - bx.x0) * UNIT_W / Math.sqrt(ASPECT), (bx.y1 - bx.y0) * UNIT_H * Math.sqrt(ASPECT));
-  const put = (b, want) => {
+  const grow = (bx, x0, y0, x1, y1) => ({ x0: Math.min(bx.x0, x0), y0: Math.min(bx.y0, y0), x1: Math.max(bx.x1, x1), y1: Math.max(bx.y1, y1) });
+  // A block's hub, in half cells from the block's top: on top of its cards, or under them.
+  const hubRow = (b, under) => (under ? b.rows * 2 + 1 : 1);
+  const put = (b, want, loner = false) => {
     const fw = b.cols * 2;
     const fh = b.rows * 2 + (b.hub ? 2 : 0);
-    const cx = Math.round(want.x / UNIT_W - fw / 2);
-    const cy = Math.round(want.y / UNIT_H - fh / 2);
     const now = box ? extent(box) : 0;
     let best = null;
-    for (let r = 4; !best; r *= 2) {
-      for (let gx = cx - r; gx <= cx + r; gx++) {
-        for (let gy = cy - r; gy <= cy + r; gy++) {
-          // Distance in screen terms: sideways is cheaper, the frame is wide.
-          const dx = (gx - cx) * UNIT_W / Math.sqrt(ASPECT);
-          const dy = (gy - cy) * UNIT_H * Math.sqrt(ASPECT);
-          const grown = box
-            ? extent({ x0: Math.min(box.x0, gx), y0: Math.min(box.y0, gy), x1: Math.max(box.x1, gx + fw), y1: Math.max(box.y1, gy + fh) }) - now
-            : 0;
-          const cost = dx * dx + dy * dy + GROW_COST * grown * grown;
-          if (best && cost >= best.cost) continue;
-          if (free(gx, gy, fw, fh)) best = { gx, gy, cost };
+    // A loner looks across all that is placed, not only near `want`.
+    for (let r = 4; !best || (loner && r <= Math.max(box.x1 - box.x0, box.y1 - box.y0)); r *= 2) {
+      for (const under of loner ? [false, true] : [false]) {
+        // `want` is for the block's middle; for a loner, for its hub.
+        const cx = Math.round(want.x / UNIT_W - fw / 2);
+        const cy = Math.round(want.y / UNIT_H - (loner ? hubRow(b, under) : fh / 2));
+        for (let gx = cx - r; gx <= cx + r; gx++) {
+          for (let gy = cy - r; gy <= cy + r; gy++) {
+            // Distance in screen terms: sideways is cheaper, the frame is wide.
+            const dx = (gx - cx) * UNIT_W / Math.sqrt(ASPECT);
+            const dy = (gy - cy) * UNIT_H * Math.sqrt(ASPECT);
+            const grown = box ? extent(grow(box, gx, gy, gx + fw, gy + fh)) - now : 0;
+            const cost = dx * dx + dy * dy + GROW_COST * grown * grown;
+            const hx = gx + fw / 2;
+            const hy = gy + hubRow(b, under);
+            const spread = loner ? extent(grow(hubBox, hx, hy, hx, hy)) - extent(hubBox) : 0;
+            if (best && (spread > best.spread || (spread === best.spread && cost >= best.cost))) continue;
+            if (free(gx, gy, fw, fh)) best = { gx, gy, cost, spread, under };
+          }
         }
       }
     }
-    box = box
-      ? { x0: Math.min(box.x0, best.gx), y0: Math.min(box.y0, best.gy), x1: Math.max(box.x1, best.gx + fw), y1: Math.max(box.y1, best.gy + fh) }
-      : { x0: best.gx, y0: best.gy, x1: best.gx + fw, y1: best.gy + fh };
+    box = box ? grow(box, best.gx, best.gy, best.gx + fw, best.gy + fh) : { x0: best.gx, y0: best.gy, x1: best.gx + fw, y1: best.gy + fh };
     for (let x = best.gx; x < best.gx + fw; x++) for (let y = best.gy; y < best.gy + fh; y++) taken.add(`${x},${y}`);
     b.x = (best.gx + fw / 2) * UNIT_W;
     b.y = (best.gy + fh / 2) * UNIT_H;
-    if (b.hub) hubPos.set(b.hub, { x: b.x, y: b.y - b.h / 2 + CELL_H / 2 });
+    b.under = best.under;
+    if (b.hub) {
+      const hx = best.gx + fw / 2;
+      const hy = best.gy + hubRow(b, b.under);
+      hubPos.set(b.hub, { x: hx * UNIT_W, y: hy * UNIT_H });
+      hubBox = hubBox ? grow(hubBox, hx, hy, hx, hy) : { x0: hx, y0: hy, x1: hx, y1: hy };
+    }
   };
   const meanAt = (ids, weight = () => 1) => {
     let x = 0;
@@ -547,23 +613,26 @@ export function buildHubGraph(features, { hubs, byFeature, empty, quietBroad = f
   const sharedBlocks = list.filter((b) => !b.hub);
   for (const id of placed) {
     const near = together.get(id);
-    put(blocks.get(id), meanAt([...near.keys()], (h) => near.get(h)));
+    const loner = !near.size && hubPos.size > 0;
+    put(blocks.get(id), loner ? hubPos.get(placed[0]) : meanAt([...near.keys()], (h) => near.get(h)), loner);
     for (const b of sharedBlocks) {
       if (b.x == null && b.hubs.every((h) => hubPos.has(h))) put(b, meanAt(b.hubs));
     }
   }
 
-  // Blocks -> anchors: the hub on top, then a row-major grid, last row centred.
+  // Blocks -> anchors: the hub, then a row-major grid, last row centred and
+  // furthest from the hub (at the bottom, or the top when the hub is under).
   const anchor = new Map();
   for (const b of list) {
     const top = b.y - b.h / 2;
-    if (b.hub) anchor.set(b.hub, { x: b.x, y: top + CELL_H / 2 });
-    const gridTop = top + (b.hub ? CELL_H : 0);
+    if (b.hub) anchor.set(b.hub, hubPos.get(b.hub));
+    const gridTop = top + (b.hub && !b.under ? CELL_H : 0);
     b.items.forEach((id, i) => {
       const row = Math.floor(i / b.cols);
       const inRow = row === b.rows - 1 ? b.items.length - row * b.cols : b.cols;
       const col = i % b.cols;
-      anchor.set(id, { x: b.x + (col - (inRow - 1) / 2) * CELL_W, y: gridTop + (row + 0.5) * CELL_H });
+      const at = b.under ? b.rows - 1 - row : row;
+      anchor.set(id, { x: b.x + (col - (inRow - 1) / 2) * CELL_W, y: gridTop + (at + 0.5) * CELL_H });
     });
   }
 

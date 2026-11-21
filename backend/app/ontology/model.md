@@ -223,7 +223,11 @@ Seventeen tools — the six `question` keys, plus `tech_search` (navigation: eve
 else takes a slug it returns) and `propose_binding` (a hand-off that persists nothing),
 and nine that answer inventory questions: `products`, `capability_inventory`,
 `check_idea`, `product_score`, `capability`, `feature_why`, `journeys`,
-`ready_features` and `recheck`.
+`ready_features` and `recheck`. All seventeen are always listed: a client lists tools
+once, when it connects, and is never told the catalog filled. With no technology
+recorded none of the technology ones (the `question` keys, `tech_search` and
+`propose_binding`) errors: each says it found nothing and points to where a technology or
+stack gets recorded or looked up.
 Four resources: `metis://ontology/model` and `metis://policy/adoptions` serve the same
 files as `GET /api/ontology/model` and `/api/ontology/adoptions`; `metis://tech/{slug}`
 and `metis://stacks/{product}` are templated. Three prompts.
@@ -314,6 +318,13 @@ linkable. Only `/ontology` earns its own entry, in the Help position.
 
 `/stacks` carries the only mutation in the buy plane: binding a slot. It is a button a
 human presses, and nothing else in the system presses it.
+Stacks, slots, concerns and constraints have no form: an editor records them through the
+API (`POST /api/stacks`, `/api/stacks/instantiate`); seed files never carry them.
+A technology's versions, vendor, links to other technologies and the group's stance have
+no form either: an editor records them through the API (`POST /api/tech/{slug}/versions`,
+`/api/tech/vendors`, `/api/tech/edges`, `PUT /api/tech/{slug}/adoption`); seed files never
+carry them. Technologies themselves, and the capabilities they satisfy, come in seed
+files. The one technology write with a screen is an encounter, on `/tech/[slug]`.
 
 ## Not built
 

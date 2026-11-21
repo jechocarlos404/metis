@@ -1,6 +1,7 @@
 import uuid
+from typing import Annotated
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from app.models.enums import CapabilityMaturity
 from app.schemas.common import Stamped
@@ -101,6 +102,44 @@ class IdeaFeature(BaseModel):
 
 class CoverageRequest(BaseModel):
     features: list[IdeaFeature] = Field(min_length=1)
+
+
+#: The coverage read's body is open to viewers and the MCP token, and its
+#: near-name search costs time for every unmatched name and every character of
+#: it (2 to 4 ms a name over 232 capabilities). So the body is bounded, well
+#: above real use. Real use, 2026-11: the biggest product has 52 features
+#: naming 110 capabilities, and a seed file's dry run sends every capability
+#: it adds as one feature (a whole instance has 232). The longest capability
+#: name is 33 characters, the longest feature name 111. At these limits the
+#: worst body costs about 1 s, where a 62 KB one cost 5 s. Stored rows scored
+#: in-process (product_coverage, journeys) go through CoverageRequest, unbounded.
+MAX_IDEA_FEATURES = 100
+MAX_IDEA_NAMES = 300  # capability names across the whole request
+MAX_CAPABILITY_NAME = 100
+MAX_NAME = 300  # a feature's name, and any other name a read looks up
+
+
+class IdeaFeatureBody(IdeaFeature):
+    name: str = Field(max_length=MAX_NAME)
+    capabilities: list[Annotated[str, Field(max_length=MAX_CAPABILITY_NAME)]] = Field(
+        min_length=1, max_length=MAX_IDEA_NAMES
+    )
+
+
+class CoverageBody(CoverageRequest):
+    """The coverage read as a caller sends it, bounded (see MAX_IDEA_NAMES)."""
+
+    features: list[IdeaFeatureBody] = Field(min_length=1, max_length=MAX_IDEA_FEATURES)
+
+    @model_validator(mode="after")
+    def _names_in_all(self):
+        named = sum(len(f.capabilities) for f in self.features)
+        if named > MAX_IDEA_NAMES:
+            raise ValueError(
+                f"at most {MAX_IDEA_NAMES} capability names per request across all "
+                f"features, got {named}"
+            )
+        return self
 
 
 class CapabilityMatch(BaseModel):

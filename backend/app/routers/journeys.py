@@ -1,18 +1,29 @@
 import uuid
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
+from app.models import Journey
+from app.schemas.capability import MAX_NAME
 from app.schemas.journey import JourneyAnalysis, JourneyCreate, JourneyRead, JourneyUpdate
+from app.services import capabilities as capability_service
 from app.services import journeys as journey_service
 
 router = APIRouter(prefix="/api", tags=["journeys"])
 
 
 @router.get("/journeys", response_model=list[JourneyRead])
-async def list_journeys(feature_id: uuid.UUID | None = None, session: AsyncSession = Depends(get_db)):
-    """All journeys, or those passing through one feature."""
+async def list_journeys(
+    feature_id: uuid.UUID | None = None,
+    near: str | None = Query(None, max_length=MAX_NAME),
+    session: AsyncSession = Depends(get_db),
+):
+    """All journeys, or those passing through one feature. With `near`, only
+    those whose name is near it (three at most, nearest first): candidates
+    after an exact miss, never a match."""
+    if near is not None:
+        return (await capability_service.near_names(session, Journey, [near]))[near]
     return await journey_service.list_journeys(session, feature_id)
 
 

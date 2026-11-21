@@ -12,6 +12,8 @@ import { Term } from "../shared/Term.jsx";
 const useIsomorphicLayoutEffect = typeof window !== "undefined" ? React.useLayoutEffect : React.useEffect;
 
 const EDGE_KINDS = ["DEPENDS_ON", "BLOCKS", "RELATES_TO"];
+// px above the drawing for the controls, which end 44px down (10 above, 34 tall).
+const CONTROL_STRIP = 46;
 const STATUS_DOT = { pending: "var(--text-secondary)", in_progress: "var(--warn-fg)", done: "var(--ok-fg)" };
 
 // `hubs` (capabilityHubs() or goalHubs() from graph-data.js) groups the
@@ -64,7 +66,7 @@ export function FeatureGraphView({ layout, hubs, selectedId, onSelect, recheckSt
     // The key starts folded; folded or open, it and the zoom buttons are
     // framed around, never drawn over.
     const engine = createForceGraph({
-      frameInsets: () => controlInsets(legendRef.current, toolbarRef.current),
+      frameInsets: () => controlInsets(legendRef.current, toolbarRef.current, svgRef.current),
       svgEl: svgRef.current,
       viewportEl: viewportRef.current,
       nodeSize: { width: NODE_W, height: NODE_H },
@@ -167,7 +169,9 @@ export function FeatureGraphView({ layout, hubs, selectedId, onSelect, recheckSt
   };
 
   return (
-    <div style={{ position: "relative", width: "100%", height: "100%", ...style }}>
+    // The drawing starts under the strip the Key and zoom buttons (and a wide
+    // screen's Group by bar) sit in, so no card is ever drawn under them (C30).
+    <div className="graph-hint-room" style={{ position: "relative", width: "100%", height: "100%", paddingTop: CONTROL_STRIP, boxSizing: "border-box", ...style }}>
       <svg
         ref={svgRef}
         style={{ width: "100%", height: "100%", display: "block", cursor: "grab", touchAction: "none" }}
@@ -391,14 +395,28 @@ export function GraphCaption({ name }) {
  * The px a graph keeps clear of the controls drawn over its canvas when it
  * frames itself (Fit, open, centring a pick): the strip along the top that
  * the folded key, the zoom buttons and a wide screen's Group by bar share;
- * and beside the key when it is open, as it is tall then.
+ * and, with the key open, beside it or under it, whichever leaves more of the
+ * canvas (a tall key: beside; the goals' wide one: under); and the strip along
+ * the bottom the corner chip sits in (the hint, or the caption naming a card
+ * when zoomed out), whenever one is there (C40, C41).
  */
-export function controlInsets(key, toolbar) {
+export function controlInsets(key, toolbar, svg) {
   const GAP = 8;
+  const CHIP_STRIP = 10 + 28 + GAP; // GraphCaption's corner chip: 10 from the edge, one line at text size
   const bottom = (el) => (el ? el.offsetTop + el.offsetHeight + GAP : 0);
-  const out = { top: Math.max(key?.open ? 0 : bottom(key), bottom(toolbar)), right: 0, bottom: 0, left: 0 };
-  if (key?.open) out.left = key.offsetLeft + key.offsetWidth + GAP;
-  return out;
+  // From the drawing's own top: none, once it starts below the controls' strip.
+  const svgTop = svg ? svg.getBoundingClientRect().top - svg.parentElement.getBoundingClientRect().top : 0; // an svg has no offsetTop
+  const w = svg?.clientWidth || 1;
+  const h = svg?.clientHeight || 1;
+  const beside = key?.open ? key.offsetLeft + key.offsetWidth + GAP : 0;
+  const under = key?.open && (w - beside) / w < (h - bottom(key)) / h;
+  const top = Math.max(0, Math.max(key?.open && !under ? 0 : bottom(key), bottom(toolbar)) - svgTop);
+  const host = svg?.parentElement;
+  const hint = host?.querySelector(".graph-hint");
+  const chip = host?.querySelector(".graph-caption") || (hint && getComputedStyle(hint).display !== "none");
+  // From the drawing's own bottom: none where it ends above the chip's strip (.graph-hint-room).
+  const svgBottom = svg ? host.getBoundingClientRect().bottom - svg.getBoundingClientRect().bottom : 0;
+  return { top, right: 0, bottom: chip ? Math.max(0, CHIP_STRIP - svgBottom) : 0, left: key?.open && !under ? beside : 0 };
 }
 
 // A row, so it shares the key's strip along the top and the drawing keeps the

@@ -55,7 +55,7 @@ write to metis from this skill.
 4. **Report** in this order:
    - What we already have, by capability, with the products whose finished
      features realize it (`capability` shows each feature's status) and its
-     maturity (`ga` and `beta` are proven; `alpha` and `planned` are not).
+     maturity (`ga` and `beta` are in use; `alpha` and `planned` are not).
    - What we don't have yet (`only elsewhere`, `not built yet`, `no match`),
      and any near-name candidates, labelled as unconfirmed.
    - A short recommendation: which pieces to reuse from where, which to build.

@@ -40,7 +40,7 @@ export const productOptions = (products) =>
 
 // ---- Shared vocabulary (PRODUCT.md: plain words on screen, raw underneath) ----
 
-/** Capability maturity. "Proven" = beta or stable. */
+/** Capability maturity. "In use" = beta or stable. */
 export const MATURITY = {
   planned: "planned",
   alpha: "alpha",
@@ -125,6 +125,10 @@ export const NEED = {
   none: { label: "not built yet", tone: "neutral", hint: "no finished feature in metis realizes it" },
 };
 
+/** What "in N products" counts, wherever a capability's reuse is shown:
+ *  metis knows which products use a capability, not whether they share its code. */
+export const REUSE_NOTE = "The product count is our products whose features use the capability, whether they share the code or each built it separately.";
+
 /** The NEED key for a capability match or inventory entry (null: no match).
  *  `ours` false covers two cases; external_products tells them apart. */
 export const needKey = (c) => (c?.ours ? "ours" : c?.external_products?.length ? "elsewhere" : "none");
@@ -154,7 +158,7 @@ export const andList = (names) =>
 
 /** One-line headline for a coverage report, the same wording everywhere. */
 export function coverageHeadline(report) {
-  return `We have ${report.existing} of the ${report.needed} capabilities needed · ${report.mature} proven (beta or stable)`;
+  return `We have ${report.existing} of the ${report.needed} capabilities needed · ${report.mature} in use (beta or stable)`;
 }
 
 // ---- A scored product (GET /products/{id}/coverage) ----
@@ -220,9 +224,11 @@ export function plain(dict, value) {
   return dict[value] ?? String(value).replace(/_/g, " ").toLowerCase();
 }
 
-/** The backend's slug rule (services/slugs.py): lowercase kebab. Capability
- *  identity is the slug, so "Route Import" and "route import" are one name. */
-export const slugify = (value) => String(value ?? "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+/** The backend's slug rule (services/slugs.py): lowercase kebab, accents
+ *  folded first. Capability identity is the slug, so "Route Import", "route
+ *  import" and "Café" / "Cafe" are each one name. */
+export const slugify = (value) =>
+  String(value ?? "").normalize("NFKD").replace(/\p{M}/gu, "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
 
 // A guessed capability link (capability_guesses). Never counted until confirmed.
 export const CONFIDENCE = {
@@ -230,3 +236,123 @@ export const CONFIDENCE = {
   medium: { label: "possibly", tone: "warn", hint: "Described somewhere, but not shown." },
   low: { label: "a hunch", tone: "neutral", hint: "Plausible from what kind of product it is, nothing more." },
 };
+
+// ---- What a delete takes or keeps, and what a seed file did ----
+
+/** The rows a product delete takes besides its features (the API's
+ *  /products/{id}/deletes), in plain words: [one, many, name them]. */
+export const TAKEN = {
+  product_decompositions: ["plan document", "plan documents", true],
+  epics: ["epic", "epics", true],
+  stories: ["story", "stories", true],
+  tickets: ["ticket", "tickets", true],
+  delivery_strategies: ["delivery strategy", "delivery strategies", false],
+  tech_stacks: ["technology stack", "technology stacks", true],
+  stack_slots: ["stack slot", "stack slots", true],
+  stack_concern_answers: ["answer to a stack concern", "answers to stack concerns", false],
+  constraint_scopes: ["constraint on it", "constraints on it", false],
+  product_technologies: ["recorded technology use", "recorded technology uses", false],
+  product_bundles: ["capability added by hand", "capabilities added by hand", false],
+  feature_capabilities: ["link to a capability", "links to capabilities", false],
+  capability_guesses: ["guess waiting for review", "guesses waiting for review", false],
+  feature_edges: ["link between features", "links between features", false],
+};
+const TAKEN_ORDER = Object.keys(TAKEN);
+export const takenRows = (takes) => (takes ?? []).filter((t) => t.table !== "features")
+  .sort((a, b) => (TAKEN_ORDER.indexOf(a.table) + 1 || 99) - (TAKEN_ORDER.indexOf(b.table) + 1 || 99));
+export const takenCounts = (takes) => takenRows(takes).map((t) => {
+  const [one, many] = TAKEN[t.table] ?? [t.label.toLowerCase(), t.label.toLowerCase()];
+  return count(t.count, one, many);
+});
+/** "1 plan document (version 1)", "2 epics (Search, Sync)": named when few. */
+export const takenWords = (takes) => takenRows(takes).map((t, i) => {
+  const said = takenCounts(takes)[i];
+  return TAKEN[t.table]?.[2] && t.names.length > 0 && t.count <= 5 ? `${said} (${t.names.join(", ")})` : said;
+});
+
+/** Rows a delete keeps but leaves without the deleted one (the API's
+ *  detaches), by name: "epic Search (Climb)", "2 stack slots: a (S), b (S)".
+ *  The API's table labels are plural, as on /data. */
+export const keptRows = (detaches) => andList(detaches.map((t) => (t.count === 1
+  ? `${t.label.replace(/ies$/, "y").replace(/s$/, "").toLowerCase()} ${t.names[0]}`
+  : `${t.count} ${t.label.toLowerCase()}: ${t.names.join(", ")}`)));
+
+/** A capability's armed delete: the links to it that go. Null when none. */
+export function capabilityDeleteLinks(motivations, guessCount) {
+  if (!(motivations?.length > 0 || guessCount > 0)) return null;
+  return `${[
+    motivations?.length > 0 && `Unlinks ${motivations.length === 1 ? "goal" : "goals"} ${andList(motivations.map((g) => g.display_id))}`,
+    guessCount > 0 && `drops ${count(guessCount, "guess", "guesses")} waiting for review`,
+  ].filter(Boolean).join(" and ").replace(/^d/, "D")}.`;
+}
+
+/** A capability's armed delete: what stays but loses it, epics and stack
+ *  slots that name it and products that added it by hand (B46). Null when none. */
+export function capabilityDeleteKept(detaches) {
+  if (!(detaches?.length > 0)) return null;
+  const kept = detaches.filter((t) => t.table !== "product_bundles");
+  const byHand = detaches.find((t) => t.table === "product_bundles");
+  return `${[
+    kept.length > 0 && `Clears it from ${keptRows(kept)}`,
+    byHand && `takes it off the capabilities ${andList(byHand.names)} added by hand`,
+  ].filter(Boolean).join(" and ").replace(/^t/, "T")}.`;
+}
+
+/** A feature's armed delete: stories and journey steps that name it, and
+ *  the links to other features it drops (B46). Null when none. */
+export function featureDeleteKept(detaches) {
+  if (!(detaches?.length > 0)) return null;
+  const kept = detaches.filter((t) => t.table !== "feature_edges");
+  const links = detaches.find((t) => t.table === "feature_edges");
+  return `Deleting it ${[
+    kept.length > 0 && `clears it from ${keptRows(kept)}`,
+    links && `drops ${links.count === 1 ? "the link" : `${links.count} links:`} ${andList(links.names)}`,
+  ].filter(Boolean).join(" and ")}.`;
+}
+
+/** A seed file's collections, as [one, many] (the importer's counts keys;
+ *  the raw key stays one hover away). The in-app importer should read its
+ *  KINDS from here too. */
+export const SEED_KINDS = {
+  goals: ["goal", "goals"],
+  capabilities: ["capability", "capabilities"],
+  motivations: ["goal link", "goal links"],
+  features: ["feature", "features"],
+  edges: ["link between features", "links between features"],
+  products: ["product", "products"],
+  bundles: ["capability added by hand", "capabilities added by hand"],
+  decompositions: ["plan document", "plan documents"],
+  technologies: ["technology", "technologies"],
+  tech_usage: ["technology in use", "technologies in use"],
+  satisfactions: ["technology link", "technology links"],
+  guesses: ["guess", "guesses"],
+};
+
+/** What an import rejects (or, checked, would reject), in words: "1 link
+ *  between features". Empty when nothing is. */
+export const seedRejected = (counts) => andList(Object.entries(counts || {}).flatMap(([collection, actions]) => {
+  const n = (actions["would reject"] ?? 0) + (actions.rejected ?? 0);
+  return n > 0 && SEED_KINDS[collection] ? [count(n, ...SEED_KINDS[collection])] : [];
+}));
+
+/** An import that adds, links or updates nothing: every row was reused or skipped. */
+const seedChangesNothing = (counts) =>
+  Object.values(counts || {}).every((actions) =>
+    Object.entries(actions).every(([action, n]) => n === 0 || action === "reused" || action === "skipped"));
+
+/** The title over a check's or an import's result. */
+export function seedImportTitle(result) {
+  const rejected = seedRejected(result.counts);
+  if (rejected) {
+    return result.dryRun
+      ? `Check found a problem: the import would reject ${rejected}, named below. The rest is what it would do:`
+      : `Imported, except ${rejected}, rejected as named below`;
+  }
+  if (seedChangesNothing(result.counts)) {
+    return `${result.dryRun ? "Check passed. " : ""}Nothing new: everything in this file ${result.dryRun ? "is" : "was"} already in metis.`;
+  }
+  return result.dryRun ? "Check passed. This is what the import would do:" : "Imported";
+}
+
+/** The title over a removal's result. */
+export const seedRemovalTitle = (result) => (result.dryRun ? "Preview: this is what would be removed" : "Removed");

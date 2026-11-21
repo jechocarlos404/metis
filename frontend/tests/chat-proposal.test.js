@@ -4,7 +4,7 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { changeLabel, display, fieldRows, objects, stepLabel, stepRows } from "../src/components/chat/proposal-words.js";
+import { changeLabel, display, fieldRows, objects, stepLabel, stepProposals, stepRows } from "../src/components/chat/proposal-words.js";
 
 const GOAL_ID = "bc55de64-3d5a-4934-b404-b0945c6e2492";
 
@@ -95,5 +95,28 @@ describe("what it did", () => {
     const doc = { epics: [{ title: "E" }], summary: "s" };
     const rows = stepRows({ product: "Atlas", document: doc, features: [{ name: "a" }, { name: "b" }], targets: ["x", "y"] }, null);
     assert.deepEqual(rows.map((r) => [r.key, r.text]), [["product", "Atlas"], ["document", "2 fields"], ["features", "2 items"], ["targets", "x, y"]]);
+  });
+});
+
+describe("what it did (A53)", () => {
+  const read = { name: "get_capability", status: "finished" };
+  const link = { name: "link_goal_capability", status: "proposed" };
+  const create = { name: "create_capability", status: "proposed" };
+  const refused = { name: "create_capability", status: "failed" };
+
+  test("a proposed step reads its proposal's current state, in order", () => {
+    const proposals = [{ tool_name: "link_goal_capability", status: "applied" }, { tool_name: "create_capability", status: "pending" }];
+    assert.deepEqual(stepProposals([read, link, refused, create], proposals).map((p) => p?.status ?? null), [null, "applied", null, "pending"]);
+  });
+
+  test("a pairing that doesn't line up shows no state rather than a wrong one", () => {
+    assert.deepEqual(stepProposals([link], [{ tool_name: "create_capability", status: "applied" }]), [null]);
+    assert.deepEqual(stepProposals([link], []), [null]);
+    assert.deepEqual(stepProposals([link]), [null]);
+  });
+
+  test("the step keeps no 'proposed' word of its own", () => {
+    const src = readFileSync(new URL("../src/components/islands/ChatIsland.jsx", import.meta.url), "utf8");
+    assert.doesNotMatch(src, /proposed: "proposed"/);
   });
 });

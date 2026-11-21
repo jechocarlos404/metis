@@ -42,10 +42,10 @@ anything, and never say an idea was saved.
    ```
 
    Keep the first line (how many distinct capabilities are ours, how many
-   proven) and the last line, which starts with `Open:`.
+   in use) and the last line, which starts with `Open:`.
 
 5. **Rank** by how much already exists: the share of distinct capabilities
-   that are ours, then how many of those are proven (`beta` or `ga`). An idea
+   that are ours, then how many of those are in use (`beta` or `ga`). An idea
    whose missing capabilities have near-name candidates is not further along:
    a candidate is unconfirmed until a human confirms it.
 

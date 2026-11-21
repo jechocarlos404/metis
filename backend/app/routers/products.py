@@ -1,12 +1,14 @@
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth import Principal, current_user
+from app.auth.deps import author
 from app.db import get_db
 from app.models import Feature, Goal, Product
-from app.schemas.capability import CapabilityRead, ProductCoverage
+from app.schemas.capability import MAX_NAME, CapabilityRead, ProductCoverage
 from app.schemas.product import (
     DecompositionCreate,
     DecompositionRead,
@@ -16,7 +18,7 @@ from app.schemas.product import (
     ProductRead,
     ProductUpdate,
 )
-from app.services import capabilities as capability_service
+from app.services import admin_cascade, capabilities as capability_service
 from app.services import features as feature_service
 from app.services.slugs import unique_slug
 from app.services import decomposition as decomposition_service
@@ -25,7 +27,13 @@ router = APIRouter(prefix="/api", tags=["products"])
 
 
 @router.get("/products", response_model=list[ProductRead])
-async def list_products(session: AsyncSession = Depends(get_db)):
+async def list_products(
+    near: str | None = Query(None, max_length=MAX_NAME), session: AsyncSession = Depends(get_db)
+):
+    """Every product. With `near`, only those whose name is near it (three at
+    most, nearest first): candidates after an exact miss, never a match."""
+    if near is not None:
+        return (await capability_service.near_names(session, Product, [near]))[near]
     return (await session.scalars(select(Product).order_by(Product.seq))).all()
 
 
@@ -77,6 +85,23 @@ async def update_product(
             session, product.id, getattr(request.app.state, "graph", None)
         )
     return product
+
+
+@router.get("/products/{product_id}/deletes", response_model=list[admin_cascade.NamedCount])
+async def deletes(product_id: uuid.UUID, session: AsyncSession = Depends(get_db)):
+    """What deleting it deletes with it (features, plan, stack, links), named,
+    so the delete can say so before anyone confirms."""
+    await decomposition_service.get_product(session, product_id)
+    return await admin_cascade.deletes(session, "products", product_id)
+
+
+@router.get("/products/{product_id}/detaches", response_model=list[admin_cascade.NamedCount])
+async def detaches(product_id: uuid.UUID, session: AsyncSession = Depends(get_db)):
+    """What deleting it keeps but unlinks (journey steps, other products'
+    stories, records of who used a technology for it), named, so the delete
+    says so before anyone confirms."""
+    await decomposition_service.get_product(session, product_id)
+    return await admin_cascade.closure_detaches(session, "products", product_id)
 
 
 @router.delete("/products/{product_id}", status_code=204)
@@ -159,9 +184,10 @@ async def create_decomposition(
     product_id: uuid.UUID,
     data: DecompositionCreate,
     session: AsyncSession = Depends(get_db),
+    principal: Principal = Depends(current_user),
 ):
     return await decomposition_service.create_prd_draft(
-        session, product_id, data.document, data.created_by
+        session, product_id, data.document, author(principal, data.created_by)
     )
 
 

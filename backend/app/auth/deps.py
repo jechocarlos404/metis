@@ -87,8 +87,6 @@ _SCREENS = tuple(
     (re.compile(pattern), screen)
     for pattern, screen in (
         (rf"/api/stacks/slots/{_ID}/bind", "/stacks?slot={id}"),
-        (r"/api/stacks(/.*)?", "/stacks"),
-        (r"/api/(constraints|concerns)(/.*)?", "/stacks"),
         # The seed importer stamps this; seed files are loaded in Settings.
         (r"/api/products/[^/]+/seeded", "/settings#seed-files"),
         (rf"/api/products/{_ID}(/.*)?", "/products?product={id}"),
@@ -104,14 +102,60 @@ _SCREENS = tuple(
         # Guesses arrive in seed files and are confirmed where they show.
         (r"/api/guesses", "/settings#seed-files"),
         (r"/api/guesses/.*", "/features"),
-        (r"/api/tech/(vendors|edges|satisfactions|encounters|versions)(/.*)?", "/tech"),
-        (r"/api/tech/(?P<id>[a-z0-9-]+)(/.*)?", "/tech/{id}"),
-        (r"/api/tech", "/tech"),
+        # The one technology write a screen makes; the rest are in _NO_SCREEN.
+        (r"/api/tech/encounters(/.*)?", "/tech"),
         (rf"/api/chat/threads/{_ID}(/.*)?", "/chat/{id}"),
         (r"/api/chat(/.*)?", "/chat"),
         (r"/api/users(/.*)?", "/users"),
         (r"/api/admin/llm(/.*)?", "/admin"),
         (r"/api/admin/data(/.*)?", "/data"),
+    )
+)
+
+
+#: Writes no screen makes. Saying so, and how it is done instead, beats naming
+#: a screen that can't do it: `/stacks` only binds a slot, and the owner chose
+#: not to add a form for the rest. `/ontology` describes the buy plane and
+#: names binding as its one screen write. Seed files carry a product's
+#: technology uses, never a stack (`ontology/seed-format.md`). Of the
+#: technology writes only an encounter has a screen (`/tech/{slug}`); a seed
+#: file carries technologies and what they satisfy, never versions, vendors,
+#: links between technologies or a stance.
+_NO_SCREEN = tuple(
+    (re.compile(pattern), message, href)
+    for pattern, message, href in (
+        (
+            r"/api/stacks/usage",
+            "No screen records which technologies a product uses: a seed file carries them, "
+            "or a person with editor access records them through metis's API.",
+            "/settings#seed-files",
+        ),
+        (
+            r"/api/stacks(/.*)?",
+            "No screen creates or changes a stack, and seed files don't carry one: "
+            "a person with editor access records it through metis's API.",
+            "/ontology",
+        ),
+        (
+            r"(?:/api/tech/(vendors|edges|versions)(/.*)?|/api/tech/[^/]+/(versions|adoption))",
+            "No screen records a technology's versions, vendor, links to other technologies "
+            "or stance, and seed files don't carry them: "
+            "a person with editor access records them through metis's API.",
+            "/ontology",
+        ),
+        (
+            r"(?:/api/tech(/satisfactions(/.*)?)?|/api/tech/(?!encounters$)[^/]+)",
+            "No screen records a technology or the capabilities it satisfies: "
+            "a seed file carries them, or a person with editor access records them "
+            "through metis's API.",
+            "/settings#seed-files",
+        ),
+        (
+            r"/api/(constraints|concerns)(/.*)?",
+            "No screen records constraints or concerns: "
+            "a person with editor access records them through metis's API.",
+            "/ontology",
+        ),
     )
 )
 
@@ -128,6 +172,9 @@ def human_action(path: str) -> tuple[str, str]:
     next step is where an agent gives up silently."""
     if path.endswith("/bind"):
         return "Binding a slot is a human action.", _screen(path)
+    for pattern, message, href in _NO_SCREEN:
+        if pattern.fullmatch(path):
+            return message, href
     return (
         "This is a human action — every write names a person and takes a rationale.",
         _screen(path),
@@ -154,6 +201,15 @@ def authorize(method: str, principal: Principal, path: str = "") -> None:
         )
     if not principal.has_any("editor", "admin"):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Requires editor or admin role")
+
+
+def author(principal: Principal, claimed: str) -> str:
+    """Who a write is recorded as made by. With auth on, the signed-in person
+    as their token names them, whatever the client sent; with auth off (local
+    dev, tests) the client's value or its default stands."""
+    if principal is DEV_PRINCIPAL:
+        return claimed
+    return principal.username or principal.email or principal.sub
 
 
 async def enforce_rbac(

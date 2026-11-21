@@ -156,9 +156,11 @@ on the Docker frontend against `metis_verify`, a copy of the real database.
   Taskmaster007's Knowledge Graph listed one by one (23 of 26 to retest).
   Tune once the owner has used it.
 - Layer is set on no feature, so the layer dots are gone from the key; journeys are empty.
-- The seed loaders never change a feature that already exists, so links that
-  `metis-fill-gaps` confirms in code must be added on the desktop. Owner to
-  decide whether loaders should add (never remove) confirmed links on reuse.
+- On a feature that already exists, both seed loaders (Settings, Seed files,
+  and `metis-seed-instance`) add the file's confirmed links it lacks and never
+  remove one, so links `metis-fill-gaps` confirms in code arrive on import.
+  The file's stated status, description and unknown-capabilities flag replace
+  the feature's, and each such overwrite is listed in the import result.
 - Every product of ours reads "never imported" and appears under Needs
   attention until its seed file is imported once more.
 

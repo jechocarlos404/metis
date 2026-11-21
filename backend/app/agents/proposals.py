@@ -29,6 +29,8 @@ from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.tools import ToolContext, ToolError, _resolve_capabilities, execute_tool
+from app.auth.deps import DEV_PRINCIPAL
+from app.auth.jwt import Principal
 from app.models import Capability, ChatProposal, Epic, Feature, Goal, Product, Story, Ticket
 from app.services.slugs import slugify
 
@@ -352,7 +354,8 @@ def _outcome(status: str, outcome: str) -> str | None:
     return summarize_result(outcome) if names else None
 
 
-async def approve(sessionmaker, graph, proposal_id: uuid.UUID):
+async def approve(sessionmaker, graph, proposal_id: uuid.UUID, principal: Principal = DEV_PRINCIPAL):
+    """Apply one pending change as `principal`, the person approving it."""
     from app.models import ChatMessage
 
     async with sessionmaker() as session:
@@ -363,7 +366,9 @@ async def approve(sessionmaker, graph, proposal_id: uuid.UUID):
     async with sessionmaker() as session:
         try:
             arguments = await _ready(session, proposal)
-            result = await execute_tool(agent, proposal.tool_name, arguments, ToolContext(session=session, graph=graph))
+            result = await execute_tool(
+                agent, proposal.tool_name, arguments, ToolContext(session=session, graph=graph, principal=principal)
+            )
             status, outcome = "applied", result.result
         except (ToolError, TypeError) as e:
             await session.rollback()
@@ -385,7 +390,7 @@ async def approve(sessionmaker, graph, proposal_id: uuid.UUID):
         return await session.get(ChatProposal, proposal_id)
 
 
-async def approve_all(sessionmaker, graph, message_id: uuid.UUID):
+async def approve_all(sessionmaker, graph, message_id: uuid.UUID, principal: Principal = DEV_PRINCIPAL):
     """Every pending change of one reply, in order, stopping at the first failure."""
     decided = []
     async with sessionmaker() as session:
@@ -395,7 +400,7 @@ async def approve_all(sessionmaker, graph, message_id: uuid.UUID):
             .order_by(ChatProposal.seq)
         )).all()
     for pid in ids:
-        proposal = await approve(sessionmaker, graph, pid)
+        proposal = await approve(sessionmaker, graph, pid, principal)
         decided.append(proposal)
         if proposal.status != "applied":
             break

@@ -13,6 +13,10 @@ RUN if [ -f extra-ca.crt ]; then \
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app ./app
+# Run unprivileged. The app writes no files at runtime (Python skips its
+# bytecode cache when it can't write one), so /app can stay root-owned.
+RUN useradd --system --uid 10001 --no-create-home metis
+USER metis
 
 EXPOSE 8000
 

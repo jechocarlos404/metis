@@ -28,6 +28,9 @@ def make_engine(url: str) -> tuple[AsyncEngine, async_sessionmaker[AsyncSession]
 #: One statement per entry — asyncpg refuses multi-command strings.
 _SLUG_BACKFILL = (
     "alter table {table} add column if not exists slug text",
+    # Not slugify()'s accent fold: only rows from before slugs existed have
+    # none (the column is NOT NULL after this), and a name lookup derives the
+    # folded slug from the name anyway, as for any slug stored before the fold.
     """update {table} set slug = nullif(trim(both '-' from
             lower(regexp_replace(name, '[^a-zA-Z0-9]+', '-', 'g'))), '')
         where slug is null""",

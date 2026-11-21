@@ -73,6 +73,8 @@ const DEFAULTS = {
   // Screen px to keep clear on each side when framing, for the controls drawn
   // over the canvas: {top, right, bottom, left} (graph-data.js frame()).
   frameInsets: () => 0,
+  // Called with a card's id when it is pressed and let go without a drag.
+  onPress: null,
 };
 
 const TICK_MS = 1000 / 60;
@@ -140,6 +142,7 @@ export function createForceGraph(opts) {
   let openPending = null;
 
   let currentTransform = zoomIdentity;
+  let fitted = null; // the view Fit last framed (refit())
 
   // ---------------------------------------------------------------- zoom --
   // Extent from the client box, as every fit here measures: d3's default
@@ -196,6 +199,7 @@ export function createForceGraph(opts) {
         d.fy = null;
       }
       onPinChange && onPinChange(d.id, dragMoved);
+      if (!dragMoved && o.onPress) o.onPress(d.id); // a press, not a drag: free to move the view now
       ensureLoopRunning();
     });
 
@@ -406,7 +410,15 @@ export function createForceGraph(opts) {
   function fitToView(duration = 450) {
     openPending = null; // pressed while settling: the view the graph opens on must not undo it (B40)
     const b = bounds();
-    if (b) frameTo(fitTransform(b, svgEl.clientWidth || 1, svgEl.clientHeight || 1, o.frameInsets(), o.scaleExtent[1]), duration);
+    if (!b) return;
+    fitted = fitTransform(b, svgEl.clientWidth || 1, svgEl.clientHeight || 1, o.frameInsets(), o.scaleExtent[1]);
+    frameTo(fitted, duration);
+  }
+
+  /** Fit again, for the controls' new insets (the key opened or closed), while the view is still Fit's. */
+  function refit() {
+    const t = currentTransform;
+    if (fitted && Math.abs(t.k - fitted.k) < 1e-3 && Math.abs(t.x - fitted.x) < 1 && Math.abs(t.y - fitted.y) < 1) fitToView(300);
   }
 
   /**
@@ -459,9 +471,8 @@ export function createForceGraph(opts) {
   }
 
   /**
-   * Frames a card picked outside the canvas with the cards in `near` (the
-   * ones it lights), so its lines are in view: centred on it when they fit
-   * around it at a readable scale, else all of them fitted (pickTransform()).
+   * Frames a picked card centred, never below the readable scale, with as
+   * many of the cards in `near` (the ones it lights) as fit (pickTransform()).
    * Never closer than scale 1, or the user's zoom when closer. Never
    * mid-drag, so a card pressed on the canvas stays under the pointer. While
    * the graph is still settling, it becomes what opens.
@@ -596,6 +607,7 @@ export function createForceGraph(opts) {
     unregisterEdge,
     update,
     fitToView,
+    refit,
     openView,
     openWhenSettled,
     reveal,

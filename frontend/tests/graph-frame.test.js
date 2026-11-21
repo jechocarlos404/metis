@@ -4,7 +4,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  GOAL_LINES, LABEL_PX, READABLE_SCALE, centreTransform, fitTransform, openTransform, pickTransform, readableUnion, revealTransform, wrapLabel,
+  GOAL_H, GOAL_LINES, LABEL_PX, NODE_W, READABLE_SCALE, buildGoalNetwork, centreTransform, fitTransform, openTransform, pickTransform, readableUnion,
+  revealTransform, wrapLabel,
 } from "../src/components/graph/graph-data.js";
 
 const screen = (t, x) => x * t.k + t.x;
@@ -124,13 +125,15 @@ test("a goal picked from the list is centred with the goals it shares with aroun
   assert.deepEqual(pickTransform(goal, [], 900, 700, { top: 40 }), centreTransform(goal, 1, 900, 700, { top: 40 }));
 });
 
-test("a picked goal whose partners don't fit around it readable is fitted with all of them instead (C39)", () => {
+test("a picked goal whose partners don't fit around it readable stays centred and readable; the far ones stay off screen (A49)", () => {
   const goal = { x0: 0, y0: 0, x1: 148, y1: 72 };
-  // One partner far right: centring on the goal would leave the left half empty.
   const near = [{ x0: 1200, y0: 0, x1: 1348, y1: 72 }, { x0: 300, y0: 300, x1: 448, y1: 372 }];
   const t = pickTransform(goal, near, 670, 418, { top: 46 });
-  for (const n of [goal, ...near]) assert.ok(inside(t, n, 0, 46, 670, 418));
-  assert.ok(t.k < READABLE_SCALE); // too far apart to read here: still all in view
+  assert.equal(t.k, READABLE_SCALE); // as far out as a name still reads, no further
+  assert.equal((screen(t, goal.x0) + screen(t, goal.x1)) / 2, 335);
+  assert.equal((screenY(t, goal.y0) + screenY(t, goal.y1)) / 2, 46 + (418 - 46) / 2);
+  assert.ok(inside(t, goal, 0, 46, 670, 418));
+  assert.ok(!inside(t, near[0], 0, 46, 670, 418)); // the far partner: its line leads out to it
   // Never closer than the cap.
   assert.ok(pickTransform(goal, [{ x0: 160, y0: 0, x1: 308, y1: 72 }], 2000, 2000, 0, 1).k <= 1);
 });
@@ -144,4 +147,54 @@ test("a goal card holds the whole name the first-run network cut (C35)", () => {
     const lines = wrapLabel(name, 19, GOAL_LINES);
     assert.equal(lines.join(" "), name);
   }
+});
+
+test("two small goal trees sit side by side and fit readable, not stacked in one column (C41)", () => {
+  const goals = [
+    { id: "o1", goal_type: "org" }, { id: "p1", goal_type: "product", parent_goal_id: "o1" }, { id: "p2", goal_type: "product", parent_goal_id: "o1" },
+    { id: "o2", goal_type: "org" }, { id: "p3", goal_type: "product", parent_goal_id: "o2" }, { id: "p4", goal_type: "product", parent_goal_id: "o2" },
+  ];
+  const { nodes } = buildGoalNetwork(goals, {});
+  const at = Object.fromEntries(nodes.map((n) => [n.id, n]));
+  assert.equal(at.o1.anchorY, at.o2.anchorY);
+  assert.notEqual(at.o1.anchorX, at.o2.anchorX);
+  const b = {
+    x0: Math.min(...nodes.map((n) => n.anchorX)) - NODE_W / 2, x1: Math.max(...nodes.map((n) => n.anchorX)) + NODE_W / 2,
+    y0: Math.min(...nodes.map((n) => n.anchorY)) - GOAL_H / 2, y1: Math.max(...nodes.map((n) => n.anchorY)) + GOAL_H / 2,
+  };
+  // The 1440 canvas, less the controls' strip and the hint's.
+  assert.ok(fitTransform(b, 882, 756, { top: 46, bottom: 46 }).k >= READABLE_SCALE);
+});
+
+const twoTrees = [
+  { id: "o1", goal_type: "org" }, { id: "p1", goal_type: "product", parent_goal_id: "o1" }, { id: "p2", goal_type: "product", parent_goal_id: "o1" },
+  { id: "o2", goal_type: "org" }, { id: "p3", goal_type: "product", parent_goal_id: "o2" }, { id: "p4", goal_type: "product", parent_goal_id: "o2" },
+];
+// Fit's view of anchors: the cards plus the engine's 40-unit margin.
+const fitBounds = (nodes) => ({
+  x0: Math.min(...nodes.map((n) => n.anchorX)) - NODE_W / 2 - 40, x1: Math.max(...nodes.map((n) => n.anchorX)) + NODE_W / 2 + 40,
+  y0: Math.min(...nodes.map((n) => n.anchorY)) - GOAL_H / 2 - 40, y1: Math.max(...nodes.map((n) => n.anchorY)) + GOAL_H / 2 + 40,
+});
+
+test("at 390 the two trees stack in one column, each org goal over its product goals, and the canvas grows to read them (C41)", () => {
+  const side = buildGoalNetwork(twoTrees, {});
+  assert.ok(fitTransform(fitBounds(side.nodes), 292, 472).k < READABLE_SCALE); // side by side: 0.445 measured
+  const { nodes, height } = buildGoalNetwork(twoTrees, {}, { w: 292, h: 650 });
+  const at = Object.fromEntries(nodes.map((n) => [n.id, n]));
+  assert.ok(at.o1.anchorY < at.p1.anchorY && at.p1.anchorY < at.p2.anchorY && at.p2.anchorY < at.o2.anchorY);
+  assert.ok(at.o1.anchorX < at.p1.anchorX && at.p1.anchorX === at.p2.anchorX);
+  assert.ok(height > 0 && height <= 650);
+  assert.ok(fitTransform(fitBounds(nodes), 292, height).k >= READABLE_SCALE);
+});
+
+test("the column is only for a canvas too narrow for the trees side by side, and only when it fits the height", () => {
+  const side = buildGoalNetwork(twoTrees, {});
+  const same = (room) => {
+    const r = buildGoalNetwork(twoTrees, {}, room);
+    assert.equal(r.height, null);
+    assert.deepEqual(r.nodes.map((n) => [n.anchorX, n.anchorY]), side.nodes.map((n) => [n.anchorX, n.anchorY]));
+  };
+  same({ w: 670, h: 500 }); // 768: side by side already reads
+  same({ w: 882, h: 650 }); // 1440
+  same({ w: 292, h: 400 }); // a short phone: the column wouldn't read either, so nothing moves
 });

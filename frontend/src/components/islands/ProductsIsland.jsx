@@ -1,8 +1,8 @@
 import React from "react";
 import { PageHeader } from "../shell/PageHeader.jsx";
-import { Badge, Button, Card, Checkbox, Dialog, Icon, Input, Select, StatusBadge, Tabs, Toast, DeleteConfirm } from "../../ds";
+import { Badge, Button, Card, Checkbox, Dialog, Icon, Input, Select, StatusBadge, Tabs, Toast, DeleteConfirm, tabId } from "../../ds";
 import { api } from "../../lib/api.js";
-import { count, freshness, productOptions, statusLabel } from "../../lib/words.js";
+import { andList, count, freshness, productOptions, statusLabel, takenCounts, takenRows, takenWords } from "../../lib/words.js";
 import { useParamRestore, writeParams } from "../../lib/url-state.js";
 import { exportSeedFile } from "../shared/SeedFiles.jsx";
 import { WhatItDoes } from "../products/WhatItDoes.jsx";
@@ -38,6 +38,7 @@ export default function ProductsIsland({ canWrite = true }) {
   const [ticketDialog, setTicketDialog] = React.useState(null); // null | {mode:'new'|'edit'|'view', ticket?}
   const [productDialog, setProductDialog] = React.useState(null); // null | {mode:'new'} | {mode:'edit'}
   const [confirmingDelete, setConfirmingDelete] = React.useState(false);
+  const [takes, setTakes] = React.useState(undefined); // what a delete takes besides its features: undefined while read, null if unreadable
   const [confirmingTicketDelete, setConfirmingTicketDelete] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
   const currentId = React.useRef(null);
@@ -183,12 +184,20 @@ export default function ProductsIsland({ canWrite = true }) {
     }
   };
 
+  // Read at arm, so the note names what this delete takes now (B47).
+  const armDelete = () => {
+    setConfirmingDelete(true);
+    setTakes(undefined);
+    api(`/products/${productId}/deletes`).then(setTakes).catch(() => setTakes(null));
+  };
+
   const deleteProduct = async () => {
     setSaving(true);
     try {
       await api(`/products/${productId}`, { method: "DELETE" });
       setProductDialog(null);
-      setToast({ tone: "ok", title: `Deleted ${product.name}`, detail: features?.length ? `With its ${count(features.length, "feature")}.` : undefined });
+      const gone = [features?.length && count(features.length, "feature"), ...takenCounts(takes)].filter(Boolean);
+      setToast({ tone: "ok", title: `Deleted ${product.name}`, detail: gone.length ? `With its ${andList(gone)}.` : undefined });
       await loadProducts();
     } catch (e) {
       showError("Delete failed")(e);
@@ -347,8 +356,11 @@ export default function ProductsIsland({ canWrite = true }) {
               ]}
               value={shownTab}
               onChange={changeTab}
+              label="Product view"
+              panelId="product-panel"
             />
 
+            <div id="product-panel" role="tabpanel" aria-labelledby={tabId("product-panel", shownTab)} style={{ minWidth: 0 }}>
             {shownTab === "does" && (
               <WhatItDoes product={product} features={features} score={score} capabilities={capabilities} journeys={journeys}
                 bundles={bundles} canWrite={canWrite} onAddBundle={addBundle} onRemoveBundle={removeBundle} />
@@ -363,6 +375,7 @@ export default function ProductsIsland({ canWrite = true }) {
             ) : (
               <div role="status" style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>Loading the plan…</div>
             ))}
+            </div>
           </div>
         ) : (
           <div style={{ maxWidth: 860, border: "1px dashed var(--border-default)", borderRadius: "var(--radius-md)", padding: 24, display: "flex", flexDirection: "column", gap: 12, alignItems: "flex-start", color: "var(--text-secondary)", fontSize: "var(--text-sm)" }}>
@@ -423,8 +436,8 @@ export default function ProductsIsland({ canWrite = true }) {
         footer={
           <>
             {productDialog?.mode === "edit" && (
-              <DeleteConfirm armed={confirmingDelete} onArm={() => setConfirmingDelete(true)} onCancel={() => setConfirmingDelete(false)} onConfirm={deleteProduct}
-                disabled={saving || features == null} label="Delete" confirmLabel={"Delete product"} style={{ marginRight: "auto" }} />
+              <DeleteConfirm armed={confirmingDelete} onArm={armDelete} onCancel={() => setConfirmingDelete(false)} onConfirm={deleteProduct}
+                disabled={saving || features == null || (confirmingDelete && takes === undefined)} label="Delete" confirmLabel={"Delete product"} style={{ marginRight: "auto" }} />
             )}
             {/* While a delete is armed, Keep is the one way back: Cancel would do the same, and Save is another act. */}
             {!confirmingDelete && <>
@@ -436,10 +449,10 @@ export default function ProductsIsland({ canWrite = true }) {
           </>
         }
       >
-        {productDialog?.mode === "edit" && confirmingDelete && <DeleteWhat product={product} features={features ?? []} />}
+        {productDialog?.mode === "edit" && confirmingDelete && <DeleteWhat product={product} features={features ?? []} takes={takes} />}
         {productDialog && (
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            <Input label="Name" value={productDialog.name} onChange={(e) => setProductDialog({ ...productDialog, name: e.target.value })} placeholder="PM tracker export" />
+            <Input label="Name" value={productDialog.name} onChange={(e) => setProductDialog({ ...productDialog, name: e.target.value })} placeholder="e.g. Trail planner" />
             <Input label="Summary" value={productDialog.summary} onChange={(e) => setProductDialog({ ...productDialog, summary: e.target.value })} />
             {!productDialog.external && (
               <Select label="Goal" value={productDialog.goalId} onChange={(e) => setProductDialog({ ...productDialog, goalId: e.target.value })}
@@ -461,9 +474,31 @@ export default function ProductsIsland({ canWrite = true }) {
   );
 }
 
+// What a product delete keeps but unlinks (the API's detaches), in plain
+// words: [one, many, what happens to one, to many].
+const KEPT = {
+  journey_steps: ["journey step", "journey steps", "stays as a gap in its journey", "stay as gaps in their journeys"],
+  stories: ["story in another product's plan", "stories in other products' plans", "loses its feature", "lose their feature"],
+  encounters: ["record of a technology used on it", "records of technologies used on it", "loses its product", "lose their product"],
+  tickets: ["ticket in another product", "tickets in other products", "loses its story", "lose their story"],
+  product_technologies: ["technology use recorded elsewhere", "technology uses recorded elsewhere", "loses its stack slot", "lose their stack slot"],
+  stack_concern_answers: ["answer to a stack concern", "answers to stack concerns", "loses its slot", "lose their slot"],
+};
+const KEPT_ORDER = Object.keys(KEPT);
+// "1 journey step stays as a gap in its journey: Write a note (A ride)." Named when few.
+const keptSentence = (t) => {
+  const [one, many, does, do_] = KEPT[t.table] ?? [t.label.toLowerCase(), t.label.toLowerCase(), "is kept, unlinked", "are kept, unlinked"];
+  const said = `${count(t.count, one, many)} ${t.count === 1 ? does : do_}`;
+  return t.names.length > 0 && t.count <= 5 ? `${said}: ${t.names.join(", ")}.` : `${said}.`;
+};
+
 // What deleting a product takes with it. Its features go too: left without a
-// product they would count as ours.
-function DeleteWhat({ product, features }) {
+// product they would count as ours. What only pointed at it stays, unlinked.
+function DeleteWhat({ product, features, takes }) {
+  const [kept, setKept] = React.useState(undefined);
+  React.useEffect(() => {
+    api(`/products/${product.id}/detaches`).then(setKept).catch(() => setKept(null));
+  }, [product.id]);
   return (
     <div role="note" style={{ marginBottom: 14, padding: 12, border: "1px solid var(--border-default)", borderRadius: "var(--radius-sm)", display: "flex", flexDirection: "column", gap: 8, fontSize: "var(--text-sm)", color: "var(--text-body)" }}>
       <div>
@@ -476,7 +511,14 @@ function DeleteWhat({ product, features }) {
           {features.map((f) => <li key={f.id}>{f.name}</li>)}
         </ul>
       )}
-      <div style={{ color: "var(--text-secondary)" }}>Anything kept only for it, such as its plan or technology stack, goes too. Capabilities and goals stay.</div>
+      <div style={{ color: "var(--text-secondary)" }}>
+        {takes === undefined ? "Reading what else goes with it…"
+          : takes === null ? "Anything kept only for it, such as its plan or technology stack, goes too."
+          : takenRows(takes).length ? `It also deletes ${andList(takenWords(takes))}.`
+          : "Nothing else goes with it."}
+        {" "}Capabilities and goals stay.
+      </div>
+      {kept && [...kept].sort((a, b) => (KEPT_ORDER.indexOf(a.table) + 1 || 99) - (KEPT_ORDER.indexOf(b.table) + 1 || 99)).map((t) => <div key={t.table} style={{ color: "var(--text-secondary)" }}>{keptSentence(t)}</div>)}
     </div>
   );
 }

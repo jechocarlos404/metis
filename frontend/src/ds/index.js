@@ -16,6 +16,6 @@ export { STATUS_TONE, StatusBadge } from "./pipeline/StatusBadge.jsx";
 export { TicketCard } from "./pipeline/TicketCard.jsx";
 export { Card } from "./surfaces/Card.jsx";
 export { Dialog } from "./surfaces/Dialog.jsx";
-export { Tabs } from "./surfaces/Tabs.jsx";
+export { Tabs, tabId } from "./surfaces/Tabs.jsx";
 export { Icon } from "./Icons.jsx";
 export { DeleteConfirm } from "./forms/DeleteConfirm.jsx";

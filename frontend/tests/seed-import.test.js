@@ -6,9 +6,9 @@ import assert from "node:assert/strict";
 import { POST, validateSeed } from "../src/pages/api/seed/import.js";
 import { POST as unseedPOST } from "../src/pages/api/seed/unseed.js";
 import { GET as exportGET } from "../src/pages/api/seed/export.js";
+import { slugify } from "../src/lib/words.js";
 
 const HOST = "http://metis.test";
-const slugify = (value) => value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
 
 /** Just enough of the metis API for the importer. Every request is recorded. */
 class FakeMetis {
@@ -26,6 +26,8 @@ class FakeMetis {
     this.guesses = [];
     // 403 plays an account that may not read guesses (a viewer, an MCP token).
     this.guessesStatus = 200;
+    // A route made to answer otherwise: "GET /api/tech" -> [503, body].
+    this.failing = new Map();
     this.requests = [];
     // Capabilities someone else creates after the importer read the list.
     this.racing = [];
@@ -53,6 +55,7 @@ class FakeMetis {
 
   handle(method, path, body) {
     const route = `${method} ${path.split("?")[0]}`;
+    if (this.failing.has(route)) return this.failing.get(route);
     let m;
     if (route === "GET /api/goals") return [200, this.goals];
     if (route === "GET /api/capabilities") return [200, this.capabilities];
@@ -71,6 +74,9 @@ class FakeMetis {
       return [201, row];
     }
     if (route === "POST /api/capabilities/coverage") {
+      // The backend's bounds: 300 names a request, each at most 100 long.
+      const asked = body.features.flatMap((f) => f.capabilities);
+      if (asked.length > 300 || asked.some((name) => name.length > 100)) return [422, { detail: "too many or too long" }];
       const words = (name) => new Set(name.toLowerCase().split(/\W+/).filter(Boolean));
       const needs = body.features[0].capabilities.map((name) => ({
         name,
@@ -332,6 +338,15 @@ describe("capability identity is the slug", () => {
     assert.equal(metis.capabilities.length, 1);
   });
 
+  test("an accented capability, whose slug predates accent folding, is found by its name", async () => {
+    use(existing({ capability: { name: "Résumé Parsing", slug: "r-sum-parsing" } }));
+    for (const name of ["Résumé Parsing", "Resume Parsing"]) {
+      const { body } = await importSeed(seed({ capabilities: [{ ref: "c-search", name }] }), { dryRun: false });
+      assert.deepEqual(body.counts.capabilities, { reused: 1 }, name);
+    }
+    assert.equal(metis.capabilities.length, 1);
+  });
+
   test("an explicit slug no row has falls back to the name", async () => {
     use(existing({ capability: { name: "Authentication" } }));
     const doc = seed({ capabilities: [{ ref: "c-search", name: "Authentication", slug: "auth" }] });
@@ -435,6 +450,41 @@ describe("a product's own seed is the authority on its features", () => {
   });
 });
 
+describe("a file that adds more capabilities than one lookup takes", () => {
+  const LONG = `Reads ${"very ".repeat(25)}long names`;
+  const many = (n) => seed({
+    capabilities: [
+      ...Array.from({ length: n }, (_, i) => ({ ref: `c${i}`, name: `Probe ${i} search` })),
+      { ref: "c-long", name: LONG },
+    ],
+    features: [{ ref: "f", product_ref: "p", name: PLAN, capability_refs: ["c0", "c-long"] }],
+  });
+
+  test("asks in chunks of 300, and every new name gets its nearest names", async () => {
+    use(new FakeMetis({ capabilities: [{ name: "Keyword search" }] }));
+    const { status, body } = await importSeed(many(650));
+    assert.equal(status, 200);
+    const lookups = metis.requests.filter((r) => r.path === "/api/capabilities/coverage");
+    assert.deepEqual(lookups.map((r) => r.body.features[0].capabilities.length), [300, 300, 50]);
+    assert.deepEqual(body.warnings, []);
+    for (const i of [0, 299, 300, 649]) {
+      assert.ok(body.notes.includes(`new capability "Probe ${i} search"; nearest existing: "Keyword search"`), `Probe ${i}`);
+    }
+    assert.ok(body.notes.includes(`new capability ${JSON.stringify(LONG)}; not looked up for nearest names (over 100 characters)`));
+  });
+
+  test("a lookup that fails is said, with the names it was for", async () => {
+    use(new FakeMetis({ capabilities: [{ name: "Keyword search" }] }));
+    metis.failing.set("POST /api/capabilities/coverage", [503, { detail: "upstream down" }]);
+    const { status, body } = await importSeed(many(2));
+    assert.equal(status, 200);
+    assert.deepEqual(body.warnings, [
+      `couldn't look up the nearest existing names for 2 new capabilities ("Probe 0 search" to "Probe 1 search"): the lookup returned 503: {"detail":"upstream down"}`,
+    ]);
+    assert.ok(body.notes.includes('new capability "Probe 0 search"'));
+  });
+});
+
 describe("dry run and re-import", () => {
   const fresh = () => ({
     ...seed({
@@ -474,6 +524,71 @@ describe("dry run and re-import", () => {
     assert.deepEqual(again.body.warnings, []);
   });
 
+  test("an import that fails partway says what it wrote, and the same file finishes it", async () => {
+    use(new FakeMetis());
+    const doc = fresh();
+    metis.failing.set("POST /api/features", [503, { detail: "upstream down" }]);
+    const failed = await importSeed(doc, { dryRun: false });
+    assert.equal(failed.status, 500);
+    assert.equal(failed.body.partial, true, failed.body.detail);
+    assert.deepEqual(failed.body.counts, { capabilities: { created: 2 }, products: { created: 1 } });
+    assert.match(failed.body.detail, /^POST \/api\/features for Search the inventory returned 503/);
+    assert.equal(
+      failed.body.detail.split("\n")[1],
+      "The import stopped partway. Before it stopped, it created 2 capabilities and 1 product; those stay. " +
+        "Importing this file again is safe: it finds those by name and slug, and adds only the rest.",
+    );
+    metis.failing.clear();
+    const again = await importSeed(doc, { dryRun: false });
+    assert.equal(again.status, 200);
+    assert.deepEqual(again.body.counts.capabilities, { reused: 2 });
+    assert.deepEqual(again.body.counts.products, { reused: 1 });
+    assert.deepEqual(again.body.counts.features, { created: 2 });
+    assert.deepEqual(again.body.counts.edges, { created: 1 });
+    assert.deepEqual(again.body.warnings, [], "a product with no features has none under old names");
+    assert.equal(metis.capabilities.length + metis.products.length + metis.features.length + metis.edges.length, 6);
+  });
+
+  test("rerunning a file whose import stopped after some features adds the rest with no rewording warning", async () => {
+    use(new FakeMetis());
+    const [first, second] = fresh().features;
+    await importSeed({ ...fresh(), features: [first], edges: [] }, { dryRun: false });
+    const { status, body } = await importSeed(fresh(), { dryRun: false });
+    assert.equal(status, 200);
+    assert.deepEqual(body.counts.features, { reused: 1, created: 1 });
+    assert.deepEqual(body.warnings, []);
+    assert.deepEqual(metis.features.map((f) => f.name).sort(), [first.name, second.name].sort());
+  });
+
+  test("a file that adds features to a product that has some warns they may be rewordings", async () => {
+    use(new FakeMetis());
+    await importSeed(fresh(), { dryRun: false });
+    const reworded = seed({ features: [{ ref: "f-new", product_ref: "p", name: "Find in the inventory", capability_refs: ["c-search"] }] });
+    const { body } = await importSeed(reworded);
+    assert.equal(body.warnings.length, 1);
+    assert.match(body.warnings[0], /^This file names a product metis already has and adds 1 feature whose name doesn't match/);
+  });
+
+  test("a guesses read that fails stops the import instead of reading as no guesses", async () => {
+    use(new FakeMetis());
+    metis.guessesStatus = 503;
+    const doc = fresh();
+    doc.features[0].capability_guesses = [{ capability_ref: "c-plan", confidence: "low", basis: "probe" }];
+    const { status, body } = await importSeed(doc, { dryRun: false });
+    assert.equal(status, 500);
+    assert.match(body.detail, /GET \/api\/guesses returned 503/);
+  });
+
+  test("a failure before anything is written says only what failed", async () => {
+    use(new FakeMetis());
+    metis.failing.set("GET /api/goals", [503, { detail: "upstream down" }]);
+    const { status, body } = await importSeed(fresh(), { dryRun: false });
+    assert.equal(status, 500);
+    assert.equal(body.partial, undefined);
+    assert.match(body.detail, /^GET \/api\/goals returned 503/);
+    assert.ok(!body.detail.includes("partway"));
+  });
+
   test("a recorded use that lost its product is named, since an import doesn't link it back", async () => {
     use(new FakeMetis({ products: [{ name: "Metis" }] }));
     metis.techs.push({ id: "tech-n", slug: "nestjs", name: "NestJS" });
@@ -505,6 +620,14 @@ describe("unseed uses the importer's capability identity", () => {
     use(existing({ capability: { name: "Keyword Search", slug: "search" } }));
     const { body } = await unseed(seed({ capabilities: [{ ref: "c-search", name: "Keyword Search" }] }));
     assert.deepEqual(wouldDelete(body), ['would delete capability "Keyword Search"']);
+  });
+
+  test("an accented capability, whose slug predates accent folding, is found by its name", async () => {
+    use(existing({ capability: { name: "Résumé Parsing", slug: "r-sum-parsing" } }));
+    for (const name of ["Résumé Parsing", "Resume Parsing"]) {
+      const { body } = await unseed(seed({ capabilities: [{ ref: "c-search", name }] }));
+      assert.deepEqual(wouldDelete(body), ['would delete capability "Résumé Parsing"'], name);
+    }
   });
 
   test("each capability of a slugged -2 pair targets its own row", async () => {
@@ -828,6 +951,16 @@ describe("removing a seeded product names every row it deletes or keeps", () => 
     assert.equal(body.notes[0], `Numbers are not kept: importing this file again adds these rows back under new numbers (${goal.display_id} would not come back as ${goal.display_id}).`);
   });
 
+  test("a technology list that fails to read is unreadable, not empty", async () => {
+    use(probe());
+    metis.failing.set("GET /api/tech", [503, { detail: "upstream down" }]);
+    const { body } = await unseed(probeSeed());
+    assert.match(body.notes[0], /^This account can't read technologies\./);
+    const real = await unseed(probeSeed(), { dryRun: false });
+    assert.equal(real.status, 403);
+    assert.deepEqual(metis.writes, []);
+  });
+
   test("an account that can't read guesses can't remove anything", async () => {
     use(probe());
     metis.guessesStatus = 403;
@@ -892,6 +1025,35 @@ describe("a product's technology links, exported, removed and imported again", (
     assert.ok(body.notes.includes(
       'would delete "Redis" satisfies "Job Queue"; importing this file again won\'t bring back its recorded cost',
     ), body.notes.join("\n"));
+  });
+
+  // A failed read used to export as "none": a usage read that failed wrote a
+  // file with no technologies, and a remove and re-import then lost them.
+  for (const route of ["GET /api/stacks/usage", "GET /api/tech", "GET /api/tech/satisfactions", "GET /api/guesses"]) {
+    test(`a failed read of ${route.slice(4)} fails the export, saying why`, async () => {
+      use(world());
+      metis.failing.set(route, [503, { detail: "upstream down" }]);
+      const response = await exportGET({
+        request: new Request(`http://app.test/api/seed/export?productId=${metis.products[0].id}`),
+        locals: { accessToken: "test-token" },
+      });
+      assert.equal(response.status, 500);
+      const { detail, document } = await response.json();
+      assert.equal(document, undefined);
+      assert.match(detail, new RegExp(`^${route.slice(4).replace(/[/]/g, "\\/")}.* returned 503: .*upstream down`));
+    });
+  }
+
+  test("guesses this account may not read, or a route an older instance lacks, export as none", async () => {
+    use(world());
+    metis.guesses.push({ id: "g1", feature_id: "f-search", capability_id: metis.capabilities[1].id, confidence: "low" });
+    metis.guessesStatus = 403;
+    let doc = await exportOf(metis.products[0].id);
+    assert.ok(doc.features.every((f) => !f.capability_guesses));
+    assert.equal(doc.technologies.length, 2);
+    metis.failing.set("GET /api/tech/satisfactions", [404, { detail: "Not Found" }]);
+    doc = await exportOf(metis.products[0].id);
+    assert.ok(doc.technologies.every((t) => !t.satisfies));
   });
 
   test("the note comes back with the link", async () => {
@@ -991,6 +1153,17 @@ describe("validateSeed", () => {
   test("rejects a capability whose name yields no slug", () => {
     const errors = validateSeed(seed({ capabilities: [{ ref: "c-search", name: "!!!" }] }));
     assert.deepEqual(errors, ["capabilities[0] (c-search): slug must be a non-empty string (give one when the name yields none)"]);
+  });
+
+  test("a misspelled key is refused by name, where it is, before touching the instance", async () => {
+    use(new FakeMetis());
+    const doc = seed({ features: [{ ref: "f-plan", product_ref: "p", name: PLAN, capability_refs: ["c-search"], stauts: "done" }] });
+    doc.capabilites = [];
+    assert.deepEqual(validateSeed(doc), ['the file: unknown key "capabilites"', 'features[0] (f-plan): unknown key "stauts"']);
+    const { status, body } = await importSeed(doc, { dryRun: false });
+    assert.equal(status, 400);
+    assert.equal(body.detail, 'the file: unknown key "capabilites"\nfeatures[0] (f-plan): unknown key "stauts"');
+    assert.deepEqual(metis.requests, []);
   });
 
   test("the endpoint refuses an invalid file before touching the instance", async () => {

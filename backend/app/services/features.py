@@ -8,7 +8,7 @@ marked dirty and rebuilt lazily — never the other way around.
 import uuid
 
 from fastapi import HTTPException
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
@@ -21,6 +21,11 @@ from app.models import (
     Product,
 )
 from app.schemas.feature import EdgeCreate, FeatureCreate, FeatureUpdate
+from app.services.graph_service import cycle_chain, precedence
+
+#: Advisory lock key serializing feature-edge writes (any fixed bigint; the
+#: tech plane has its own, `technologies.EDGE_LOCK`).
+EDGE_LOCK = 0x6D6574697301
 
 
 async def list_features(session: AsyncSession, q: str | None = None) -> list[Feature]:
@@ -62,11 +67,39 @@ async def _require_product(session: AsyncSession, product_id: uuid.UUID | None) 
         raise HTTPException(404, f"Product {product_id} not found")
 
 
+async def _refuse_same_name(
+    session: AsyncSession, name: str, product_id: uuid.UUID | None, exclude_id: uuid.UUID | None = None
+) -> None:
+    """One feature per name in a product (B51): a second "keep notes when
+    OFFLINE" beside "Keep notes when offline" would split one feature in two,
+    so it is refused, naming the one that exists, as a capability's is.
+    Both names are lowered here, in Python, as the seed loaders lower them
+    (Python and JavaScript agree): Postgres's lower() differs on İ and final
+    sigma, so a dry run's "would create" met a 409 on the real run."""
+    stmt = select(Feature).where(Feature.product_id.is_not_distinct_from(product_id))
+    if exclude_id is not None:
+        stmt = stmt.where(Feature.id != exclude_id)
+    typed = name.strip().lower()
+    existing = next(
+        (f for f in await session.scalars(stmt.order_by(Feature.seq)) if f.name.strip().lower() == typed), None
+    )
+    if existing is not None:
+        where = "this product" if product_id is not None else "the features with no product"
+        raise HTTPException(
+            409,
+            detail={
+                "message": f'"{existing.name}" is already in {where}',
+                "existing": {"id": str(existing.id), "name": existing.name},
+            },
+        )
+
+
 async def create_feature(
     session: AsyncSession, data: FeatureCreate, graph=None
 ) -> Feature:
     ids = await _resolve_links(session, data.capability_ids, data.unknown_capabilities)
     await _require_product(session, data.product_id)
+    await _refuse_same_name(session, data.name, data.product_id)
     feature = Feature(**data.model_dump(exclude={"capability_ids"}))
     feature.capability_links = [FeatureCapability(capability_id=cid) for cid in ids]
     session.add(feature)
@@ -104,6 +137,10 @@ async def update_feature(
         await _resolve_links(session, feature.capability_ids, unknown)
     if fields.get("product_id") is not None:
         await _require_product(session, fields["product_id"])
+    if "name" in fields or "product_id" in fields:
+        await _refuse_same_name(
+            session, fields.get("name") or feature.name, fields.get("product_id", feature.product_id), feature.id
+        )
     for key, value in fields.items():
         setattr(feature, key, value)
     await session.commit()
@@ -146,15 +183,28 @@ async def create_edge(session: AsyncSession, data: EdgeCreate, graph=None) -> Fe
             raise HTTPException(404, f"Feature {fid} not found")
     # Precedence edges (DEPENDS_ON, BLOCKS) are rejected at write time if they
     # would close a cycle — the invariant lives here, not at topo time.
-    if graph is not None and data.kind != EdgeKind.RELATES_TO:
-        await graph.ensure_fresh()
-        chain = graph.would_create_cycle(data.src_id, data.dst_id, data.kind)
+    if data.kind != EdgeKind.RELATES_TO:
+        # Check and insert are one step: the lock is held until this
+        # transaction ends, so "A needs B" and "B needs A" sent together can't
+        # both pass. The check reads Postgres, not the in-memory graph, which
+        # hears of another request's edge only after that request commits.
+        await session.execute(text("select pg_advisory_xact_lock(:key)"), {"key": EDGE_LOCK})
+        rows = await session.execute(
+            select(FeatureEdge.src_id, FeatureEdge.dst_id, FeatureEdge.kind).where(
+                FeatureEdge.kind.in_((EdgeKind.DEPENDS_ON, EdgeKind.BLOCKS))
+            )
+        )
+        chain = cycle_chain(precedence(rows), data.src_id, data.dst_id, data.kind)
         if chain:
             # Name the chain it would close, in plain words: people and agents
             # both need to know which link to remove.
             rows = await session.scalars(select(Feature).where(Feature.id.in_(chain)))
             names = {f.id: f"“{f.name}”" for f in rows}
             through = f" through {', '.join(names[n] for n in chain[1:-1])}" if len(chain) > 2 else ""
+            # End the transaction, and with it the lock: a Chat turn keeps its
+            # session open across tool calls. Commit, not rollback, which would
+            # expire everything the session holds.
+            await session.commit()
             raise HTTPException(
                 422,
                 f"That would make a circular dependency: {names[chain[0]]} already needs "
@@ -168,6 +218,7 @@ async def create_edge(session: AsyncSession, data: EdgeCreate, graph=None) -> Fe
         )
     )
     if existing is not None:
+        await session.commit()  # releases the lock, as above
         return existing
     edge = FeatureEdge(**data.model_dump())
     session.add(edge)

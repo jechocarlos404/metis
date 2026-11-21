@@ -1,5 +1,5 @@
 import React from "react";
-import { StatusBadge } from "../../ds";
+import { Select, StatusBadge } from "../../ds";
 import { createForceGraph } from "./forceGraphEngine.js";
 import { buildGoalNetwork, buildAdjacency, NODE_W, GOAL_H, GOAL_LINES } from "./graph-data.js";
 import { CardLabel, GraphCaption, GraphToolbar, controlInsets } from "./FeatureGraphView.jsx";
@@ -15,6 +15,7 @@ const STATUS_DOT = { pending: "var(--text-secondary)", in_progress: "var(--warn-
 const linkDistance = (e) => (e.kind === "PART_OF" ? 170 : 320);
 const linkStrength = (e) => (e.kind === "PART_OF" ? 0.05 : 0.002);
 const sharesWidth = (w) => 0.6 + Math.min(w, 6) * 0.5;
+const CANVAS_MARGIN = 20;
 
 /** Goals linked by the capabilities they share, with a side panel for the selected goal. */
 export function GoalNetworkView({ goals, capsByGoal, selectedId, onSelect }) {
@@ -30,14 +31,19 @@ export function GoalNetworkView({ goals, capsByGoal, selectedId, onSelect }) {
   const keyRef = React.useRef(null);
   const toolbarRef = React.useRef(null);
   const canvasRef = React.useRef(null);
+  const rowRef = React.useRef(null);
+  const [room, setRoom] = React.useState(null); // the canvas's width, and the height it may grow to
   const [hoveredId, setHoveredId] = React.useState(null);
   const [focusedId, setFocusedId] = React.useState(null); // the goal last focused on the canvas
 
-  const data = React.useMemo(() => buildGoalNetwork(goals, capsByGoal), [goals, capsByGoal]);
+  const data = React.useMemo(() => buildGoalNetwork(goals, capsByGoal, room), [goals, capsByGoal, room]);
   const adjacency = React.useMemo(() => buildAdjacency(data.edges), [data]);
+
+  const adjacencyRef = React.useRef(adjacency);
 
   useIsomorphicLayoutEffect(() => {
     onSelectRef.current = onSelect;
+    adjacencyRef.current = adjacency;
   });
 
   useIsomorphicLayoutEffect(() => {
@@ -54,11 +60,16 @@ export function GoalNetworkView({ goals, capsByGoal, selectedId, onSelect }) {
       alphaDecay: 0.06,
       linkDistance,
       linkStrength,
-      frameInsets: () => controlInsets(keyRef.current, toolbarRef.current),
+      frameInsets: () => controlInsets(keyRef.current, toolbarRef.current, svgRef.current),
       reducedMotion: window.matchMedia("(prefers-reduced-motion: reduce)").matches,
       onSelect: (id) => {
         canvasPickRef.current = id;
         onSelectRef.current?.(id);
+      },
+      // A goal pressed on a view too far out to name it comes in to where its
+      // name reads (A49); one already readable stays under the pointer.
+      onPress: (id) => {
+        if (svgRef.current?.classList.contains("graph-far")) engine.framePick(id, [...(adjacencyRef.current.get(id) ?? [])]);
       },
     });
     engineRef.current = engine;
@@ -70,7 +81,27 @@ export function GoalNetworkView({ goals, capsByGoal, selectedId, onSelect }) {
     };
   }, []);
 
+  // The room the trees are laid out for (C41): the drawing's width, and the
+  // height the scroller shows less the canvas's margins, its border and hint
+  // room, and the toolbar's strip. None depends on the canvas's own height.
   useIsomorphicLayoutEffect(() => {
+    const measure = () => {
+      const toolbar = toolbarRef.current;
+      const strip = toolbar.offsetTop + toolbar.offsetHeight + 8
+        + canvasRef.current.offsetHeight - svgRef.current.clientHeight;
+      const w = svgRef.current.clientWidth;
+      const h = rowRef.current.clientHeight - 2 * CANVAS_MARGIN - strip;
+      setRoom((r) => (r && r.w === w && r.h === h && r.strip === strip ? r : { w, h, strip }));
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(canvasRef.current);
+    observer.observe(rowRef.current);
+    return () => observer.disconnect();
+  }, []);
+
+  useIsomorphicLayoutEffect(() => {
+    if (!room) return; // laid out once the canvas is measured, so it opens on that layout
     engineRef.current?.update(data.nodes, data.edges);
     if (!hasFitRef.current && data.nodes.length) {
       hasFitRef.current = true;
@@ -80,10 +111,10 @@ export function GoalNetworkView({ goals, capsByGoal, selectedId, onSelect }) {
     }
   }, [data]);
 
-  // A goal picked in the side list (or by keyboard) is framed with the goals
-  // it lights, so its lines show (C39), centred when they fit around it
-  // (A10); stacked under the list, the canvas then scrolls into view. One
-  // pressed on the canvas stays under the pointer.
+  // A goal picked in the side list (or by keyboard) is centred where its name
+  // reads, with as many of the goals it lights as fit there (A49, C39);
+  // stacked under the list, the canvas then scrolls into view. One pressed on
+  // the canvas stays under the pointer (onPress above when zoomed out).
   useIsomorphicLayoutEffect(() => {
     const pressed = canvasPickRef.current === selectedId;
     canvasPickRef.current = null;
@@ -126,8 +157,8 @@ export function GoalNetworkView({ goals, capsByGoal, selectedId, onSelect }) {
     // Side by side, the canvas fills the height and the list scrolls on its
     // own; stacked (.graph-goal-row wraps), the list leads (base.css).
     <div className="graph-goal-network" style={{ flex: 1, display: "flex", minHeight: 0 }}>
-      <div className="graph-goal-row" style={{ flex: 1, display: "flex", minHeight: 0, overflowY: "auto" }}>
-        <div ref={canvasRef} style={{ flex: "999 1 420px", minHeight: 420, position: "relative", margin: 20, background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", overflow: "hidden", minWidth: 0 }}>
+      <div ref={rowRef} className="graph-goal-row" style={{ flex: 1, display: "flex", minHeight: 0, overflowY: "auto" }}>
+        <div ref={canvasRef} className="graph-hint-room" style={{ flex: "999 1 420px", minHeight: Math.max(420, data.height ? data.height + room.strip : 0), position: "relative", margin: CANVAS_MARGIN, background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", overflow: "hidden", minWidth: 0 }}>
           <svg ref={svgRef} role="group" aria-label="Goals linked by the capabilities they share. Arrow keys move between goals."
             style={{ width: "100%", height: "100%", display: "block", cursor: "grab", touchAction: "none" }}>
             <g ref={viewportRef}>
@@ -169,7 +200,7 @@ export function GoalNetworkView({ goals, capsByGoal, selectedId, onSelect }) {
             onZoomOut={() => engineRef.current?.zoomBy(1 / 1.4)}
             onFit={() => engineRef.current?.fitToView()}
             toolbarRef={toolbarRef} />
-          <NetworkKey keyRef={keyRef} />
+          <NetworkKey keyRef={keyRef} onToggle={() => engineRef.current?.refit()} />
           <GraphCaption name={named?.goal.title} />
         </div>
         <GoalPanel goals={goals} edges={data.edges} capsByGoal={capsByGoal} selectedId={selectedId} onSelect={onSelect} />
@@ -212,7 +243,7 @@ function GoalNode({ node, isSelected, isTabStop, isDimmed, onSelect, onHoverChan
   );
 }
 
-function NetworkKey({ keyRef }) {
+function NetworkKey({ keyRef, onToggle }) {
   const row = { display: "flex", alignItems: "center", gap: 6 };
   const card = (fill, stroke, dash) => (
     <svg width="16" height="10"><rect x="1" y="1" width="14" height="8" rx="2" fill={fill} stroke={stroke} strokeDasharray={dash} /></svg>
@@ -221,7 +252,7 @@ function NetworkKey({ keyRef }) {
     <svg width="16" height="8"><line x1="0" y1="4" x2="16" y2="4" stroke={stroke} strokeWidth={width} strokeLinecap="round" /></svg>
   );
   return (
-    <details ref={keyRef} style={{ position: "absolute", top: 10, left: 10, background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-sm)", boxShadow: "var(--shadow-card)", padding: "6px 10px", fontFamily: "var(--font-mono)", fontSize: "var(--text-2xs)", color: "var(--text-secondary)" }}>
+    <details ref={keyRef} onToggle={onToggle} style={{ position: "absolute", top: 10, left: 10, background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-sm)", boxShadow: "var(--shadow-card)", padding: "6px 10px", fontFamily: "var(--font-mono)", fontSize: "var(--text-2xs)", color: "var(--text-secondary)" }}>
       <summary style={{ cursor: "pointer", color: "var(--text-heading)" }}>Key</summary>
       <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 6 }}>
         <div style={row}>{card("var(--surface-inverse)", "var(--surface-inverse)")}org goal</div>
@@ -246,6 +277,13 @@ function GoalPanel({ goals, edges, capsByGoal, selectedId, onSelect }) {
       {g.title}
     </button>
   );
+  // Every goal, one target 34px tall: the canvas's boxes are 21x10 at 390
+  // after Fit, and the links below reach only goals that share or nest
+  // (43 of 48). This is the same pick as pressing a goal on the canvas.
+  const picker = (
+    <Select aria-label="Goal" value={selectedId ?? ""} onChange={(e) => e.target.value && onSelect(e.target.value)}
+      options={[{ value: "", label: "Pick a goal…", disabled: true }, ...goals.map((g) => ({ value: g.id, label: `${g.display_id} · ${g.title}` }))]} />
+  );
 
   if (!goal) {
     const shares = edges.filter((e) => e.kind === "SHARES");
@@ -253,6 +291,7 @@ function GoalPanel({ goals, edges, capsByGoal, selectedId, onSelect }) {
     const most = [...shares].sort((a, b) => b.weight - a.weight || a.id.localeCompare(b.id)).slice(0, 6);
     return (
       <aside className="graph-goal-panel" style={panel}>
+        {picker}
         <div style={{ color: "var(--text-secondary)" }}>Pick a goal to see which other goals rely on the same capabilities.</div>
         <div style={{ color: "var(--text-secondary)" }}>{count(sharing.size, "goal")} of {goals.length} share a capability with another goal.</div>
         {most.length > 0 && (
@@ -285,6 +324,7 @@ function GoalPanel({ goals, edges, capsByGoal, selectedId, onSelect }) {
 
   return (
     <aside className="graph-goal-panel" style={panel} aria-label="Selected goal">
+      {picker}
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
         <div style={head}>{goal.goal_type === "org" ? "org goal" : "product goal"} · {goal.display_id}</div>
         <div style={{ fontWeight: "var(--weight-semibold)", color: "var(--text-heading)" }}>{goal.title}</div>

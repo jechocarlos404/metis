@@ -138,3 +138,85 @@ async def test_agent_rename_clash_is_a_clear_tool_error(db):
         with pytest.raises(ToolError) as err:
             await tools.update_capability(ctx, capability="Payments", name="user authentication")
         assert '"User Authentication" already exists' in str(err.value)
+
+
+async def test_an_accented_name_stored_before_the_fold_still_guards_its_name(client, db):
+    """Slugs fold accents now, but a row stored before keeps its old slug
+    ("Résumé Parsing" is r-sum-parsing): its name must still guard."""
+    async with db() as session:
+        session.add(Capability(name="Résumé Parsing", slug="r-sum-parsing"))
+        await session.commit()
+    for name in ("Résumé-Parsing", "Résumé  Parsing", "Resume Parsing", "resume parsing"):
+        res = await _create(client, name)
+        assert res.status_code == 409, (name, res.json())
+        assert res.json()["existing"] == {"slug": "r-sum-parsing", "name": "Résumé Parsing"}
+
+
+async def test_a_renamed_capability_guards_its_new_name_in_any_punctuation(client):
+    made = (await _create(client, "Semantic Search")).json()
+    await client.patch(f"/api/capabilities/{made['id']}", json={"name": "Vector Retrieval"})
+    assert (await _create(client, "vector-retrieval")).status_code == 409
+
+
+async def test_a_feature_name_differing_only_in_case_is_refused_in_one_product(client, db):
+    """B51: "qa-b5 keep notes when OFFLINE" was created beside "QA-B5 Keep notes
+    when offline" in one product. It is refused, naming the one that exists;
+    the same name in another product, or a case change of the feature itself,
+    still goes through."""
+    trail = (await client.post("/api/products", json={"name": "Trail Notes"})).json()["id"]
+    other = (await client.post("/api/products", json={"name": "Other Notes"})).json()["id"]
+
+    async def feature(name, product, **extra):
+        return await client.post(
+            "/api/features", json={"name": name, "product_id": product, "unknown_capabilities": True, **extra}
+        )
+
+    first = await feature("Keep notes when offline", trail)
+    assert first.status_code == 201
+    res = await feature("keep notes when OFFLINE", trail)
+    assert res.status_code == 409
+    assert res.json() == {
+        "detail": '"Keep notes when offline" is already in this product',
+        "existing": {"id": first.json()["id"], "name": "Keep notes when offline"},
+    }
+    assert (await feature("Keep notes when offline", other)).status_code == 201
+    loose = await feature("Sync later", None)
+    assert loose.status_code == 201
+    assert (await feature("sync LATER", None)).json()["detail"] == '"Sync later" is already in the features with no product'
+
+    # A rename into a clash is refused; renaming itself in another case is not.
+    sync = (await feature("Sync notes later", trail)).json()["id"]
+    res = await client.patch(f"/api/features/{sync}", json={"name": "KEEP notes when offline"})
+    assert res.status_code == 409
+    assert (await client.patch(f"/api/features/{sync}", json={"name": "Sync Notes Later"})).status_code == 200
+    # So is a move into a product that has it.
+    moved = (await feature("Keep notes when offline", None)).json()["id"]
+    assert (await client.patch(f"/api/features/{moved}", json={"product_id": trail})).status_code == 409
+
+    async with db() as session:
+        ctx = ToolContext(session=session)
+        with pytest.raises(ToolError) as err:
+            await tools.create_feature(ctx, name="keep notes when offline", product="Trail Notes", unknown_capabilities=True)
+        assert str(err.value) == '"Keep notes when offline" is already in this product'
+
+
+async def test_a_feature_name_clash_is_judged_as_the_seed_loaders_judge_it(client):
+    """The guard lowered the stored name in Postgres and the typed one in
+    Python, which disagree on some letters: "İNBOX ZERO" beside "İnbox Zero"
+    went through (Python's lower keeps İ's dot, Postgres's drops it), while
+    "inbox zero" was refused though both seed loaders, which lower in Python
+    and JavaScript alike, would create it, so a real import stopped on a 409
+    its dry run never warned of. Both sides are now lowered the loaders' way."""
+    trail = (await client.post("/api/products", json={"name": "Trail Notes"})).json()["id"]
+
+    async def feature(name):
+        return await client.post(
+            "/api/features", json={"name": name, "product_id": trail, "unknown_capabilities": True}
+        )
+
+    for name in ("İnbox Zero", "ΟΔΟΣ Routes", "Résumé Import"):
+        assert (await feature(name)).status_code == 201
+    for name in ("İNBOX ZERO", "οδος routes", "RÉSUMÉ IMPORT"):
+        assert (await feature(name)).status_code == 409, name
+    for name in ("inbox zero", "οδοσ routes"):
+        assert (await feature(name)).status_code == 201, name

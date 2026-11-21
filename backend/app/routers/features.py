@@ -4,6 +4,8 @@ from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
+from app.models import Feature
+from app.schemas.capability import MAX_NAME
 from app.schemas.feature import (
     EdgeCreate,
     EdgeRead,
@@ -13,6 +15,7 @@ from app.schemas.feature import (
     FeatureUpdate,
     WhyChain,
 )
+from app.services import admin_cascade
 from app.services import capabilities as capability_service
 from app.services import features as feature_service
 from app.services import search as search_service
@@ -26,8 +29,15 @@ def get_graph(request: Request):
 
 @router.get("", response_model=list[FeatureRead])
 async def list_features(
-    q: str | None = None, session: AsyncSession = Depends(get_db)
+    q: str | None = None,
+    near: str | None = Query(None, max_length=MAX_NAME),
+    session: AsyncSession = Depends(get_db),
 ):
+    """Every feature, or those whose name holds `q`. With `near`, only those
+    whose name is near it (three at most, nearest first): candidates after an
+    exact miss, never a match."""
+    if near is not None:
+        return (await capability_service.near_names(session, Feature, [near]))[near]
     return await feature_service.list_features(session, q)
 
 
@@ -67,6 +77,14 @@ async def create_feature(
     data: FeatureCreate, request: Request, session: AsyncSession = Depends(get_db)
 ):
     return await feature_service.create_feature(session, data, get_graph(request))
+
+
+@router.get("/{feature_id}/detaches", response_model=list[admin_cascade.NamedCount])
+async def detaches(feature_id: uuid.UUID, session: AsyncSession = Depends(get_db)):
+    """What deleting it keeps but leaves without it (stories, journey steps),
+    named, so the delete can say so before anyone confirms."""
+    await feature_service.get_feature(session, feature_id)
+    return await admin_cascade.detaches(session, Feature, feature_id)
 
 
 @router.get("/{feature_id}/why", response_model=WhyChain)

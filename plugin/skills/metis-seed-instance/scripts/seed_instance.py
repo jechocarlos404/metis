@@ -26,6 +26,7 @@ import json
 import os
 import re
 import sys
+import unicodedata
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -44,11 +45,41 @@ CONFIDENCES = {"low", "medium", "high"}
 TECH_KINDS = {"language", "framework", "library", "runtime", "service", "model", "protocol"}
 TECH_LAYERS = {"data", "api", "web", "agent", "infra", "ops"}
 TECH_FITS = {"native", "partial", "workaround"}
+#: Every key the format has, per kind of object. Any other key is refused by
+#: name: a misspelled one ("stauts") would otherwise be dropped without a word.
+#: `source` and `facets` are free-form, so their keys are not checked.
+KEYS = {
+    "file": {"format", "source", "goals", "capabilities", "motivations", "features", "edges",
+             "products", "technologies"},
+    "goals": {"ref", "goal_type", "parent_ref", "title", "description", "success_criteria",
+              "priority", "status"},
+    "capabilities": {"ref", "parent_ref", "name", "slug", "description", "maturity", "facets",
+                     "evidence_anchors"},
+    "motivations": {"goal_ref", "capability_ref"},
+    "features": {"ref", "capability_refs", "capability_ref", "unknown_capabilities",
+                 "capability_guesses", "product_ref", "name", "description", "facets", "status",
+                 "priority", "priority_rationale"},
+    "capability_guesses": {"capability_ref", "confidence", "basis"},
+    "edges": {"src_ref", "dst_ref", "kind"},
+    "products": {"ref", "goal_ref", "name", "summary", "body", "external", "bundle_refs",
+                 "decomposition"},
+    "decomposition": {"summary", "epics"},
+    "epics": {"title", "acceptance_criteria", "capability_ref", "stories"},
+    "stories": {"title", "description", "feature_ref", "tickets"},
+    "tickets": {"title", "description", "technical_approach", "acceptance_criteria",
+                "affected_files", "context_budget"},
+    "technologies": {"ref", "name", "slug", "kind", "layer", "products", "satisfies"},
+    "satisfies": {"capability_ref", "fit", "confidence", "basis"},
+}
 
 
 def slugify(value):
-    """The backend's slug rule: lowercase kebab, '' when nothing survives."""
-    return re.sub(r"[^a-z0-9]+", "-", value.strip().lower()).strip("-")
+    """The backend's slug rule: accents folded ("Café" is "Cafe"), then
+    lowercase kebab, '' when nothing survives."""
+    folded = "".join(
+        c for c in unicodedata.normalize("NFKD", value) if not unicodedata.category(c).startswith("M")
+    )
+    return re.sub(r"[^a-z0-9]+", "-", folded.strip().lower()).strip("-")
 
 
 def tech_slug(tech):
@@ -100,6 +131,42 @@ def feature_capability_refs(feature):
     if refs is None and feature.get("unknown_capabilities") is True:
         refs = []  # declared unknown: none named yet
     return refs
+
+
+def _check_keys(errors, doc):
+    """Each object's keys against KEYS, named by the object's path."""
+    def check(where, item, kind):
+        if not isinstance(item, dict):
+            return {}
+        for key in item:
+            if key not in KEYS[kind]:
+                errors.append(f"{where}: unknown key {key!r}")
+        return item
+
+    def each(items):
+        return enumerate(items if isinstance(items, list) else [])
+
+    check("the file", doc, "file")
+    for collection in ("goals", "capabilities", "motivations", "features", "edges", "products",
+                       "technologies"):
+        for i, raw in each(doc.get(collection)):
+            ref = raw.get("ref") if isinstance(raw, dict) else None
+            where = f"{collection}[{i}]" if collection in ("motivations", "edges") else f"{collection}[{i}] ({ref})"
+            item = check(where, raw, collection)
+            if collection == "features":
+                for j, guess in each(item.get("capability_guesses")):
+                    check(f"{where}.capability_guesses[{j}]", guess, "capability_guesses")
+            if collection == "technologies":
+                for j, link in each(item.get("satisfies")):
+                    check(f"{where}.satisfies[{j}]", link, "satisfies")
+            if collection == "products":
+                decomp = check(f"{where}.decomposition", item.get("decomposition"), "decomposition")
+                for j, epic in each(decomp.get("epics")):
+                    ewhere = f"{where}.epics[{j}]"
+                    for k, story in each(check(ewhere, epic, "epics").get("stories")):
+                        swhere = f"{ewhere}.stories[{k}]"
+                        for t, ticket in each(check(swhere, story, "stories").get("tickets")):
+                            check(f"{swhere}.tickets[{t}]", ticket, "tickets")
 
 
 def validate(doc):
@@ -381,6 +448,7 @@ def validate(doc):
                     ):
                         errors.append(f"{twhere}: affected_files must be a list of strings")
 
+    _check_keys(errors, doc)
     return errors
 
 
@@ -389,6 +457,9 @@ def validate(doc):
 # ---------------------------------------------------------------------------
 
 DRY_PREFIX = "dry-run:"
+#: The coverage read's bounds (backend MAX_IDEA_NAMES, MAX_CAPABILITY_NAME).
+COVERAGE_NAMES = 300
+COVERAGE_NAME_LENGTH = 100
 
 
 def prune(payload):
@@ -528,7 +599,12 @@ class Api:
     def get_optional(self, path):
         """For endpoints an older instance may not have yet: absent reads as []."""
         status, body = self.request("GET", path)
-        return body if status == 200 else []
+        if status == 200:
+            return body
+        # Only "not there" is empty; any other failure must not read as "none".
+        if status == 404:
+            return []
+        sys.exit(f"error: GET {path} returned {status}: {body}")
 
     def post(self, path, payload):
         return self.request("POST", path, payload)
@@ -538,6 +614,11 @@ class Api:
 
     def patch(self, path, payload):
         return self.request("PATCH", path, payload)
+
+
+def _detail(body):
+    """The API's own sentence for a refusal (`detail`), not its JSON."""
+    return body["detail"] if isinstance(body, dict) and isinstance(body.get("detail"), str) else body
 
 
 class Loader:
@@ -649,19 +730,33 @@ class Loader:
         if not names:
             return
         nearest = {}
-        if self.dry_run:
+        # The coverage read takes at most COVERAGE_NAMES names a request, each
+        # at most COVERAGE_NAME_LENGTH long, so the names go in chunks and a
+        # longer name isn't looked up. A chunk that fails is said, never dropped.
+        lookup = [n for n in names if len(n.strip()) <= COVERAGE_NAME_LENGTH] if self.dry_run else []
+        for start in range(0, len(lookup), COVERAGE_NAMES):
+            chunk = lookup[start:start + COVERAGE_NAMES]
             status, body = self.api.post(
                 "/api/capabilities/coverage",
-                {"features": [{"name": "seed file", "capabilities": names}]},
+                {"features": [{"name": "seed file", "capabilities": chunk}]},
             )
-            if status == 200:
-                needs = (body.get("features") or [{}])[0].get("capabilities") or []
-                nearest = {n["name"]: [c["name"] for c in n.get("candidates") or []] for n in needs}
+            if status != 200:
+                self.warnings.append(
+                    f"couldn't look up the nearest existing names for {len(chunk)} new "
+                    f"{'capability' if len(chunk) == 1 else 'capabilities'} "
+                    f"({quoted(chunk[0])} to {quoted(chunk[-1])}): the lookup returned {status}: {body}"
+                )
+                continue
+            for need in (body.get("features") or [{}])[0].get("capabilities") or []:
+                nearest[need["name"]] = [c["name"] for c in need.get("candidates") or []]
         for name in names:
             near = nearest.get(name.strip()) or []
+            too_long = self.dry_run and len(name.strip()) > COVERAGE_NAME_LENGTH
             self.notes.append(
                 f"new capability {quoted(name)}"
                 + (f"; nearest existing: {', '.join(quoted(n) for n in near)}" if near else "")
+                + (f"; not looked up for nearest names (over {COVERAGE_NAME_LENGTH} characters)"
+                   if too_long else "")
             )
 
     def load_motivations(self):
@@ -729,7 +824,7 @@ class Loader:
             return set(have + missing)
         status, body = self.api.patch(f"/api/features/{current['id']}", payload)
         if status != 200:
-            self.warnings.append(f"feature {f['ref']} rejected ({status}): {body}")
+            self.warnings.append(f"feature {f['ref']} rejected ({status}): {_detail(body)}")
             self.note("features", "rejected")
             return set(have)
         self.note("features", "linked" if missing else "updated")
@@ -740,12 +835,14 @@ class Loader:
     def load_features(self):
         # On reuse, links only grow and the file's stated status, description
         # and unknown_capabilities win (update_reused_feature). Identity is
-        # (product, name): features belong to their product, so another
-        # product's "Sign in" is a different feature, not a reuse.
+        # (product, name ignoring case, as the API holds it): features belong
+        # to their product, so another product's "Sign in" is a different
+        # feature, not a reuse.
         instance = self.api.get("/api/features")
-        existing = {(f.get("product_id"), f["name"]): f for f in instance}
+        existing = {(f.get("product_id"), f["name"].lower()): f for f in instance}
+        self.feat_names = {f["id"]: f["name"] for f in instance}
         for f in self.doc.get("features") or []:
-            key = (self.prod_ids.get(f.get("product_ref")), f["name"])
+            key = (self.prod_ids.get(f.get("product_ref")), f["name"].lower())
             if key in existing:
                 self.feat_ids[f["ref"]] = existing[key]["id"]
                 self.note("features", "reused")
@@ -801,7 +898,7 @@ class Loader:
         if status in (200, 201):
             self.note("guesses", "updated" if exists else "created")
         else:
-            self.warnings.append(f"guess {label} rejected ({status}): {body}")
+            self.warnings.append(f"guess {label} rejected ({status}): {_detail(body)}")
             self.note("guesses", "rejected")
 
     def load_feature_guesses(self):
@@ -945,28 +1042,79 @@ class Loader:
                     sys.exit(f"error: satisfaction {label} returned {status}: {body}")
 
     def load_edges(self):
-        existing = {
-            (e["src_id"], e["dst_id"], e["kind"]) for e in self.api.get("/api/features/edges")
-        }
+        instance = self.api.get("/api/features/edges")
+        existing = {(e["src_id"], e["dst_id"], e["kind"]) for e in instance}
+        # The API's cycle check, run here too so a dry run sees what the import
+        # will be refused: u -> v means u needs v, DEPENDS_ON as is and BLOCKS
+        # reversed; a link closes a cycle when v already reaches u.
+        needs = {}
+
+        def need(src, dst, kind):
+            return (src, dst) if kind == "DEPENDS_ON" else (dst, src) if kind == "BLOCKS" else None
+
+        def add(pair):
+            if pair:
+                needs.setdefault(pair[0], set()).add(pair[1])
+
+        def chain_from(start, goal):
+            back, queue = {start: None}, [start]
+            while queue:
+                node = queue.pop(0)
+                if node == goal:
+                    chain = []
+                    while node is not None:
+                        chain.insert(0, node)
+                        node = back[node]
+                    return chain
+                for nxt in sorted(needs.get(node, ())):
+                    if nxt not in back:
+                        back[nxt] = node
+                        queue.append(nxt)
+            return None
+
+        for e in instance:
+            add(need(e["src_id"], e["dst_id"], e["kind"]))
+        names = {f["ref"]: f.get("name") for f in self.doc.get("features") or []}
+
+        def node_of(ref):
+            """A feature the import would create has no id yet: its ref stands in."""
+            fid = self.feat_ids[ref]
+            return f"ref:{ref}" if str(fid).startswith(DRY_PREFIX) else fid
+
+        def name_of(node):
+            return f"\u201c{names.get(node[4:]) if node.startswith('ref:') else self.feat_names.get(node, node)}\u201d"
+
         for e in self.doc.get("edges") or []:
             kind = e.get("kind", "DEPENDS_ON")
-            src, dst = self.feat_ids[e["src_ref"]], self.feat_ids[e["dst_ref"]]
+            src, dst = node_of(e["src_ref"]), node_of(e["dst_ref"])
             label = f"{e['src_ref']} -{kind}-> {e['dst_ref']}"
             if (src, dst, kind) in existing:
                 self.note("edges", "reused")
                 continue
+            pair = need(src, dst, kind)
+            chain = pair and chain_from(pair[1], pair[0])
+            if chain:
+                said = [name_of(n) for n in chain]
+                through = f" through {', '.join(said[1:-1])}" if len(said) > 2 else ""
+                self.warnings.append(
+                    f"edge {label} {'would be rejected' if self.dry_run else 'rejected'}: That would make "
+                    f"a circular dependency: {said[0]} already needs {said[-1]}{through}. "
+                    "Remove a link in that chain first."
+                )
+                self.note("edges", "would reject" if self.dry_run else "rejected")
+                continue
             if self.dry_run:
+                add(pair)
                 self.note("edges", "would create")
                 continue
             status, body = self.api.post(
                 "/api/features/edges", {"src_id": src, "dst_id": dst, "kind": kind}
             )
             if status == 201:
+                add(pair)
                 self.note("edges", "created")
             else:
-                # Most likely a cycle-closing precedence edge, rejected by the
-                # API against edges already in the instance. Skip and report.
-                self.warnings.append(f"edge {label} rejected ({status}): {body}")
+                self.warnings.append(f"edge {label} rejected ({status}): {_detail(body)}")
                 self.note("edges", "rejected")
 
     def load_product_rows(self):
@@ -1090,6 +1238,12 @@ class Loader:
             }
         )
 
+    def written(self):
+        """What a real load has written so far, by kind: "capabilities 2 created"."""
+        return [
+            f"{c} {n} {a}" for (c, a), n in self.counts.items() if a in ("created", "updated", "linked")
+        ]
+
     def report(self):
         order = [
             "goals",
@@ -1160,16 +1314,29 @@ def main():
         sys.exit(f"error: {args.base_url}/api/health returned {status} — is the instance up?")
 
     loader = Loader(api, doc, args.dry_run)
-    loader.load_goals()
-    loader.load_capabilities()
-    loader.load_motivations()
-    loader.load_product_rows()
-    loader.load_features()
-    loader.load_feature_guesses()
-    loader.load_edges()
-    loader.load_technologies()
-    loader.load_products()
-    loader.mark_seeded()
+    try:
+        loader.load_goals()
+        loader.load_capabilities()
+        loader.load_motivations()
+        loader.load_product_rows()
+        loader.load_features()
+        loader.load_feature_guesses()
+        loader.load_edges()
+        loader.load_technologies()
+        loader.load_products()
+        loader.mark_seeded()
+    except SystemExit as stop:
+        # Each row is its own API call, so a failure partway leaves what came
+        # before it. Say what that is, and that the same file finishes the job.
+        if not loader.written():
+            raise
+        print(stop.code, file=sys.stderr)
+        sys.exit(
+            "The load stopped partway. Before it stopped, it wrote: "
+            + "; ".join(loader.written())
+            + ". Those stay. Loading this file again is safe: it finds those by name and"
+            " slug, and adds only the rest."
+        )
 
     print(("dry run — nothing written" if args.dry_run else "seed complete") + ":")
     loader.report()

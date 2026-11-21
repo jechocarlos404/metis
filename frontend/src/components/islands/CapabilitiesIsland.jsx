@@ -4,14 +4,16 @@ import { Badge, Button, Dialog, Icon, Input, Select } from "../../ds";
 import { MaturityBadge } from "../shared/coverage.jsx";
 import { Guesses } from "../shared/Guesses.jsx";
 import { api } from "../../lib/api.js";
-import { readParam, writeParams } from "../../lib/url-state.js";
-import { MATURITY, NEED, count, needKey } from "../../lib/words.js";
+import { readParam, useParamRestore, writeParams } from "../../lib/url-state.js";
+import { MATURITY, NEED, REUSE_NOTE, count, needKey } from "../../lib/words.js";
 
 // Health finding kinds this page shows, in plain words, and where each links.
 const FINDINGS = {
   empty_intent: { label: "Goal with no capabilities", tone: "neutral", hint: "This product goal links to no capability" },
   unmotivated_capability: { label: "No goal explains it", tone: "danger", hint: "No goal links to it or to anything under it" },
-  aspirational_gap: { label: NEED.none.label, tone: NEED.none.tone, hint: "No feature builds it yet" },
+  // Its own words: a narrower set than the "not built yet" pill, which also
+  // covers capabilities whose features are planned or in progress (B44).
+  aspirational_gap: { label: "No feature builds it", tone: NEED.none.tone, hint: "Planned, alpha or beta, yet no feature in metis, finished or not, links to it or to anything under it" },
   unlinked_feature: { label: "Feature with no capability", tone: "warn", hint: "It can't count toward reuse or coverage until it has one" },
   stale_map: { label: "Map may be out of date", tone: "warn", hint: "Not imported from its seed file in 30 days, or ever" },
 };
@@ -19,7 +21,7 @@ const FINDINGS = {
 const sentence = (text) => text.charAt(0).toUpperCase() + text.slice(1);
 const VIEWS = [
   { value: "tree", label: "Tree" },
-  { value: "reused", label: "Most reused" },
+  { value: "reused", label: "Most reused", hint: REUSE_NOTE },
   { value: "attention", label: "Needs attention" },
 ];
 
@@ -72,6 +74,13 @@ export default function CapabilitiesIsland({ canWrite = true }) {
   // under its name instead of cutting them off.
   const [tableEl, setTableEl] = React.useState(null);
   const [narrow, setNarrow] = React.useState(false);
+
+  // The view lives in the URL, so /capabilities?view=attention opens on it and Back returns.
+  useParamRestore("view", (v) => setView(VIEWS.some((x) => x.value === v) ? v : "tree"));
+  const changeView = (next) => {
+    setView(next);
+    writeParams({ view: next === "tree" ? "" : next }, { push: true });
+  };
   React.useEffect(() => {
     if (!tableEl) return undefined;
     const observer = new ResizeObserver(() => setNarrow(tableEl.clientWidth < TABLE_MIN));
@@ -177,7 +186,7 @@ export default function CapabilitiesIsland({ canWrite = true }) {
           maturity: draft.maturity,
         },
       });
-      window.location.href = `/capabilities/${created.slug}`;
+      window.location.href = `/capabilities/${created.slug}?created=${encodeURIComponent(created.name)}`;
     } catch (e) {
       // Same name in another case: point at the one that exists, stay here.
       setDialogError(e.status === 409 && e.existing?.slug
@@ -214,7 +223,7 @@ export default function CapabilitiesIsland({ canWrite = true }) {
             style={{ flex: "1 1 240px", height: 32, padding: "0 10px", fontSize: "var(--text-sm)", fontFamily: "var(--font-body)", color: "var(--text-body)", background: "var(--surface-card)", border: "1px solid var(--border-control)", borderRadius: "var(--radius-sm)" }} />
           <div role="group" aria-label="View" style={{ display: "inline-flex", border: "1px solid var(--border-control)", borderRadius: "var(--radius-sm)", overflow: "hidden" }}>
             {VIEWS.map((v, i) => (
-              <button key={v.value} type="button" aria-pressed={view === v.value} onClick={() => setView(v.value)}
+              <button key={v.value} type="button" aria-pressed={view === v.value} onClick={() => changeView(v.value)} title={v.hint}
                 style={{ height: 30, padding: "0 12px", font: "inherit", fontSize: "var(--text-xs)", cursor: "pointer", border: "none",
                   borderLeft: i ? "1px solid var(--border-control)" : "none",
                   background: view === v.value ? "var(--accent-wash)" : "var(--surface-card)",
@@ -230,6 +239,7 @@ export default function CapabilitiesIsland({ canWrite = true }) {
           )}
         </div>
 
+        {view === "reused" && <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>{REUSE_NOTE}</div>}
         {view === "attention" ? (
           <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
             {findingFilter !== "guesses" && !(groups.length === 0 && guessCount > 0) && (

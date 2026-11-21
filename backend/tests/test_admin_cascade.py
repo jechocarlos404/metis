@@ -400,6 +400,108 @@ async def test_child_registry_matches_the_live_foreign_keys(db):
     assert declared == actual
 
 
+@pytest.mark.asyncio
+async def test_every_detach_is_a_set_null_foreign_key(db):
+    """`detaches()` names what a guarded delete leaves behind unlinked, from
+    the registry's detach specs; that holds only if each one is ON DELETE SET
+    NULL in the live schema."""
+    async with db() as session:
+        rows = (
+            await session.execute(
+                text(
+                    "select c.confrelid::regclass::text, c.conrelid::regclass::text, "
+                    "a.attname, c.confdeltype::text from pg_constraint c "
+                    "join unnest(c.conkey) k on true "
+                    "join pg_attribute a on a.attrelid=c.conrelid and a.attnum=k "
+                    "where c.contype='f'"
+                )
+            )
+        ).all()
+    rule = {(p, c, col): kind for p, c, col, kind in rows}
+    detach = [
+        (parent.__tablename__, spec.model.__tablename__, spec.fk)
+        for parent, specs in CHILDREN.items()
+        for spec in specs
+        if spec.action == "detach"
+    ]
+    assert detach and all(rule[key] == "n" for key in detach), {k: rule[k] for k in detach}
+
+
+async def test_a_guarded_delete_names_the_rows_it_leaves_unlinked(client, db):
+    """Deleting a capability clears an epic's and a stack slot's reference to
+    it; deleting a feature, a story's and a journey step's. Each is named, with
+    where it sits, before the delete, and the delete changes exactly those.
+    The links each drops are named too (B46): the product that added the
+    capability by hand, and the feature's links to other features, in the
+    feature page's words."""
+    from app.models import JourneyStep, StackSlot, TechStack
+    from app.models.enums import TechLayer
+    from app.schemas.journey import JourneyCreate, JourneyStepIn
+    from app.services import journeys as journey_service
+
+    async with db() as session:
+        product = Product(name="Climb", slug="climb")
+        session.add(product)
+        await session.commit()
+        cap = await make_capability(session, "Route search")
+        feature = await feature_service.create_feature(
+            session, FeatureCreate(name="Plan a ride", product_id=product.id, unknown_capabilities=True)
+        )
+        stack = TechStack(name="Climb stack", product_id=product.id)
+        session.add(stack)
+        await session.flush()
+        epic = Epic(product_id=product.id, capability_id=cap.id, title="Search epic")
+        session.add_all([epic, StackSlot(stack_id=stack.id, layer=TechLayer.data, role="search index", capability_id=cap.id)])
+        await session.flush()
+        session.add(Story(epic_id=epic.id, feature_id=feature.id, title="Plan story"))
+        offline = await feature_service.create_feature(
+            session, FeatureCreate(name="Keep notes offline", product_id=product.id, unknown_capabilities=True)
+        )
+        session.add_all([
+            ProductBundle(product_id=product.id, capability_id=cap.id),
+            FeatureEdge(src_id=offline.id, dst_id=feature.id, kind=EdgeKind.DEPENDS_ON),
+            FeatureEdge(src_id=feature.id, dst_id=offline.id, kind=EdgeKind.RELATES_TO),
+        ])
+        await session.commit()
+        await journey_service.create_journey(
+            session, JourneyCreate(name="Ride day", steps=[JourneyStepIn(feature_id=feature.id, label="Plan")])
+        )
+
+    def said(body):
+        return {t["table"]: (t["count"], t["names"]) for t in body}
+
+    res = await client.get(f"/api/capabilities/{cap.id}/detaches")
+    assert res.status_code == 200
+    assert said(res.json()) == {
+        "epics": (1, ["Search epic (Climb)"]),
+        "stack_slots": (1, ["data::search index (Climb stack)"]),
+        "product_bundles": (1, ["Climb"]),
+    }
+    res = await client.get(f"/api/features/{feature.id}/detaches")
+    assert said(res.json()) == {
+        "stories": (1, ["Plan story (Search epic)"]),
+        "journey_steps": (1, ["Plan (Ride day)"]),
+        "feature_edges": (2, ["\u201cKeep notes offline\u201d needs \u201cPlan a ride\u201d",
+                              "\u201cPlan a ride\u201d related to \u201cKeep notes offline\u201d"]),
+    }
+    assert (await client.get(f"/api/capabilities/{uuid.uuid4()}/detaches")).status_code == 404
+    assert (await client.get(f"/api/features/{uuid.uuid4()}/detaches")).status_code == 404
+
+    assert (await client.delete(f"/api/capabilities/{cap.id}")).status_code == 204
+    assert (await client.delete(f"/api/features/{feature.id}")).status_code == 204
+    async with db() as session:
+        assert await count(session, Epic) == 1 and await count(session, StackSlot) == 1
+        assert await count(session, Story) == 1 and await count(session, JourneyStep) == 1
+        for model, fk in ((Epic, "capability_id"), (StackSlot, "capability_id"), (Story, "feature_id"), (JourneyStep, "feature_id")):
+            assert await session.scalar(select(getattr(model, fk))) is None, model
+        assert await count(session, ProductBundle) == 0 and await count(session, FeatureEdge) == 0
+
+    # Nothing to unlink: an empty list, so the dialog says nothing.
+    async with db() as session:
+        lone = await make_capability(session, "Lone")
+    assert (await client.get(f"/api/capabilities/{lone.id}/detaches")).json() == []
+
+
 @pytest.mark.parametrize("surface", [Surface.api, Surface.mcp])
 @pytest.mark.parametrize(
     "path", ["/api/admin/data/cascade-preview", "/api/admin/data/cascade-delete"]

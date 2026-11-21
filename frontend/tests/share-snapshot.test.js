@@ -3,7 +3,7 @@
 
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
-import { snapshotHtml } from "../src/components/products/shareSnapshot.js";
+import { featureCountNote, snapshotHtml } from "../src/components/products/shareSnapshot.js";
 
 const ref = (id, name) => ({ id, slug: id, name });
 const strava = { id: "strava", name: "Strava", external: true, summary: null, goal_id: null };
@@ -39,7 +39,7 @@ const text = (html) => html.replace(/<[^>]+>/g, " ").replace(/&#39;/g, "'").repl
 describe("Share snapshot", () => {
   test("someone else's product: the page's answer, groups and ranked lists", () => {
     const out = text(snapshotHtml({ product: strava, goals: [], features, capabilities, score }));
-    assert.match(out, /We have 1 of the 2 capabilities needed · 1 proven \(beta or stable\)\. Nothing is buildable yet\./);
+    assert.match(out, /We have 1 of the 2 capabilities needed · 1 in use \(beta or stable\)\. Nothing is buildable yet\./);
     assert.match(out, /"Ours": a finished feature of one of our products realizes it\./);
     assert.match(out, /2 missing: needs a capability we don't have Record an activity · 0 of 1 ours Upload files · 1 of 2 ours/);
     assert.doesNotMatch(out, /0 buildable/); // empty groups stay off, as on the page
@@ -87,12 +87,23 @@ describe("Share snapshot", () => {
     // Steps points at PG-61 and owns OG-60 with PG-61 and PG-62 under it.
     const steps = { ...ours, id: "steps", name: "Steps", goal_id: "pg61" };
     const goals = [
-      { id: "og60", title: "Walk more", status: "pending", parent_goal_id: null, product_id: "steps", success_criteria: "People walk daily" },
-      { id: "pg61", title: "Count steps", status: "in_progress", parent_goal_id: "og60", product_id: "steps" },
-      { id: "pg62", title: "Share a streak", status: "pending", parent_goal_id: "og60", product_id: "steps" },
+      { id: "og60", display_id: "OG-60", title: "Walk more", status: "pending", parent_goal_id: null, product_id: "steps", success_criteria: "People walk daily" },
+      { id: "pg61", display_id: "PG-61", title: "Count steps", status: "in_progress", parent_goal_id: "og60", product_id: "steps" },
+      { id: "pg62", display_id: "PG-62", title: "Share a streak", status: "pending", parent_goal_id: "og60", product_id: "steps" },
     ];
     const out = text(snapshotHtml({ product: steps, goals, features, capabilities, score: null }));
-    assert.match(out, /Goals Walk more planned Done when: People walk daily Count steps in progress Share a streak planned/);
+    // With the codes the Goals tab shows, so "PG-61" can be found (A48).
+    assert.match(out, /Goals OG-60 Walk more planned Done when: People walk daily PG-61 Count steps in progress PG-62 Share a streak planned/);
     assert.doesNotMatch(out, /Part of/);
+  });
+
+  test("What it does counts features in the page's words, saying a feature repeats only when one does (A48)", () => {
+    const out = text(snapshotHtml({ product: ours, goals: [], features, capabilities, score: null }));
+    // "Upload files" names two capabilities, so it is listed under both.
+    assert.match(out, /What it does 2 features\. A feature appears under each capability it uses, so some show more than once\./);
+    const single = text(snapshotHtml({ product: ours, goals: [], features: features.slice(0, 1), capabilities, score: null }));
+    assert.match(single, /What it does 1 feature Activity Logging/);
+    assert.doesNotMatch(single, /more than once|grouped by/);
+    assert.equal(featureCountNote(1, false), "1 feature");
   });
 });

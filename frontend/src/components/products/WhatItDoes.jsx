@@ -2,6 +2,7 @@ import React from "react";
 import { Select, StatusBadge, Tag } from "../../ds";
 import { NOTHING_TO_SCORE, count } from "../../lib/words.js";
 import { BuildNext, CoverageReport, ProductScore } from "../shared/coverage.jsx";
+import { featureCountNote } from "./shareSnapshot.js";
 
 const heading = { fontSize: "var(--text-sm)", fontWeight: "var(--weight-semibold)", color: "var(--text-heading)", marginBottom: 8 };
 const muted = { fontSize: "var(--text-sm)", color: "var(--text-secondary)" };
@@ -91,8 +92,7 @@ export function WhatItDoes({ product, features, score, capabilities, journeys, b
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>
-              {count(features.length, "feature")}
-              {repeats && ". A feature appears under each capability it uses, so some show more than once."}
+              {featureCountNote(features.length, repeats)}
             </div>
             {grouped.map(({ cap, list }) => {
               const n = sharedWith(cap);

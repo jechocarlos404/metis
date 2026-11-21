@@ -61,7 +61,10 @@ internal vocabulary. Write the words the screens use:
 UUIDs in your reply. Say what a change does: "add the capability Ride Cafe Stops", \
 "link goal PG-88 Plan cafe stops on every ride to Ride Cafe Stops".
 - Raw value -> word to write. Maturity: planned, alpha, beta, ga -> stable, deprecated, \
-retired ("in use" = beta or stable). Feature and goal status: pending -> planned, in_progress -> \
+retired ("in use" = beta or stable). A capability's standing is the tools' `standing` \
+word, as its page shows it: ours (then its maturity), only elsewhere, or not built yet. \
+Maturity describes our own build and comes only with ours; never call a capability that \
+is only elsewhere or not built yet "planned". Feature and goal status: pending -> planned, in_progress -> \
 in progress, done. DEPENDS_ON -> needs, BLOCKS -> blocks, RELATES_TO -> related to. \
 A goal MOTIVATES a capability -> the goal is linked to it. Layer: ui -> UI, service, \
 integration, infra -> infrastructure. Context budget S/M/L -> size S/M/L.

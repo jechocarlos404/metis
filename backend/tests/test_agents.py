@@ -856,3 +856,52 @@ async def test_why_feature_says_whose_each_goal_is(db):
     goals = [s for s in out["chain"] if s["kind"] == "goal"]
     assert [(g["name"], g["product_id"]) for g in goals] == [("Plan work well", str(ours.id))]
     assert all("product_id" not in s for s in out["chain"] if s["kind"] != "goal")
+
+
+@pytest.mark.asyncio
+async def test_a_capability_read_gives_the_standing_its_page_shows(db):
+    """A54: Chat called Offline Map Downloads "still planned" where its page
+    says "only elsewhere": list_capabilities gave the raw maturity and no
+    standing. Each capability read now carries the page's word, and maturity
+    only when ours, as capability_inventory and the page do."""
+    import json
+
+    from app.agents.tools import ToolContext, execute_tool
+    from app.models import CapabilityMaturity, WorkStatus
+    from app.schemas.capability import CapabilityCreate
+    from app.schemas.feature import FeatureCreate
+    from app.services import capabilities as capability_service
+    from app.services import features as feature_service
+
+    async with db() as session:
+        async def cap(name, maturity=CapabilityMaturity.planned):
+            return await capability_service.create_capability(session, CapabilityCreate(name=name, maturity=maturity))
+
+        maps, offline, heat = await cap("Maps", CapabilityMaturity.ga), await cap("Offline Map Downloads"), await cap("Heatmaps")
+        atlas = Product(slug="atlas", name="Atlas", summary="s")
+        rival = Product(slug="rival", name="Rival", summary="s", external=True)
+        session.add_all([atlas, rival])
+        await session.commit()
+        for name, product, caps, status in [
+            ("Show the map", atlas, [maps], WorkStatus.done),
+            ("Download maps", rival, [offline], WorkStatus.done),
+            ("Show heat", atlas, [heat], WorkStatus.in_progress),
+        ]:
+            await feature_service.create_feature(session, FeatureCreate(
+                name=name, product_id=product.id, capability_ids=[c.id for c in caps], status=status,
+            ))
+        ctx = ToolContext(session=session, graph=GRAPH)
+        listed = json.loads((await execute_tool("feature_manager", "list_capabilities", {}, ctx)).result)
+        inventory = json.loads((await execute_tool("feature_manager", "capability_inventory", {}, ctx)).result)
+        rollup = json.loads((await execute_tool("graph_agent", "capability_rollup",
+                                                {"capability": "Offline Map Downloads"}, ctx)).result)
+
+    assert {c["name"]: (c["standing"], c["maturity"]) for c in listed} == {
+        "Maps": ("ours", "ga"),
+        "Offline Map Downloads": ("only elsewhere", None),
+        "Heatmaps": ("not built yet", None),
+    }
+    assert {e["name"]: e["standing"] for e in inventory} == {
+        "Maps": "ours", "Offline Map Downloads": "only elsewhere", "Heatmaps": "not built yet",
+    }
+    assert (rollup["capability"]["standing"], rollup["capability"]["maturity"]) == ("only elsewhere", None)

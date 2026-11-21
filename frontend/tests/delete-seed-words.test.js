@@ -56,7 +56,7 @@ describe("delete confirm sentences", () => {
     assert.equal(capabilityDeleteLinks([], 0), null);
     assert.equal(capabilityDeleteLinks([{ display_id: "PG-40" }], 0), "Unlinks goal PG-40.");
     assert.equal(capabilityDeleteLinks([{ display_id: "OG-39" }, { display_id: "PG-40" }], 2), "Unlinks goals OG-39 and PG-40 and drops 2 guesses waiting for review.");
-    assert.equal(capabilityDeleteLinks(null, 1), "drops 1 guess waiting for review.");
+    assert.equal(capabilityDeleteLinks(null, 1), "Drops 1 guess waiting for review."); // a sentence of its own
     assert.equal(capabilityDeleteKept([]), null);
     assert.equal(capabilityDeleteKept([{ table: "epics", label: "Epics", count: 1, names: ["Search (Climb)"] }]), "Clears it from epic Search (Climb).");
     assert.equal(capabilityDeleteKept([

@@ -283,7 +283,7 @@ export function capabilityDeleteLinks(motivations, guessCount) {
   return `${[
     motivations?.length > 0 && `Unlinks ${motivations.length === 1 ? "goal" : "goals"} ${andList(motivations.map((g) => g.display_id))}`,
     guessCount > 0 && `drops ${count(guessCount, "guess", "guesses")} waiting for review`,
-  ].filter(Boolean).join(" and ")}.`;
+  ].filter(Boolean).join(" and ").replace(/^d/, "D")}.`;
 }
 
 /** A capability's armed delete: what stays but loses it, epics and stack

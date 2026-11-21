@@ -33,8 +33,10 @@ then copy it over both.
 - `source` is free-form provenance metadata; the loader ignores it.
 - Every object takes only the keys this document shows for it. Any other key
   is refused by name, with where it is (`features[3] (f-plan): unknown key
-  'stauts'`), so a misspelling never drops data without a word. `source` and
-  `facets` are free-form, so their keys are not checked.
+  'stauts'`), so a misspelling never drops data without a word. Removing a
+  seed refuses the same file the same way, before it removes anything, so a
+  misspelled `features` never removes the product's goals and keeps its
+  features. `source` and `facets` are free-form, so their keys are not checked.
 - Every collection is optional; omit or leave empty what you don't have.
 - Entities reference each other by `ref` — a short local string handle, unique within
   its own collection. Refs never reach the instance; the loader resolves them to real

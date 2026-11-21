@@ -1292,4 +1292,4 @@ export async function POST({ request, locals }) {
   }
 }
 
-export { validateSeed, Loader };
+export { validateSeed, checkKeys, Loader };

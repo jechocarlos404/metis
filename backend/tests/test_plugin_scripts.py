@@ -25,6 +25,7 @@ VALIDATE = SKILLS / "metis-export" / "scripts" / "validate_seed.py"
 LOADER = SKILLS / "metis-seed-instance" / "scripts" / "seed_instance.py"
 HOOKS = ROOT / "plugin" / "hooks" / "metis_hooks.py"
 JS_IMPORTER = ROOT / "frontend" / "src" / "pages" / "api" / "seed" / "import.js"
+JS_UNSEED = ROOT / "frontend" / "src" / "pages" / "api" / "seed" / "unseed.js"
 SCRIPTS = sorted(SKILLS.glob("*/scripts/*.py"))
 
 VALID = {
@@ -173,6 +174,57 @@ def _validator(path):
 
 def test_the_two_python_validators_are_identical():
     assert _validator(VALIDATE) == _validator(LOADER)
+
+
+def _key_check(path):
+    """KEYS and _check_keys, the part of the validator a removal runs too."""
+    text = path.read_text()
+    return [text[text.index(start):text.index("\n\n\n", text.index(start))]
+            for start in ("#: Every key", "def _check_keys")]
+
+
+def test_the_removal_script_checks_keys_as_the_loaders_do():
+    assert _key_check(UNSEED) == _key_check(VALIDATE)
+
+
+def test_a_misspelled_key_stops_a_removal_before_it_reads_anything(tmp_path):
+    """A misspelled collection would remove the rest and keep what it names:
+    the product's goals go, its features stay (D42). Refused by name, dry run
+    included, before any request (no instance listens at the base URL)."""
+    seed = tmp_path / "seed.json"
+    doc = json.loads(json.dumps(VALID))
+    doc["featurse"] = doc.pop("features")
+    seed.write_text(json.dumps(doc))
+    result = _run(UNSEED, seed, "--dry-run", "--base-url", "http://127.0.0.1:9")
+    assert result.returncode == 1
+    assert "failed validation, so nothing was removed" in result.stderr
+    assert "  - the file: unknown key 'featurse'" in result.stderr
+    assert "cannot reach" not in result.stderr + result.stdout
+
+
+def test_the_in_app_removal_refuses_a_misspelled_key_by_name():
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is not installed; the in-app removal is checked where it is")
+    doc = json.loads(json.dumps(VALID))
+    doc["featurse"] = doc.pop("features")
+    script = (
+        f"import {{ POST }} from {json.dumps(JS_UNSEED.as_uri())};"
+        "let s = ''; process.stdin.on('data', (c) => (s += c));"
+        "process.stdin.on('end', async () => {"
+        "  globalThis.fetch = () => { throw new Error('no request may be sent'); };"
+        "  const request = new Request('http://metis.test/api/seed/unseed', {"
+        "    method: 'POST', body: JSON.stringify({ document: s, dryRun: true }) });"
+        "  const res = await POST({ request, locals: { accessToken: 't' } });"
+        "  console.log(JSON.stringify({ status: res.status, body: await res.json() }));"
+        "});"
+    )
+    result = subprocess.run(
+        [node, "--input-type=module", "-e", script], input=json.dumps(doc),
+        capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == {"status": 400, "body": {"detail": 'the file: unknown key "featurse"'}}
 
 
 @pytest.mark.parametrize("script", SCRIPTS, ids=lambda p: p.name)

@@ -1,6 +1,7 @@
 export const prerender = false;
 
 import { EDGE, andList, count, slugify } from "../../../lib/words.js";
+import { checkKeys } from "./import.js";
 
 const backend = () =>
   (process.env.API_INTERNAL_URL || "http://localhost:8000").replace(/\/$/, "");
@@ -949,6 +950,17 @@ export async function POST({ request, locals }) {
     return new Response(JSON.stringify({
       detail: "This is a metis-fill-gaps file. Removing it would delete the product's real features. Remove a single link on the feature instead.",
     }), { status: 400, headers: { "content-type": "application/json" } });
+  }
+
+  // The importer's key check: a misspelled collection ("featurse") would
+  // otherwise remove the rest and keep what it names, a half removal.
+  const keyErrors = [];
+  checkKeys(keyErrors, doc);
+  if (keyErrors.length > 0) {
+    return new Response(JSON.stringify({ detail: keyErrors.join("\n") }), {
+      status: 400,
+      headers: { "content-type": "application/json" },
+    });
   }
 
   try {

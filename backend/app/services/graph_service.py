@@ -52,10 +52,11 @@ class GraphCycleError(Exception):
         super().__init__("Dependency cycle detected")
 
 
-def precedence(edges) -> nx.DiGraph:
+def precedence(edges, nodes=()) -> nx.DiGraph:
     """DEPENDS_ON ∪ reverse(BLOCKS) over ``(src, dst, kind)`` triples: edge
     u->v means *u needs v*. RELATES_TO is left out."""
     g = nx.DiGraph()
+    g.add_nodes_from(nodes)
     for src, dst, kind in edges:
         if str(kind) == str(EdgeKind.DEPENDS_ON):
             g.add_edge(src, dst)
@@ -199,11 +200,10 @@ class FeatureGraph:
 
     def _precedence_subgraph(self) -> nx.DiGraph:
         """DEPENDS_ON ∪ reverse(BLOCKS): edge u->v means *u needs v*."""
-        g = precedence(
-            (src, dst, data["kind"]) for src, dst, data in self._g.edges(data=True)
+        return precedence(
+            ((src, dst, data["kind"]) for src, dst, data in self._g.edges(data=True)),
+            self._g.nodes,
         )
-        g.add_nodes_from(self._g.nodes)
-        return g
 
     def would_create_cycle(
         self, src: uuid.UUID, dst: uuid.UUID, kind: EdgeKind | str

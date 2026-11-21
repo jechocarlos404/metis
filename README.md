@@ -360,7 +360,8 @@ Seventeen tools. Nine answer inventory questions: `products`, `capability_invent
 takes a slug it returns) and `propose_binding` (a hand-off that persists nothing).
 All seventeen are always listed, though the desktop hides the technology plane until it
 has data: a client lists tools once, when it connects, and is never told the catalog
-filled. With no technology recorded, those eight say so.
+filled. With no technology recorded none of those eight errors: each says it found
+nothing and points to where a technology or stack gets recorded or looked up.
 Four resources: `metis://ontology/model`, `metis://policy/adoptions`, and the templated
 `metis://tech/{slug}` and `metis://stacks/{product}`. Three prompts.
 

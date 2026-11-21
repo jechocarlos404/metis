@@ -46,7 +46,7 @@ def main() -> None:
         token = get_settings().mcp_sse_token
         if not token:
             raise SystemExit(
-                "MCP_SSE_TOKEN is required for --sse. Without it this port "
+                "METIS_MCP_SSE_TOKEN is required for --sse. Without it this port "
                 "hands the server's API token to any caller that reaches it. "
                 "Use stdio for local agents, which needs no token."
             )

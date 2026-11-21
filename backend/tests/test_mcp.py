@@ -130,6 +130,38 @@ async def test_every_tool_is_listed_and_a_tech_tool_on_an_empty_catalog_says_so(
     assert not server.server.create_initialization_options().capabilities.tools.listChanged
 
 
+async def test_on_an_empty_catalog_each_technology_tool_points_somewhere(api):
+    """What README, docs/mcp.md and model.md say of the eight on an empty
+    catalog: none errors; each says it found nothing and points to where a
+    technology gets recorded or looked up."""
+    import mcp.types as types
+
+    app, _ = api
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as http:
+        await http.post("/api/capabilities", json={"name": "User Authentication"})
+        await http.post("/api/products", json={"name": "Trail Notes"})
+    called = server.server.request_handlers[types.CallToolRequest]
+    said = {
+        "tech_search": ({"q": "redis"}, "a seed file's technologies, or the API, record them"),
+        "capability_supply": ({"capability": "user-authentication"}, "a seed file's technologies, or the API, record one"),
+        "tech_blast_radius": ({"tech": "redis"}, "tech_search lists them"),
+        "tech_exposure": ({}, "tech_search shows what is recorded at all"),
+        "stack_redundancy": ({"product": "trail-notes"}, "a seed file's technologies, or the API, record one"),
+        "tech_encounters": ({"tech": "redis"}, "tech_search lists them"),
+        "stack_recommend": ({"product": "trail-notes"}, "a stack is recorded only through the API"),
+        "propose_binding": ({"slot": "00000000-0000-0000-0000-000000000000", "tech": "redis", "rationale": "r"}, "metis://stacks/{product} resource lists"),
+    }
+    assert set(said) == {t.name for t in TOOLS} - INVENTORY_TOOLS
+    for name, (arguments, words) in said.items():
+        answer = (
+            await called(types.CallToolRequest(
+                method="tools/call", params=types.CallToolRequestParams(name=name, arguments=arguments),
+            ))
+        ).root
+        assert not answer.isError, name
+        assert words.lower() in answer.content[0].text.lower(), (name, answer.content[0].text)
+
+
 def test_no_tool_mutates():
     """propose_binding is a hand-off, not a mutation. Nothing else even looks
     like a write."""
@@ -1271,6 +1303,24 @@ def test_the_client_secret_is_read_under_the_name_env_example_gives(tmp_path, mo
     assert Settings().keycloak_mcp_client_secret == "old-name"
     monkeypatch.setenv("METIS_MCP_CLIENT_SECRET", "new-name")
     assert Settings().keycloak_mcp_client_secret == "new-name"
+
+
+def test_the_sse_token_is_read_under_the_documented_name(tmp_path, monkeypatch):
+    """README, docs/mcp.md, .env.example and the Guide say METIS_MCP_SSE_TOKEN;
+    the server read only MCP_SSE_TOKEN, which compose mapped one onto the
+    other. The documented name wins, the old one still works alone, and an
+    empty new name (.env.example's blank line) doesn't hide the old one."""
+    for name in ("METIS_MCP_SSE_TOKEN", "MCP_SSE_TOKEN"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("METIS_MCP_SSE_TOKEN=from-dot-env\n")
+    assert Settings().mcp_sse_token == "from-dot-env"
+    (tmp_path / ".env").write_text("METIS_MCP_SSE_TOKEN=\n")
+    assert Settings().mcp_sse_token == ""
+    monkeypatch.setenv("MCP_SSE_TOKEN", "old-name")
+    assert Settings().mcp_sse_token == "old-name"
+    monkeypatch.setenv("METIS_MCP_SSE_TOKEN", "new-name")
+    assert Settings().mcp_sse_token == "new-name"
 
 
 async def test_an_auth_off_server_against_an_auth_on_api_says_so(api, monkeypatch):

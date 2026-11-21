@@ -380,8 +380,8 @@ async def list_tools() -> list[Tool]:
     data, but a client lists tools once, when it connects, and this server
     can't tell it the catalog filled (`listChanged` stays false: nothing here
     notices a seed import), so a hidden tool stayed one the agent couldn't
-    call (D43). With an empty catalog each technology tool says so and how a
-    technology gets recorded."""
+    call (D43). With an empty catalog no technology tool errors: each says it
+    found nothing and points to where a technology or stack gets recorded or looked up."""
     return TOOLS
 
 

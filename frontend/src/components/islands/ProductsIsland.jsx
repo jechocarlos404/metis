@@ -474,9 +474,31 @@ export default function ProductsIsland({ canWrite = true }) {
   );
 }
 
+// What a product delete keeps but unlinks (the API's detaches), in plain
+// words: [one, many, what happens to one, to many].
+const KEPT = {
+  journey_steps: ["journey step", "journey steps", "stays as a gap in its journey", "stay as gaps in their journeys"],
+  stories: ["story in another product's plan", "stories in other products' plans", "loses its feature", "lose their feature"],
+  encounters: ["record of a technology used on it", "records of technologies used on it", "loses its product", "lose their product"],
+  tickets: ["ticket in another product", "tickets in other products", "loses its story", "lose their story"],
+  product_technologies: ["technology use recorded elsewhere", "technology uses recorded elsewhere", "loses its stack slot", "lose their stack slot"],
+  stack_concern_answers: ["answer to a stack concern", "answers to stack concerns", "loses its slot", "lose their slot"],
+};
+const KEPT_ORDER = Object.keys(KEPT);
+// "1 journey step stays as a gap in its journey: Write a note (A ride)." Named when few.
+const keptSentence = (t) => {
+  const [one, many, does, do_] = KEPT[t.table] ?? [t.label.toLowerCase(), t.label.toLowerCase(), "is kept, unlinked", "are kept, unlinked"];
+  const said = `${count(t.count, one, many)} ${t.count === 1 ? does : do_}`;
+  return t.names.length > 0 && t.count <= 5 ? `${said}: ${t.names.join(", ")}.` : `${said}.`;
+};
+
 // What deleting a product takes with it. Its features go too: left without a
-// product they would count as ours.
+// product they would count as ours. What only pointed at it stays, unlinked.
 function DeleteWhat({ product, features, takes }) {
+  const [kept, setKept] = React.useState(undefined);
+  React.useEffect(() => {
+    api(`/products/${product.id}/detaches`).then(setKept).catch(() => setKept(null));
+  }, [product.id]);
   return (
     <div role="note" style={{ marginBottom: 14, padding: 12, border: "1px solid var(--border-default)", borderRadius: "var(--radius-sm)", display: "flex", flexDirection: "column", gap: 8, fontSize: "var(--text-sm)", color: "var(--text-body)" }}>
       <div>
@@ -496,6 +518,7 @@ function DeleteWhat({ product, features, takes }) {
           : "Nothing else goes with it."}
         {" "}Capabilities and goals stay.
       </div>
+      {kept && [...kept].sort((a, b) => (KEPT_ORDER.indexOf(a.table) + 1 || 99) - (KEPT_ORDER.indexOf(b.table) + 1 || 99)).map((t) => <div key={t.table} style={{ color: "var(--text-secondary)" }}>{keptSentence(t)}</div>)}
     </div>
   );
 }

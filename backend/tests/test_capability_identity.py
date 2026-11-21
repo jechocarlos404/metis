@@ -198,3 +198,25 @@ async def test_a_feature_name_differing_only_in_case_is_refused_in_one_product(c
         with pytest.raises(ToolError) as err:
             await tools.create_feature(ctx, name="keep notes when offline", product="Trail Notes", unknown_capabilities=True)
         assert str(err.value) == '"Keep notes when offline" is already in this product'
+
+
+async def test_a_feature_name_clash_is_judged_as_the_seed_loaders_judge_it(client):
+    """The guard lowered the stored name in Postgres and the typed one in
+    Python, which disagree on some letters: "İNBOX ZERO" beside "İnbox Zero"
+    went through (Python's lower keeps İ's dot, Postgres's drops it), while
+    "inbox zero" was refused though both seed loaders, which lower in Python
+    and JavaScript alike, would create it, so a real import stopped on a 409
+    its dry run never warned of. Both sides are now lowered the loaders' way."""
+    trail = (await client.post("/api/products", json={"name": "Trail Notes"})).json()["id"]
+
+    async def feature(name):
+        return await client.post(
+            "/api/features", json={"name": name, "product_id": trail, "unknown_capabilities": True}
+        )
+
+    for name in ("İnbox Zero", "ΟΔΟΣ Routes", "Résumé Import"):
+        assert (await feature(name)).status_code == 201
+    for name in ("İNBOX ZERO", "οδος routes", "RÉSUMÉ IMPORT"):
+        assert (await feature(name)).status_code == 409, name
+    for name in ("inbox zero", "οδοσ routes"):
+        assert (await feature(name)).status_code == 201, name

@@ -290,24 +290,28 @@ async def compute_closure(
             to_delete[Feature] |= orphans
             frontier.append((Feature, orphans))
 
-    # Detach counts last, and only for rows that survive. A story whose epic is
-    # in the closure is deleted, not detached; counting it during expansion would
-    # report the same row under both headings.
-    detach: dict[type, int] = defaultdict(int)
-    for model, ids in list(to_delete.items()):
+    to_delete = {m: ids for m, ids in to_delete.items() if ids}
+    detach = {m: len(ids) for m, ids in (await _detached(session, to_delete)).items()}
+    return to_delete, detach, missing
+
+
+async def _detached(
+    session: AsyncSession, to_delete: dict[type, set[uuid.UUID]]
+) -> dict[type, set[uuid.UUID]]:
+    """The rows a closure keeps but unlinks: a `detach` spec's rows pointing
+    into it. Found last, and only rows that survive: a story whose epic is in
+    the closure is deleted, not detached; finding it during expansion would
+    report the same row under both headings."""
+    found: dict[type, set[uuid.UUID]] = defaultdict(set)
+    for model, ids in to_delete.items():
         for spec in CHILDREN.get(model, ()):
             if spec.action != "detach":
                 continue
-            stmt = (
-                select(func.count())
-                .select_from(spec.model)
-                .where(getattr(spec.model, spec.fk).in_(ids))
-            )
+            stmt = select(spec.model.id).where(getattr(spec.model, spec.fk).in_(ids))
             if to_delete.get(spec.model):
                 stmt = stmt.where(spec.model.id.notin_(to_delete[spec.model]))
-            detach[spec.model] += await session.scalar(stmt) or 0
-
-    return {m: ids for m, ids in to_delete.items() if ids}, dict(detach), missing
+            found[spec.model] |= set(await session.scalars(stmt))
+    return {m: ids for m, ids in found.items() if ids}
 
 
 async def _orphaned_features(
@@ -472,6 +476,13 @@ async def _named_where(session: AsyncSession, model: type, ids: set[uuid.UUID]) 
             row_id: f"\u201c{a}\u201d {EDGE_WORDS.get(getattr(kind, 'value', kind), kind)} \u201c{b}\u201d"
             for row_id, a, kind, b in rows
         }
+    if model is Encounter:
+        # The technology only: who used it is a person, named only behind the
+        # people throttle (questions.tech_encounters), never by a plain read.
+        rows = await session.execute(
+            select(model.id, Technology.name).join(Technology, Technology.id == model.tech_id).where(model.id.in_(ids))
+        )
+        return dict(rows.all())
     if model is ProductDecomposition:
         rows = await session.execute(select(model.id, model.version).where(model.id.in_(ids)))
         return {row_id: f"version {version}" for row_id, version in rows}
@@ -536,6 +547,27 @@ async def deletes(session: AsyncSession, entity: str, row_id: uuid.UUID) -> list
             NamedCount(
                 table=model.__tablename__, label=label, plane=plane, count=len(ids),
                 names=sorted(names.values(), key=str.lower),
+            )
+        )
+    return sorted(out, key=lambda t: (-t.count, t.label))
+
+
+async def closure_detaches(session: AsyncSession, entity: str, row_id: uuid.UUID) -> list[NamedCount]:
+    """What deleting this one row keeps but unlinks, by table and name: the
+    rows outside the closure the delete follows whose key into it goes empty
+    (ON DELETE SET NULL). A product's delete says this before anyone confirms
+    (B47): a journey step on one of its features stays as a gap, another
+    product's story about one loses its feature."""
+    to_delete, _, _ = await compute_closure(session, [RowRef(entity=entity, id=row_id)])
+    out = []
+    for model, ids in (await _detached(session, to_delete)).items():
+        label, plane = LABELS[model]
+        names = await _named_where(session, model, ids)
+        out.append(
+            NamedCount(
+                table=model.__tablename__, label=label, plane=plane, count=len(ids),
+                # Each name once: two records of one technology read "SQLite".
+                names=sorted(set(names.values()), key=str.lower),
             )
         )
     return sorted(out, key=lambda t: (-t.count, t.label))

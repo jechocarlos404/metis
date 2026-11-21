@@ -36,3 +36,14 @@ test("Home and the saved idea word a missing feature the same way", () => {
   assert.equal(verdictOf("missing", [null]).label, "missing");
   assert.equal(verdictOf("buildable", [ours]), VERDICT.buildable);
 });
+
+test("Home and Capabilities explain 'in N products' with the one sentence (R-N5)", async () => {
+  const { readFileSync } = await import("node:fs");
+  const { REUSE_NOTE } = await import("../src/lib/words.js");
+  assert.match(REUSE_NOTE, /whether they share the code or each built it separately/);
+  for (const f of ["HomeIsland.jsx", "CapabilitiesIsland.jsx"]) {
+    const src = readFileSync(new URL(`../src/components/islands/${f}`, import.meta.url), "utf8");
+    assert.match(src, /\{REUSE_NOTE\}/, f);
+    assert.doesNotMatch(src, /const REUSE_NOTE/, f);
+  }
+});

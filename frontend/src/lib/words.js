@@ -125,6 +125,10 @@ export const NEED = {
   none: { label: "not built yet", tone: "neutral", hint: "no finished feature in metis realizes it" },
 };
 
+/** What "in N products" counts, wherever a capability's reuse is shown:
+ *  metis knows which products use a capability, not whether they share its code. */
+export const REUSE_NOTE = "The product count is our products whose features use the capability, whether they share the code or each built it separately.";
+
 /** The NEED key for a capability match or inventory entry (null: no match).
  *  `ours` false covers two cases; external_products tells them apart. */
 export const needKey = (c) => (c?.ours ? "ours" : c?.external_products?.length ? "elsewhere" : "none");

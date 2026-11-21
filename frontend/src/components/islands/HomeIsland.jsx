@@ -2,7 +2,7 @@ import React from "react";
 import { PageHeader } from "../shell/PageHeader.jsx";
 import { Badge, Button, Input } from "../../ds";
 import { api } from "../../lib/api.js";
-import { NEED, VERDICT, count, freshness, needKey, scoreGroups } from "../../lib/words.js";
+import { NEED, REUSE_NOTE, VERDICT, count, freshness, needKey, scoreGroups } from "../../lib/words.js";
 import { CapabilityPicker } from "../shared/CapabilityPicker.jsx";
 import { CoverageReport } from "../shared/coverage.jsx";
 import GetStartedIsland from "./GetStartedIsland.jsx";
@@ -310,7 +310,8 @@ function MostReused({ inventory }) {
               </li>
             ))}
           </ul>
-          <div style={{ padding: "10px 16px", borderTop: "1px solid var(--border-hairline)", fontSize: "var(--text-xs)" }}>
+          <div style={{ padding: "10px 16px", borderTop: "1px solid var(--border-hairline)", fontSize: "var(--text-xs)", display: "flex", flexDirection: "column", gap: 6 }}>
+            <span style={QUIET}>{REUSE_NOTE}</span>
             <a href="/capabilities" style={LINK}>See all capabilities</a>
           </div>
         </>

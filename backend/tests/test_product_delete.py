@@ -137,3 +137,63 @@ async def test_a_product_delete_names_everything_it_deletes(app_graph, db):
         for model in (Product, Feature, FeatureCapability, ProductDecomposition, Epic, Story, TechStack, StackSlot):
             assert await session.scalar(select(func.count()).select_from(model)) == 0, model
         assert await session.scalar(select(func.count()).select_from(Capability)) == 1
+
+
+async def test_a_product_delete_names_what_it_keeps_but_unlinks(app_graph, db):
+    """The confirm named what goes, not what stays pointing at nothing (B47):
+    a journey step on one of its features, another product's story about one,
+    a record of who used a technology for it. `detaches` names those rows from
+    the closure the delete follows; its own story is a delete, not a detach;
+    and the delete then keeps exactly those rows, unlinked."""
+    from datetime import date
+
+    from app.models import Encounter, Epic, Journey, JourneyStep, Story, Technology
+    from app.models.enums import EncounterDepth, TechKind
+
+    http, graph = app_graph
+    async with db() as session:
+        trail, other = Product(name="Trail Notes", slug="trail-notes"), Product(name="Ride Day", slug="ride-day")
+        session.add_all([trail, other])
+        await session.commit()
+        feature = await feature_service.create_feature(
+            session, FeatureCreate(name="Sync notes later", product_id=trail.id, unknown_capabilities=True), graph
+        )
+        own_epic = Epic(product_id=trail.id, title="Offline epic")
+        other_epic = Epic(product_id=other.id, title="Ride epic")
+        journey = Journey(name="A ride")
+        tech = Technology(slug="sqlite", name="SQLite", kind=TechKind.library)
+        session.add_all([own_epic, other_epic, journey, tech])
+        await session.flush()
+        session.add_all([
+            Story(epic_id=own_epic.id, feature_id=feature.id, title="Own story"),
+            Story(epic_id=other_epic.id, feature_id=feature.id, title="Borrowed story"),
+            JourneyStep(journey_id=journey.id, position=0, feature_id=feature.id, label="Write a note"),
+            Encounter(tech_id=tech.id, person="ana", product_id=trail.id, depth=EncounterDepth.shipped, last_at=date(2026, 1, 1)),
+        ])
+        await session.commit()
+        trail_id = trail.id
+
+    res = await http.get(f"/api/products/{trail_id}/detaches")
+    assert res.status_code == 200
+    said = {t["table"]: (t["count"], t["names"]) for t in res.json()}
+    assert said == {
+        "journey_steps": (1, ["Write a note (A ride)"]),
+        "stories": (1, ["Borrowed story (Ride epic)"]),
+        "encounters": (1, ["ana (SQLite)"]),
+    }
+    deletes = {t["table"]: t["names"] for t in (await http.get(f"/api/products/{trail_id}/deletes")).json()}
+    assert deletes["stories"] == ["Own story"]
+    # /data's cascade preview counts the same rows: one helper finds them.
+    preview = (await http.post(
+        "/api/admin/data/cascade-preview", json={"rows": [{"entity": "products", "id": str(trail_id)}]}
+    )).json()
+    assert {t["table"]: t["count"] for t in preview["total_detaches"]} == {t: n for t, (n, _) in said.items()}
+    import uuid as _uuid
+    assert (await http.get(f"/api/products/{_uuid.uuid4()}/detaches")).status_code == 404
+
+    assert (await http.delete(f"/api/products/{trail_id}")).status_code == 204
+    async with db() as session:
+        assert (await session.scalars(select(Story.title))).all() == ["Borrowed story"]
+        assert await session.scalar(select(Story.feature_id)) is None
+        assert (await session.execute(select(JourneyStep.label, JourneyStep.feature_id))).all() == [("Write a note", None)]
+        assert (await session.execute(select(Encounter.person, Encounter.product_id))).all() == [("ana", None)]

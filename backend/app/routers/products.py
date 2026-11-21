@@ -95,6 +95,15 @@ async def deletes(product_id: uuid.UUID, session: AsyncSession = Depends(get_db)
     return await admin_cascade.deletes(session, "products", product_id)
 
 
+@router.get("/products/{product_id}/detaches", response_model=list[admin_cascade.NamedCount])
+async def detaches(product_id: uuid.UUID, session: AsyncSession = Depends(get_db)):
+    """What deleting it keeps but unlinks (journey steps, other products'
+    stories, records of who used a technology for it), named, so the delete
+    says so before anyone confirms."""
+    await decomposition_service.get_product(session, product_id)
+    return await admin_cascade.closure_detaches(session, "products", product_id)
+
+
 @router.delete("/products/{product_id}", status_code=204)
 async def delete_product(
     product_id: uuid.UUID, request: Request, session: AsyncSession = Depends(get_db)

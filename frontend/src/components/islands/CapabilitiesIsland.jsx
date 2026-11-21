@@ -4,7 +4,7 @@ import { Badge, Button, Dialog, Icon, Input, Select } from "../../ds";
 import { MaturityBadge } from "../shared/coverage.jsx";
 import { Guesses } from "../shared/Guesses.jsx";
 import { api } from "../../lib/api.js";
-import { readParam, writeParams } from "../../lib/url-state.js";
+import { readParam, useParamRestore, writeParams } from "../../lib/url-state.js";
 import { MATURITY, NEED, count, needKey } from "../../lib/words.js";
 
 // Health finding kinds this page shows, in plain words, and where each links.
@@ -72,6 +72,13 @@ export default function CapabilitiesIsland({ canWrite = true }) {
   // under its name instead of cutting them off.
   const [tableEl, setTableEl] = React.useState(null);
   const [narrow, setNarrow] = React.useState(false);
+
+  // The view lives in the URL, so /capabilities?view=attention opens on it and Back returns.
+  useParamRestore("view", (v) => setView(VIEWS.some((x) => x.value === v) ? v : "tree"));
+  const changeView = (next) => {
+    setView(next);
+    writeParams({ view: next === "tree" ? "" : next }, { push: true });
+  };
   React.useEffect(() => {
     if (!tableEl) return undefined;
     const observer = new ResizeObserver(() => setNarrow(tableEl.clientWidth < TABLE_MIN));
@@ -214,7 +221,7 @@ export default function CapabilitiesIsland({ canWrite = true }) {
             style={{ flex: "1 1 240px", height: 32, padding: "0 10px", fontSize: "var(--text-sm)", fontFamily: "var(--font-body)", color: "var(--text-body)", background: "var(--surface-card)", border: "1px solid var(--border-control)", borderRadius: "var(--radius-sm)" }} />
           <div role="group" aria-label="View" style={{ display: "inline-flex", border: "1px solid var(--border-control)", borderRadius: "var(--radius-sm)", overflow: "hidden" }}>
             {VIEWS.map((v, i) => (
-              <button key={v.value} type="button" aria-pressed={view === v.value} onClick={() => setView(v.value)}
+              <button key={v.value} type="button" aria-pressed={view === v.value} onClick={() => changeView(v.value)}
                 style={{ height: 30, padding: "0 12px", font: "inherit", fontSize: "var(--text-xs)", cursor: "pointer", border: "none",
                   borderLeft: i ? "1px solid var(--border-control)" : "none",
                   background: view === v.value ? "var(--accent-wash)" : "var(--surface-card)",

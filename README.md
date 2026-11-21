@@ -358,8 +358,9 @@ Seventeen tools. Nine answer inventory questions: `products`, `capability_invent
 `check_idea`, `product_score`, `capability`, `feature_why`, `journeys`, `ready_features`,
 `recheck`. The other eight: the six `question` keys, plus `tech_search` (navigation — everything else
 takes a slug it returns) and `propose_binding` (a hand-off that persists nothing).
-Those eight are listed only once the catalog holds a technology, as the desktop hides
-that plane until it has data; called by name, they answer anyway.
+All seventeen are always listed, though the desktop hides the technology plane until it
+has data: a client lists tools once, when it connects, and is never told the catalog
+filled. With no technology recorded, those eight say so.
 Four resources: `metis://ontology/model`, `metis://policy/adoptions`, and the templated
 `metis://tech/{slug}` and `metis://stacks/{product}`. Three prompts.
 

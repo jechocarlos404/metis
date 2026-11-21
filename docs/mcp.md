@@ -66,9 +66,9 @@ The inventory tools answer the portfolio questions:
 | `recheck` | If a feature changes, what else to recheck. Takes a feature id or its exact name (a name several features share is listed, not picked). Breaks: features that depend on it, through links of links. Retest (same product): features sharing a confirmed capability, rarest shared capability first. Broad (many features): capabilities used by more than half of the product (and at least 6 features), counted rather than listed. Same capability elsewhere (info only): our other products with the same capabilities; metis does not know whether they share code. Guesses are never counted. | `GET /api/graph/recheck/{id}` |
 
 The technology and buy tools stay hidden on the desktop until there is data for
-them, and are listed here only once the catalog holds a technology (a client
-that listed tools before then sees them when it lists again). Called by name,
-each still answers:
+them, but this server always lists them: a client lists tools once, when it
+connects, and the server can't tell it the catalog filled (`listChanged` is
+false). With no technology recorded, each says so and how one gets recorded:
 
 | Tool | What it answers |
 |---|---|

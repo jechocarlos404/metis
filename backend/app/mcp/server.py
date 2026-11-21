@@ -372,30 +372,15 @@ TOOLS = [
 ]
 
 
-#: The technology and buy tools: every tool above the inventory ones.
-TECH_TOOLS = {
-    "tech_search",
-    "capability_supply",
-    "tech_blast_radius",
-    "tech_exposure",
-    "stack_redundancy",
-    "tech_encounters",
-    "stack_recommend",
-    "propose_binding",
-}
-
-
 @server.list_tools()
 async def list_tools() -> list[Tool]:
-    """The technology plane stays hidden until it has data, as on the
-    desktop: its tools are listed once the catalog holds a technology. Called
-    by name they still answer. When the catalog can't be read, every tool is
-    listed, and the call says why it can't answer."""
-    try:
-        empty = (await client.get("/api/tech", {"limit": 1}))["total"] == 0
-    except (ApiError, SetupError):
-        empty = False
-    return [tool for tool in TOOLS if not (empty and tool.name in TECH_TOOLS)]
+    """Every tool, always. The desktop hides the technology plane until it has
+    data, but a client lists tools once, when it connects, and this server
+    can't tell it the catalog filled (`listChanged` stays false: nothing here
+    notices a seed import), so a hidden tool stayed one the agent couldn't
+    call (D43). With an empty catalog each technology tool says so and how a
+    technology gets recorded."""
+    return TOOLS
 
 
 #: The desktop screen of each tool's subject: where an error's Open: line

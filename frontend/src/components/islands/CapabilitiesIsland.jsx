@@ -184,7 +184,7 @@ export default function CapabilitiesIsland({ canWrite = true }) {
           maturity: draft.maturity,
         },
       });
-      window.location.href = `/capabilities/${created.slug}`;
+      window.location.href = `/capabilities/${created.slug}?created=${encodeURIComponent(created.name)}`;
     } catch (e) {
       // Same name in another case: point at the one that exists, stay here.
       setDialogError(e.status === 409 && e.existing?.slug

@@ -15,6 +15,7 @@ from app.schemas.feature import (
     FeatureUpdate,
     WhyChain,
 )
+from app.services import admin_cascade
 from app.services import capabilities as capability_service
 from app.services import features as feature_service
 from app.services import search as search_service
@@ -76,6 +77,14 @@ async def create_feature(
     data: FeatureCreate, request: Request, session: AsyncSession = Depends(get_db)
 ):
     return await feature_service.create_feature(session, data, get_graph(request))
+
+
+@router.get("/{feature_id}/detaches", response_model=list[admin_cascade.NamedCount])
+async def detaches(feature_id: uuid.UUID, session: AsyncSession = Depends(get_db)):
+    """What deleting it keeps but leaves without it (stories, journey steps),
+    named, so the delete can say so before anyone confirms."""
+    await feature_service.get_feature(session, feature_id)
+    return await admin_cascade.detaches(session, Feature, feature_id)
 
 
 @router.get("/{feature_id}/why", response_model=WhyChain)

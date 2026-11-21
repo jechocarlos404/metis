@@ -54,6 +54,13 @@ function treeOptions(all, excluded) {
   return out;
 }
 
+// Rows a delete keeps but leaves without the deleted one (the API's
+// detaches), by name: "epic Search (Climb)", "2 stack slots: a (S), b (S)".
+// The API's table labels are plural, as on /data.
+const keptRows = (detaches) => andList(detaches.map((t) => (t.count === 1
+  ? `${t.label.replace(/ies$/, "y").replace(/s$/, "").toLowerCase()} ${t.names[0]}`
+  : `${t.count} ${t.label.toLowerCase()}: ${t.names.join(", ")}`)));
+
 export default function CapabilityIsland({ slug, canWrite = false }) {
   const [inventory, setInventory] = React.useState(null);
   const [supply, setSupply] = React.useState(null);
@@ -68,6 +75,7 @@ export default function CapabilityIsland({ slug, canWrite = false }) {
   const [dialogError, setDialogError] = React.useState(null);
   const [confirmingDelete, setConfirmingDelete] = React.useState(false);
   const [guessCount, setGuessCount] = React.useState(0); // guesses a delete would drop with it
+  const [detaches, setDetaches] = React.useState(null); // rows a delete keeps but leaves without it
   const [removing, setRemoving] = React.useState(null); // goal id armed for unlink
   const [impact, setImpact] = React.useState(null); // null | "loading" | "error" | {dependents, dependencies}
   const [techNames, setTechNames] = React.useState({}); // slug → name, for Build or buy
@@ -196,6 +204,9 @@ export default function CapabilityIsland({ slug, canWrite = false }) {
     else {
       setError(null);
       setConfirmingDelete(true);
+      // Read at arm, so the note names what this delete clears now.
+      setDetaches(null);
+      api(`/capabilities/${cap.id}/detaches`).then(setDetaches).catch(() => setDetaches(null));
     }
   };
 
@@ -253,7 +264,8 @@ export default function CapabilityIsland({ slug, canWrite = false }) {
         meta={<Standing c={cap} />}
         actions={
           canWrite && (
-            <span style={{ display: "inline-flex", gap: 8, alignItems: "center" }}>
+            // Wraps, so an armed delete's notes take their own lines on a phone.
+            <span style={{ display: "inline-flex", flexWrap: "wrap", justifyContent: "flex-end", gap: 8, alignItems: "center", minWidth: 0 }}>
               {/* While a delete is armed, Keep is the one way back. */}
               {!confirmingDelete && (
                 <Button size="sm" variant="secondary" style={{ gap: 6 }} onClick={openEdit}>
@@ -274,6 +286,12 @@ export default function CapabilityIsland({ slug, canWrite = false }) {
                     motivations?.length > 0 && `Unlinks ${motivations.length === 1 ? "goal" : "goals"} ${andList(motivations.map((g) => g.display_id))}`,
                     guessCount > 0 && `drops ${count(guessCount, "guess", "guesses")} waiting for review`,
                   ].filter(Boolean).join(" and ")}.
+                </span>
+              )}
+              {/* What stays but loses it: epics and stack slots that name it. */}
+              {confirmingDelete && detaches?.length > 0 && (
+                <span style={{ fontSize: "var(--text-xs)", color: "var(--text-body)" }}>
+                  Clears it from {keptRows(detaches)}.
                 </span>
               )}
               <DeleteConfirm armed={confirmingDelete} onArm={armDelete} onCancel={() => setConfirmingDelete(false)}

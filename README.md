@@ -453,7 +453,7 @@ place that overrides the domain invariants, for cleaning up orphaned seed data.
 
 ## Configuration
 
-All optional — see `.env.example`:
+All optional except `SESSION_SECRET` while auth is on — see `.env.example`:
 
 | Variable | Purpose |
 |---|---|
@@ -471,10 +471,10 @@ All optional — see `.env.example`:
 ## Development
 
 ```sh
-# settings, once: compose and the backend below both read this file. With auth
-# on, set SESSION_SECRET in it first (openssl rand -hex 32): sign-in refuses
-# while it is unset or the public default.
+# settings, once: compose and the backend below both read this file
 cp .env.example .env
+# with auth on, set SESSION_SECRET in .env now (openssl rand -hex 32): sign-in
+# refuses while it is unset or the public default
 
 # database, and Keycloak: the backend checks every token against it and the
 # frontend signs in through it (or set AUTH_ENABLED=false in .env for scripts)

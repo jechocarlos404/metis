@@ -87,8 +87,6 @@ _SCREENS = tuple(
     (re.compile(pattern), screen)
     for pattern, screen in (
         (rf"/api/stacks/slots/{_ID}/bind", "/stacks?slot={id}"),
-        (r"/api/stacks(/.*)?", "/stacks"),
-        (r"/api/(constraints|concerns)(/.*)?", "/stacks"),
         # The seed importer stamps this; seed files are loaded in Settings.
         (r"/api/products/[^/]+/seeded", "/settings#seed-files"),
         (rf"/api/products/{_ID}(/.*)?", "/products?product={id}"),
@@ -116,6 +114,36 @@ _SCREENS = tuple(
 )
 
 
+#: Writes no screen makes. Saying so, and how it is done instead, beats naming
+#: a screen that can't do it: `/stacks` only binds a slot, and the owner chose
+#: not to add a form for the rest. `/ontology` describes the buy plane and
+#: names binding as its one screen write. Seed files carry a product's
+#: technology uses, never a stack (`ontology/seed-format.md`).
+_NO_SCREEN = tuple(
+    (re.compile(pattern), message, href)
+    for pattern, message, href in (
+        (
+            r"/api/stacks/usage",
+            "No screen records which technologies a product uses: a seed file carries them, "
+            "or a person with editor access records them through metis's API.",
+            "/settings#seed-files",
+        ),
+        (
+            r"/api/stacks(/.*)?",
+            "No screen creates or changes a stack, and seed files don't carry one: "
+            "a person with editor access records it through metis's API.",
+            "/ontology",
+        ),
+        (
+            r"/api/(constraints|concerns)(/.*)?",
+            "No screen records constraints or concerns: "
+            "a person with editor access records them through metis's API.",
+            "/ontology",
+        ),
+    )
+)
+
+
 def _screen(path: str) -> str:
     for pattern, screen in _SCREENS:
         if match := pattern.fullmatch(path):
@@ -128,6 +156,9 @@ def human_action(path: str) -> tuple[str, str]:
     next step is where an agent gives up silently."""
     if path.endswith("/bind"):
         return "Binding a slot is a human action.", _screen(path)
+    for pattern, message, href in _NO_SCREEN:
+        if pattern.fullmatch(path):
+            return message, href
     return (
         "This is a human action — every write names a person and takes a rationale.",
         _screen(path),

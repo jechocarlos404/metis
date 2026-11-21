@@ -720,7 +720,7 @@ async def test_existing_product_coverage_says_what_the_product_page_says(db):
     lines = out.splitlines()
     assert lines[0] == "Rival: 5 features — 1 buildable, 1 partly known, 2 missing, 1 not described."
     assert summarize_result(out) == lines[0]  # what "What it did" shows
-    assert lines[1] == "We have 2 of the 4 capabilities needed · 2 proven (beta or stable)"
+    assert lines[1] == "We have 2 of the 4 capabilities needed · 2 in use (beta or stable)"
     for expected in [
         "1 partly known — everything named so far is ours, but the list is incomplete.",
         "- Switch layers (named: Maps)",

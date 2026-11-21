@@ -479,7 +479,7 @@ def check_idea(report: dict, idea: str) -> str:
     not_ours = report["missing"]
     lines = [
         f"{report['existing']}/{report['needed']} distinct capabilit(ies) are ours, "
-        f"{report['mature']} of them proven (beta or ga); {len(not_ours)} not ours.",
+        f"{report['mature']} of them in use (beta or ga); {len(not_ours)} not ours.",
         "",
     ]
     for feature in report["features"]:
@@ -545,7 +545,7 @@ def product_score(score: dict) -> str:
     if report:
         lines.append(
             f"Across its named capabilities: {report['existing']}/{report['needed']} ours, "
-            f"{report['mature']} proven (beta or ga)."
+            f"{report['mature']} in use (beta or ga)."
         )
         gaps = score["missing_capabilities"]
         if gaps:

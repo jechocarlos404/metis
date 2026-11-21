@@ -627,7 +627,7 @@ async def test_check_idea_never_counts_a_near_name(api):
     )
     _conventions(text)
     assert text.startswith(
-        "1/3 distinct capabilit(ies) are ours, 1 of them proven (beta or ga); 2 not ours."
+        "1/3 distinct capabilit(ies) are ours, 1 of them in use (beta or ga); 2 not ours."
     )
     lines = text.splitlines()
     assert any(line.strip().startswith("ours") and "strava-import (ga" in line for line in lines)

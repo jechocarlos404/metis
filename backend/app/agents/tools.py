@@ -272,7 +272,7 @@ def score_text(score) -> str:
         return "\n".join(lines)
     lines.append(
         f"We have {report.existing} of the {report.needed} capabilities needed · "
-        f"{report.mature} proven (beta or stable)"
+        f"{report.mature} in use (beta or stable)"
     )
     if not score.buildable and score.partly:
         lines.append(

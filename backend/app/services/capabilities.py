@@ -508,8 +508,11 @@ async def near_names(session: AsyncSession, model, names: list[str]) -> dict[str
     coverage body is bounded (schemas.capability)."""
     if not names:
         return {}
-    typed = func.unnest(literal(list(names), ARRAY(Text))).table_valued("name").alias("typed")
-    score = name_closeness(model.name, typed.c.name)
+    # `AS typed(typed_name)`: a column list, so the value is read as text. With no
+    # list Postgres reads `typed.name` as a cast to its 63-byte `name` type and
+    # cuts a long name short (D41).
+    typed = func.unnest(literal(list(names), ARRAY(Text))).table_valued("typed_name").render_derived(name="typed")
+    score = name_closeness(model.name, typed.c.typed_name)
     near = (
         select(model.id, score.label("score"), model.seq)
         .where(score > NEAR)
@@ -519,9 +522,9 @@ async def near_names(session: AsyncSession, model, names: list[str]) -> dict[str
     )
     pairs = (
         await session.execute(
-            select(typed.c.name, near.c.id)
+            select(typed.c.typed_name, near.c.id)
             .select_from(typed.join(near, true()))
-            .order_by(typed.c.name, near.c.score.desc(), near.c.seq)
+            .order_by(typed.c.typed_name, near.c.score.desc(), near.c.seq)
         )
     ).all()
     out: dict[str, list] = {name: [] for name in names}

@@ -371,3 +371,15 @@ async def test_agent_tool_links_exact_names_only(db):
         await tools.create_feature(ctx, name="Sign in", capabilities=["authentication"])
         feature = await session.scalar(select(Feature).where(Feature.name == "Sign in"))
         assert feature.capability_ids == [auth.id]
+
+
+async def test_a_long_typed_name_gets_its_near_names_not_an_error(db):
+    """D41: names longer than Postgres's 63-byte `name` type, accents counting
+    double, still come back keyed by what was typed."""
+    long_name = "Show a résumé's parsed skills next to every job posting it matches well"
+    async with db() as session:
+        await make_capability(session, long_name)
+        typed = long_name.upper()
+        near = await capability_service.near_names(session, Capability, [typed, "Nothing alike"])
+    assert [c.name for c in near[typed]] == [long_name]
+    assert near["Nothing alike"] == []

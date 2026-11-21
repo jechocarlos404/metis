@@ -26,6 +26,7 @@ export default function GoalsIsland({ canWrite = true }) {
   const [error, setError] = React.useState(null);
   const [notice, setNotice] = React.useState(null); // what the last write did
   const [scrollTo, setScrollTo] = React.useState(null); // a goal to bring into view once rendered
+  const [focusTo, setFocusTo] = React.useState(null); // the card to focus once a delete re-renders the list
 
   const load = React.useCallback(async () => {
     const [goalList, productList, motivations, capabilities] = await Promise.all([
@@ -180,9 +181,14 @@ export default function GoalsIsland({ canWrite = true }) {
     try {
       const gone = dialog.goal;
       const { capabilities, products: left, children } = deleteEffects(gone, goals, capsByGoal, products);
+      // Focus goes to the card after the deleted one in the list, or the one
+      // before it when it was last, not to the page (A51).
+      const cards = [...document.querySelectorAll("[data-goal-card]")].map((el) => el.id);
+      const at = cards.indexOf(`goal-${gone.id}`);
       await api(`/goals/${gone.id}`, { method: "DELETE" });
       setDialog(null);
       await load();
+      setFocusTo(cards[at + 1] ?? cards[at - 1] ?? tabId("goals-panel", "list"));
       const did = [
         capabilities.length > 0 && `Unlinked ${andList(capabilities.map((c) => c.name))}.`,
         left.length > 0 && `${andList(left.map((p) => p.name))} ${left.length === 1 ? "has" : "have"} no goal now.`,
@@ -210,6 +216,11 @@ export default function GoalsIsland({ canWrite = true }) {
     writeParams({ goal: id }, { push: true });
   };
 
+  React.useEffect(() => {
+    if (!focusTo) return;
+    document.getElementById(focusTo)?.focus();
+    setFocusTo(null);
+  }, [focusTo, goals]);
   React.useEffect(() => {
     if (!scrollTo) return;
     document.getElementById(`goal-${scrollTo}`)?.scrollIntoView({ block: "center", behavior: "smooth" });
@@ -275,7 +286,7 @@ export default function GoalsIsland({ canWrite = true }) {
           <div style={{ display: "flex", flexDirection: "column", gap: 28 }}>
             {orgs.map((org) => (
               <div key={org.id}>
-                <div id={`goal-${org.id}`} style={{ background: "var(--surface-inverse)", borderRadius: "var(--radius-lg)", padding: "20px 24px", display: "flex", flexWrap: "wrap", alignItems: "center", gap: 16, ...highlightStyle(org.id) }}>
+                <div id={`goal-${org.id}`} data-goal-card tabIndex={-1} style={{ background: "var(--surface-inverse)", borderRadius: "var(--radius-lg)", padding: "20px 24px", display: "flex", flexWrap: "wrap", alignItems: "center", gap: 16, ...highlightStyle(org.id) }}>
                   <Icon name="target" size={20} style={{ color: "var(--aegean-4)" }} />
                   <div style={{ flex: "1 1 220px", minWidth: 0 }}>
                     <div style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-2xs)", letterSpacing: "var(--tracking-caps)", textTransform: "uppercase", color: "var(--ink-3)" }}>org goal · {org.display_id}</div>
@@ -532,7 +543,7 @@ function GoalList({ goals, productById, capsByGoal, highlightStyle, editButton, 
           const owner = productById[g.product_id];
           const caps = capsByGoal[g.id] || [];
           return (
-            <div key={g.id} id={`goal-${g.id}`} style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 14, background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", boxShadow: "var(--shadow-card)", padding: "14px 18px", ...highlightStyle(g.id) }}>
+            <div key={g.id} id={`goal-${g.id}`} data-goal-card tabIndex={-1} style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 14, background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", boxShadow: "var(--shadow-card)", padding: "14px 18px", ...highlightStyle(g.id) }}>
               {/* Level with the title's first line, not the card's middle. */}
               <span style={{ alignSelf: "flex-start", marginTop: 4, fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-secondary)", width: 46 }}>{g.display_id}</span>
               <div style={{ flex: "1 1 220px", minWidth: 0 }}>

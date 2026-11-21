@@ -370,6 +370,9 @@ class Unseeder:
         while True:
             status, page = self.api.request("GET", f"/api/tech?limit=200&offset={offset}")
             if status != 200:
+                # Absent (404) is none; any other failure is a list it can't read.
+                if status != 404 and "technologies" not in self.unreadable:
+                    self.unreadable.append("technologies")
                 return rows
             rows.extend(page["rows"])
             offset += 200

@@ -122,6 +122,8 @@ class Unseeder {
     this.instTechs = [];
     for (let offset = 0; ; offset += 200) {
       const { status, body } = await this.api.request("GET", `/api/tech?limit=200&offset=${offset}`);
+      // Absent (404) is none; any other failure is a list this run can't read.
+      if (status !== 200 && status !== 404 && !this.unreadable.includes("technologies")) this.unreadable.push("technologies");
       if (status !== 200) break;
       this.instTechs.push(...body.rows);
       if (offset + 200 >= body.total || body.rows.length === 0) break;

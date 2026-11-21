@@ -26,6 +26,8 @@ class FakeMetis {
     this.guesses = [];
     // 403 plays an account that may not read guesses (a viewer, an MCP token).
     this.guessesStatus = 200;
+    // A route made to answer otherwise: "GET /api/tech" -> [503, body].
+    this.failing = new Map();
     this.requests = [];
     // Capabilities someone else creates after the importer read the list.
     this.racing = [];
@@ -53,6 +55,7 @@ class FakeMetis {
 
   handle(method, path, body) {
     const route = `${method} ${path.split("?")[0]}`;
+    if (this.failing.has(route)) return this.failing.get(route);
     let m;
     if (route === "GET /api/goals") return [200, this.goals];
     if (route === "GET /api/capabilities") return [200, this.capabilities];
@@ -845,6 +848,16 @@ describe("removing a seeded product names every row it deletes or keeps", () => 
     assert.equal(body.notes[0], `Numbers are not kept: importing this file again adds these rows back under new numbers (${goal.display_id} would not come back as ${goal.display_id}).`);
   });
 
+  test("a technology list that fails to read is unreadable, not empty", async () => {
+    use(probe());
+    metis.failing.set("GET /api/tech", [503, { detail: "upstream down" }]);
+    const { body } = await unseed(probeSeed());
+    assert.match(body.notes[0], /^This account can't read technologies\./);
+    const real = await unseed(probeSeed(), { dryRun: false });
+    assert.equal(real.status, 403);
+    assert.deepEqual(metis.writes, []);
+  });
+
   test("an account that can't read guesses can't remove anything", async () => {
     use(probe());
     metis.guessesStatus = 403;
@@ -909,6 +922,35 @@ describe("a product's technology links, exported, removed and imported again", (
     assert.ok(body.notes.includes(
       'would delete "Redis" satisfies "Job Queue"; importing this file again won\'t bring back its recorded cost',
     ), body.notes.join("\n"));
+  });
+
+  // A failed read used to export as "none": a usage read that failed wrote a
+  // file with no technologies, and a remove and re-import then lost them.
+  for (const route of ["GET /api/stacks/usage", "GET /api/tech", "GET /api/tech/satisfactions", "GET /api/guesses"]) {
+    test(`a failed read of ${route.slice(4)} fails the export, saying why`, async () => {
+      use(world());
+      metis.failing.set(route, [503, { detail: "upstream down" }]);
+      const response = await exportGET({
+        request: new Request(`http://app.test/api/seed/export?productId=${metis.products[0].id}`),
+        locals: { accessToken: "test-token" },
+      });
+      assert.equal(response.status, 500);
+      const { detail, document } = await response.json();
+      assert.equal(document, undefined);
+      assert.match(detail, new RegExp(`^${route.slice(4).replace(/[/]/g, "\\/")}.* returned 503: .*upstream down`));
+    });
+  }
+
+  test("guesses this account may not read, or a route an older instance lacks, export as none", async () => {
+    use(world());
+    metis.guesses.push({ id: "g1", feature_id: "f-search", capability_id: metis.capabilities[1].id, confidence: "low" });
+    metis.guessesStatus = 403;
+    let doc = await exportOf(metis.products[0].id);
+    assert.ok(doc.features.every((f) => !f.capability_guesses));
+    assert.equal(doc.technologies.length, 2);
+    metis.failing.set("GET /api/tech/satisfactions", [404, { detail: "Not Found" }]);
+    doc = await exportOf(metis.products[0].id);
+    assert.ok(doc.technologies.every((t) => !t.satisfies));
   });
 
   test("the note comes back with the link", async () => {

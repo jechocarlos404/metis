@@ -71,18 +71,20 @@ export async function GET({ request, locals }) {
       headers: { authorization: `Bearer ${locals.accessToken}` },
     });
     const text = await res.text();
-    const body = text ? JSON.parse(text) : null;
-    if (!res.ok) throw new Error(`${route} returned ${res.status}: ${JSON.stringify(body)}`);
-    return body;
+    if (!res.ok) throw Object.assign(new Error(`${route} returned ${res.status}: ${text}`), { status: res.status });
+    return text ? JSON.parse(text) : null;
   }
 
-  // Guesses are editor/admin only and the technology plane may be empty or
-  // absent on an older instance: a refusal there means "none", not a failure.
-  async function optional(route) {
+  // Only a list that isn't there reads as none: a route an older instance
+  // lacks (404), or guesses this account may not read (403: editors and admins
+  // only). Any other failure fails the export, since a file missing rows
+  // would lose them on a remove and re-import.
+  async function optional(route, absent = [404]) {
     try {
       return await api(route);
-    } catch {
-      return null;
+    } catch (error) {
+      if (absent.includes(error.status)) return null;
+      throw error;
     }
   }
 
@@ -107,7 +109,7 @@ export async function GET({ request, locals }) {
       api(`/api/products/${productId}/bundles`),
     ]);
     const [guessRows, usage, satisfactions, technologies] = await Promise.all([
-      optional("/api/guesses"),
+      optional("/api/guesses", [403, 404]),
       optional(`/api/stacks/usage?product_id=${productId}`),
       optional("/api/tech/satisfactions"),
       allTechnologies(),

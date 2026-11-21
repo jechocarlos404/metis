@@ -289,3 +289,74 @@ def test_the_hooks_say_their_line_and_stay_silent_without_metis(tmp_path, metis)
                         ("user-prompt", {"cwd": str(repo), "prompt": "x"}),
                         ("stop", {"cwd": str(repo), "session_id": "s2"})):
         assert _hook(name, event, closed, tmp_path / "cold") is None, name
+
+
+# ---- the unseed script against an instance in memory ----
+
+
+def _unseeder(routes, doc, failing=()):
+    """The unseed script's Unseeder over its own Api, whose requests are
+    answered from `routes` (path -> body): a path not there is a 404, one in
+    `failing` a 503. Returns the dry run's report as printed."""
+    module = _load(UNSEED, "unseed_instance")
+
+    class Api(module.Api):
+        def request(self, method, path, payload=None):
+            if path in failing:
+                return 503, {"detail": "upstream down"}
+            if method == "GET" and path in routes:
+                return 200, routes[path]
+            return 404, None
+
+    return module.Unseeder(Api("http://metis.test"), doc, dry_run=True)
+
+
+def _run_unseed(unseeder, capsys):
+    for step in ("remove_motivations", "remove_edges", "remove_features", "remove_products",
+                 "remove_technologies", "remove_capabilities", "remove_goals", "numbers_note"):
+        getattr(unseeder, step)()
+    unseeder.report()
+    return capsys.readouterr().out
+
+
+PROBE_SEED = {
+    "format": "metis-seed/v1",
+    "capabilities": [{"ref": "c", "name": "Probe Cap"}],
+    "products": [{"ref": "p", "name": "Probe"}],
+    "features": [{"ref": "f", "product_ref": "p", "name": "Probe feature", "capability_refs": ["c"]}],
+    "technologies": [{"ref": "t", "name": "Qdrant", "kind": "service", "products": ["p"],
+                      "satisfies": [{"capability_ref": "c", "fit": "native"}]}],
+}
+AT = "2026-11-20T10:00:00Z"
+
+
+def _probe(**extra):
+    """One product with one feature on one capability, a technology it uses
+    that satisfies it, a guess on the feature, a capability added by hand and
+    a plan: every kind the in-app removal tallies."""
+    routes = {
+        "/api/goals": [],
+        "/api/capabilities": [{"id": "cap1", "slug": "probe-cap", "name": "Probe Cap", "parent_id": None}],
+        "/api/features": [{"id": "f1", "product_id": "p1", "name": "Probe feature", "capability_ids": ["cap1"]}],
+        "/api/features/edges": [],
+        "/api/products": [{"id": "p1", "name": "Probe", "status": "draft"}],
+        "/api/motivations": [],
+        "/api/product-bundles": [{"product_id": "p1", "capability_id": "cap1"}],
+        "/api/tech/satisfactions": [{"id": "s1", "tech_id": "t1", "capability_id": "cap1", "fit": "native"}],
+        "/api/guesses": [{"id": "g1", "feature_id": "f1", "capability_id": "cap1", "confidence": "low"}],
+        "/api/tech?limit=200&offset=0": {"rows": [{"id": "t1", "slug": "qdrant", "name": "Qdrant", "used_by": 1}], "total": 1},
+        "/api/tech/qdrant": {"id": "t1", "name": "Qdrant", "encounters": [], "versions": [], "outgoing": [], "incoming": []},
+        "/api/stacks/usage?product_id=p1": [{"product_id": "p1", "tech_id": "t1"}],
+        "/api/tickets": [],
+        "/api/products/p1/decompositions": [{"id": "pd1", "product_id": "p1", "version": 1, "status": "draft"}],
+    }
+    routes.update(extra)
+    return routes
+
+
+def test_a_technology_list_that_fails_to_read_is_unreadable_not_empty(capsys):
+    """Read as none, the technologies would match nothing and their links
+    would be judged against an empty list."""
+    unseeder = _unseeder(_probe(), PROBE_SEED, failing={"/api/tech?limit=200&offset=0"})
+    assert unseeder.unreadable == ["technologies"]
+    assert "can't tell" in _run_unseed(unseeder, capsys)

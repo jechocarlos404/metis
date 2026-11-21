@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
     Capability,
+    CapabilityGuess,
     CapabilityMaturity,
     Feature,
     FeatureCapability,
@@ -746,13 +747,25 @@ async def health(session: AsyncSession) -> list[HealthFinding]:
         m.goal_id for m in (await session.scalars(select(Motivation))).all()
     }
 
+    # Guesses, by whose feature: a guess on someone else's product is no more
+    # our promise than a confirmed link there is.
+    guessed: dict[bool, set[uuid.UUID]] = defaultdict(set)
+    for capability_id, external in await session.execute(
+        select(CapabilityGuess.capability_id, Product.external.is_(True))
+        .join(Feature, Feature.id == CapabilityGuess.feature_id)
+        .outerjoin(Product, Product.id == Feature.product_id)
+    ):
+        guessed[external].add(capability_id)
+
     usage = await _usage(session)
     for capability in capabilities:
-        # Known only from someone else's product: not our promise to keep.
-        # One nothing realizes isn't ours either, but is still ours to explain,
-        # and so is one we're still building.
+        # Known only from someone else's product, linked or guessed: not our
+        # promise to keep. One nothing realizes isn't ours either, but is still
+        # ours to explain, and so is one we're still building or guessing at.
         u = usage[capability.id]
-        if not u.features and u.external_products:
+        submap = _submap_ids(capability.id, children)
+        elsewhere = u.external_products or (submap & guessed[True] and not submap & guessed[False])
+        if not u.features and elsewhere:
             continue
         in_scope = sum(
             counts_by_capability.get(cid, 0)

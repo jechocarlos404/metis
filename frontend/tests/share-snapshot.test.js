@@ -39,7 +39,7 @@ const text = (html) => html.replace(/<[^>]+>/g, " ").replace(/&#39;/g, "'").repl
 describe("Share snapshot", () => {
   test("someone else's product: the page's answer, groups and ranked lists", () => {
     const out = text(snapshotHtml({ product: strava, goals: [], features, capabilities, score }));
-    assert.match(out, /We have 1 of the 2 capabilities needed · 1 proven \(beta or stable\)\. Nothing is buildable yet\./);
+    assert.match(out, /We have 1 of the 2 capabilities needed · 1 in use \(beta or stable\)\. Nothing is buildable yet\./);
     assert.match(out, /"Ours": a finished feature of one of our products realizes it\./);
     assert.match(out, /2 missing: needs a capability we don't have Record an activity · 0 of 1 ours Upload files · 1 of 2 ours/);
     assert.doesNotMatch(out, /0 buildable/); // empty groups stay off, as on the page

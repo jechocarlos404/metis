@@ -1,6 +1,6 @@
 import React from "react";
 import { PageHeader } from "../shell/PageHeader.jsx";
-import { Badge, Button, Checkbox, Dialog, Icon, IconButton, Input, Select, Tabs, Tag, Toast, DeleteConfirm } from "../../ds";
+import { Badge, Button, Checkbox, Dialog, Icon, IconButton, Input, Select, Tabs, Tag, Toast, DeleteConfirm, tabId } from "../../ds";
 import { api } from "../../lib/api.js";
 import { ENTITIES, REF_SOURCES, TABLE_WORDS, shortId } from "../../lib/data-entities.js";
 import { count } from "../../lib/words.js";
@@ -249,6 +249,8 @@ export default function DataIsland() {
           tabs={ENTITIES.map((e) => ({ value: e.key, label: e.label, title: e.table, count: counts[e.key] }))}
           value={tab}
           onChange={setTab}
+          label="Tables"
+          panelId="data-panel"
           style={{ overflowX: "auto" }}
         />
       </div>
@@ -261,7 +263,7 @@ export default function DataIsland() {
         </div>
       )}
 
-      <div style={{ flex: 1, overflowY: "auto", margin: 20, minWidth: 0 }}>
+      <div id="data-panel" role="tabpanel" aria-labelledby={tabId("data-panel", tab)} style={{ flex: 1, overflowY: "auto", margin: 20, minWidth: 0 }}>
         {selected.size > 0 && (
           <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 10, marginBottom: 12, padding: "8px 16px", background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)" }}>
             <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-secondary)" }}>

@@ -26,21 +26,52 @@ function moveFocus(e) {
   tabs[(move(at, tabs.length) + tabs.length) % tabs.length].focus({ preventScroll: true });
 }
 
-export function Tabs({ tabs = [], value, onChange, style }) {
+// label: the strip's accessible name ("Tables"). panelId: the id of the
+// element the tabs swap, which the caller marks role="tabpanel" and labels
+// with tabId(panelId, value); without it the tabs claim no panel, rather
+// than point at one that isn't there.
+export const tabId = (panelId, value) => `${panelId}-tab-${value}`;
+
+export function Tabs({ tabs = [], value, onChange, style, label, panelId }) {
   const strip = React.useRef(null);
   // After render: the selected tab is set in semibold, so it is wider now.
   React.useEffect(() => {
     reveal(strip.current, strip.current?.querySelector('[aria-selected="true"]'));
   }, [value]);
+  // A strip that scrolls fades at each edge it hides tabs behind, so a phone
+  // shows there is more ("Features 4…" cut with no cue was C's note).
+  const [cut, setCut] = React.useState({ start: false, end: false });
+  const measure = React.useRef(() => {});
+  measure.current = () => {
+    const el = strip.current;
+    if (!el) return;
+    const start = el.scrollLeft > 1;
+    const end = el.scrollLeft + el.clientWidth < el.scrollWidth - 1;
+    setCut((c) => (c.start === start && c.end === end ? c : { start, end }));
+  };
+  React.useEffect(() => {
+    const el = strip.current;
+    const run = () => measure.current();
+    el.addEventListener("scroll", run, { passive: true });
+    const observer = new ResizeObserver(run);
+    observer.observe(el);
+    return () => { el.removeEventListener("scroll", run); observer.disconnect(); };
+  }, []);
+  React.useEffect(() => measure.current()); // labels and counts change widths
+  const fade = cut.start || cut.end
+    ? `linear-gradient(to right, ${cut.start ? "transparent, #000 32px" : "#000"}, ${cut.end ? "#000 calc(100% - 32px), transparent" : "#000"})`
+    : undefined;
   const items = tabs.map((t) => (typeof t === "string" ? { value: t, label: t } : t));
   // The one Tab stop; the first tab when nothing is selected, so the strip stays reachable.
   const stop = items.some((t) => t.value === value) ? value : items[0]?.value;
   return (
-    <div ref={strip} role="tablist" onKeyDown={moveFocus} style={{ display: "flex", gap: "2px", borderBottom: "1px solid var(--border-hairline)", fontFamily: "var(--font-body)", ...style }}>
+    <div ref={strip} role="tablist" aria-label={label} onKeyDown={moveFocus}
+      style={{ display: "flex", gap: "2px", borderBottom: "1px solid var(--border-hairline)", fontFamily: "var(--font-body)", maskImage: fade, WebkitMaskImage: fade, ...style }}>
       {items.map((tab) => {
         const active = tab.value === value;
         return (
           <button key={tab.value} role="tab" aria-selected={active} title={tab.title}
+            id={panelId ? tabId(panelId, tab.value) : undefined} aria-controls={panelId}
             tabIndex={tab.value === stop ? 0 : -1}
             onClick={() => onChange && onChange(tab.value)}
             onFocus={(e) => reveal(strip.current, e.currentTarget)}

@@ -71,7 +71,8 @@ main:focus { outline: none; }
   .app-sidebar nav { padding-left: 6px !important; padding-right: 6px !important; }
   .app-sidebar > div:first-child { padding: 18px 0 14px !important; justify-content: center; }
   .app-sidebar > div:first-child span:first-child { font-size: 0 !important; }
-  .app-sidebar > div:first-child span:first-child::before { content: "m"; font-size: 20px; }
+  /* The "m" is drawn, not read: the name stays "metis". */
+  .app-sidebar > div:first-child span:first-child::before { content: "m" / ""; font-size: 20px; }
   .sidebar-user { flex-direction: column; padding: 10px 0 !important; }
   .app-sidebar .nav-group > summary { justify-content: center; padding: 4px 0; }
 }

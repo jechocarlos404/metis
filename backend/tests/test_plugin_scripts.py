@@ -396,6 +396,51 @@ def test_a_load_that_fails_partway_says_what_it_wrote_and_that_the_same_file_fin
     assert capsys.readouterr().err.startswith("error: POST /api/features for 'Plan a route' returned 503")
 
 
+def _lookup_loader(n, failing=False):
+    """The loader's dry run of a file adding n capabilities and one 120-character
+    name, against an instance holding "Keyword search" whose coverage read keeps
+    the backend's bounds (300 names a request, each at most 100 long)."""
+    module = _load(LOADER, "seed_instance")
+    asked = []
+
+    class Api(module.Api):
+        def request(self, method, path, payload=None):
+            if path != "/api/capabilities/coverage":
+                return 200, []
+            names = [c for f in payload["features"] for c in f["capabilities"]]
+            asked.append(len(names))
+            if failing:
+                return 503, {"detail": "upstream down"}
+            if len(names) > 300 or any(len(c) > 100 for c in names):
+                return 422, {"detail": "too many or too long"}
+            needs = [{"name": c, "candidates": [{"name": "Keyword search"}] if "search" in c else []}
+                     for c in names]
+            return 200, {"features": [{"name": "seed file", "capabilities": needs}]}
+
+    loader = module.Loader(Api("http://metis.test"), {}, dry_run=True)
+    names = [f"Probe {i} search" for i in range(n)] + ["x" * 120]
+    loader.list_added_capabilities(names)
+    return loader, asked
+
+
+def test_the_dry_run_looks_up_nearest_names_in_chunks_the_coverage_read_takes():
+    loader, asked = _lookup_loader(650)
+    assert asked == [300, 300, 50]
+    assert loader.warnings == []
+    for i in (0, 299, 300, 649):
+        assert f'new capability "Probe {i} search"; nearest existing: "Keyword search"' in loader.notes
+    assert f'new capability "{"x" * 120}"; not looked up for nearest names (over 100 characters)' in loader.notes
+
+
+def test_a_nearest_name_lookup_that_fails_is_said():
+    loader, _ = _lookup_loader(2, failing=True)
+    assert loader.warnings == [
+        "couldn't look up the nearest existing names for 2 new capabilities "
+        "(\"Probe 0 search\" to \"Probe 1 search\"): the lookup returned 503: {'detail': 'upstream down'}"
+    ]
+    assert 'new capability "Probe 0 search"' in loader.notes
+
+
 # ---- the unseed script against an instance in memory ----
 
 

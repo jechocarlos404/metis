@@ -457,6 +457,9 @@ def validate(doc):
 # ---------------------------------------------------------------------------
 
 DRY_PREFIX = "dry-run:"
+#: The coverage read's bounds (backend MAX_IDEA_NAMES, MAX_CAPABILITY_NAME).
+COVERAGE_NAMES = 300
+COVERAGE_NAME_LENGTH = 100
 
 
 def prune(payload):
@@ -717,19 +720,33 @@ class Loader:
         if not names:
             return
         nearest = {}
-        if self.dry_run:
+        # The coverage read takes at most COVERAGE_NAMES names a request, each
+        # at most COVERAGE_NAME_LENGTH long, so the names go in chunks and a
+        # longer name isn't looked up. A chunk that fails is said, never dropped.
+        lookup = [n for n in names if len(n.strip()) <= COVERAGE_NAME_LENGTH] if self.dry_run else []
+        for start in range(0, len(lookup), COVERAGE_NAMES):
+            chunk = lookup[start:start + COVERAGE_NAMES]
             status, body = self.api.post(
                 "/api/capabilities/coverage",
-                {"features": [{"name": "seed file", "capabilities": names}]},
+                {"features": [{"name": "seed file", "capabilities": chunk}]},
             )
-            if status == 200:
-                needs = (body.get("features") or [{}])[0].get("capabilities") or []
-                nearest = {n["name"]: [c["name"] for c in n.get("candidates") or []] for n in needs}
+            if status != 200:
+                self.warnings.append(
+                    f"couldn't look up the nearest existing names for {len(chunk)} new "
+                    f"{'capability' if len(chunk) == 1 else 'capabilities'} "
+                    f"({quoted(chunk[0])} to {quoted(chunk[-1])}): the lookup returned {status}: {body}"
+                )
+                continue
+            for need in (body.get("features") or [{}])[0].get("capabilities") or []:
+                nearest[need["name"]] = [c["name"] for c in need.get("candidates") or []]
         for name in names:
             near = nearest.get(name.strip()) or []
+            too_long = self.dry_run and len(name.strip()) > COVERAGE_NAME_LENGTH
             self.notes.append(
                 f"new capability {quoted(name)}"
                 + (f"; nearest existing: {', '.join(quoted(n) for n in near)}" if near else "")
+                + (f"; not looked up for nearest names (over {COVERAGE_NAME_LENGTH} characters)"
+                   if too_long else "")
             )
 
     def load_motivations(self):

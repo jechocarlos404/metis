@@ -14,6 +14,9 @@ const CONFIDENCES = new Set(["low", "medium", "high"]);
 const TECH_KINDS = new Set(["language", "framework", "library", "runtime", "service", "model", "protocol"]);
 const TECH_LAYERS = new Set(["data", "api", "web", "agent", "infra", "ops"]);
 const TECH_FITS = new Set(["native", "partial", "workaround"]);
+// The coverage read's bounds (backend MAX_IDEA_NAMES, MAX_CAPABILITY_NAME).
+const COVERAGE_NAMES = 300;
+const COVERAGE_NAME_LENGTH = 100;
 // Each kind an import counts, in the words the Settings page counts it in.
 const KINDS = {
   goals: ["goal", "goals"],
@@ -704,22 +707,34 @@ class Loader {
    * existing names, so a near-duplicate is caught before the import. */
   async listAddedCapabilities(names) {
     if (names.length === 0) return;
-    let nearest = new Map();
-    if (this.dryRun) {
+    const nearest = new Map();
+    // The coverage read takes at most COVERAGE_NAMES names a request, each at
+    // most COVERAGE_NAME_LENGTH long, so the names go in chunks and a longer
+    // name isn't looked up. A chunk that fails is said, never dropped.
+    const lookup = this.dryRun ? names.filter((name) => name.trim().length <= COVERAGE_NAME_LENGTH) : [];
+    for (let start = 0; start < lookup.length; start += COVERAGE_NAMES) {
+      const chunk = lookup.slice(start, start + COVERAGE_NAMES);
       const { status, body } = await this.api.post("/api/capabilities/coverage", {
-        features: [{ name: "seed file", capabilities: names }],
+        features: [{ name: "seed file", capabilities: chunk }],
       });
-      if (status === 200) {
-        nearest = new Map(
-          (body.features?.[0]?.capabilities || []).map((need) => [need.name, (need.candidates || []).map((c) => c.name)]),
+      if (status !== 200) {
+        this.warnings.push(
+          `couldn't look up the nearest existing names for ${count(chunk.length, "new capability", "new capabilities")} ` +
+            `(${JSON.stringify(chunk[0])} to ${JSON.stringify(chunk[chunk.length - 1])}): the lookup returned ${status}: ${JSON.stringify(body)}`,
         );
+        continue;
+      }
+      for (const need of body.features?.[0]?.capabilities || []) {
+        nearest.set(need.name, (need.candidates || []).map((c) => c.name));
       }
     }
     for (const name of names) {
       const near = nearest.get(name.trim()) || [];
+      const tooLong = this.dryRun && name.trim().length > COVERAGE_NAME_LENGTH;
       this.notes.push(
         `new capability ${JSON.stringify(name)}` +
-          (near.length > 0 ? `; nearest existing: ${near.map((n) => JSON.stringify(n)).join(", ")}` : ""),
+          (near.length > 0 ? `; nearest existing: ${near.map((n) => JSON.stringify(n)).join(", ")}` : "") +
+          (tooLong ? `; not looked up for nearest names (over ${COVERAGE_NAME_LENGTH} characters)` : ""),
       );
     }
   }

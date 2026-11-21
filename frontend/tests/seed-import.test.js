@@ -74,6 +74,9 @@ class FakeMetis {
       return [201, row];
     }
     if (route === "POST /api/capabilities/coverage") {
+      // The backend's bounds: 300 names a request, each at most 100 long.
+      const asked = body.features.flatMap((f) => f.capabilities);
+      if (asked.length > 300 || asked.some((name) => name.length > 100)) return [422, { detail: "too many or too long" }];
       const words = (name) => new Set(name.toLowerCase().split(/\W+/).filter(Boolean));
       const needs = body.features[0].capabilities.map((name) => ({
         name,
@@ -444,6 +447,41 @@ describe("a product's own seed is the authority on its features", () => {
     assert.deepEqual(body.counts.features, { reused: 1, rejected: 1 });
     assert.ok(!body.notes.some((n) => n.startsWith("feature ")));
     assert.equal(body.warnings.length, 1);
+  });
+});
+
+describe("a file that adds more capabilities than one lookup takes", () => {
+  const LONG = `Reads ${"very ".repeat(25)}long names`;
+  const many = (n) => seed({
+    capabilities: [
+      ...Array.from({ length: n }, (_, i) => ({ ref: `c${i}`, name: `Probe ${i} search` })),
+      { ref: "c-long", name: LONG },
+    ],
+    features: [{ ref: "f", product_ref: "p", name: PLAN, capability_refs: ["c0", "c-long"] }],
+  });
+
+  test("asks in chunks of 300, and every new name gets its nearest names", async () => {
+    use(new FakeMetis({ capabilities: [{ name: "Keyword search" }] }));
+    const { status, body } = await importSeed(many(650));
+    assert.equal(status, 200);
+    const lookups = metis.requests.filter((r) => r.path === "/api/capabilities/coverage");
+    assert.deepEqual(lookups.map((r) => r.body.features[0].capabilities.length), [300, 300, 50]);
+    assert.deepEqual(body.warnings, []);
+    for (const i of [0, 299, 300, 649]) {
+      assert.ok(body.notes.includes(`new capability "Probe ${i} search"; nearest existing: "Keyword search"`), `Probe ${i}`);
+    }
+    assert.ok(body.notes.includes(`new capability ${JSON.stringify(LONG)}; not looked up for nearest names (over 100 characters)`));
+  });
+
+  test("a lookup that fails is said, with the names it was for", async () => {
+    use(new FakeMetis({ capabilities: [{ name: "Keyword search" }] }));
+    metis.failing.set("POST /api/capabilities/coverage", [503, { detail: "upstream down" }]);
+    const { status, body } = await importSeed(many(2));
+    assert.equal(status, 200);
+    assert.deepEqual(body.warnings, [
+      `couldn't look up the nearest existing names for 2 new capabilities ("Probe 0 search" to "Probe 1 search"): the lookup returned 503: {"detail":"upstream down"}`,
+    ]);
+    assert.ok(body.notes.includes('new capability "Probe 0 search"'));
   });
 });
 

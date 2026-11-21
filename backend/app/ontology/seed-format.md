@@ -320,7 +320,9 @@ satisfies. A technology is shared across products, like a capability.
   derived slug is also compared with each capability's current name, slugified
   the same way. Case, accents and punctuation never make a second capability. Every
   capability the file would create is listed by name in the dry run, with the
-  closest existing names, so a near-duplicate can be caught before the import.
+  closest existing names, so a near-duplicate can be caught before the import
+  (a name over 100 characters is listed without them; if the lookup fails, the
+  dry run says so).
 - An existing feature (matched by (product, name)) is reused, and its confirmed
   links only grow: every `capability_refs` entry it does not realize yet is
   added, and a link the file leaves out is never removed. A product's own seed

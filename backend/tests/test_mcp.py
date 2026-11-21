@@ -807,6 +807,13 @@ async def test_redundancy_says_when_there_is_nothing_to_compare(api):
         await stack_service.record_usage(s, w["climb"].id, ProductTechnologyWrite(tech_id=quiet.id))
     text = await server._dispatch("stack_redundancy", {"product": "can-i-climb"})
     assert "Unresolved" not in text
+    # A technology recorded, no stack, nothing overlapping: it says what it
+    # compared rather than a bare 0 (D39).
+    _conventions(text)
+    assert (
+        "No two technologies can-i-climb uses answer the same capability natively or partly. "
+        "This compares its recorded technology uses, so it needs no stack."
+    ) in text.splitlines()
 
 
 async def test_own_products_are_not_scored(api):

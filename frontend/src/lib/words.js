@@ -40,7 +40,7 @@ export const productOptions = (products) =>
 
 // ---- Shared vocabulary (PRODUCT.md: plain words on screen, raw underneath) ----
 
-/** Capability maturity. "Proven" = beta or stable. */
+/** Capability maturity. "In use" = beta or stable. */
 export const MATURITY = {
   planned: "planned",
   alpha: "alpha",
@@ -154,7 +154,7 @@ export const andList = (names) =>
 
 /** One-line headline for a coverage report, the same wording everywhere. */
 export function coverageHeadline(report) {
-  return `We have ${report.existing} of the ${report.needed} capabilities needed · ${report.mature} proven (beta or stable)`;
+  return `We have ${report.existing} of the ${report.needed} capabilities needed · ${report.mature} in use (beta or stable)`;
 }
 
 // ---- A scored product (GET /products/{id}/coverage) ----

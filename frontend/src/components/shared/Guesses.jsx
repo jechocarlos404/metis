@@ -3,6 +3,9 @@ import { Badge, Button, DeleteConfirm } from "../../ds";
 import { api } from "../../lib/api.js";
 import { CONFIDENCE } from "../../lib/words.js";
 
+// Rejecting deletes the row; a seed file that still lists the guess makes it again.
+const REJECT_NOTE = "Importing a seed file that still lists it brings it back.";
+
 /**
  * Guessed capability links for editors and admins: confirm one to make it a
  * fact, or reject it. Renders nothing when there are none, and nothing for
@@ -87,11 +90,12 @@ export function Guesses({ query, name = "capability", title = "Guesses", onConfi
                   <Button size="sm" variant="secondary" disabled={busy === g.id} onClick={() => act(g, true)}>Confirm</Button>
                   <DeleteConfirm armed={rejecting === g.id} onArm={() => setRejecting(g.id)} onCancel={() => setRejecting(null)}
                     onConfirm={() => act(g, false)} disabled={busy === g.id} label="Reject" confirmLabel="Reject guess" />
+                  {rejecting === g.id && <span style={{ color: "var(--text-secondary)" }}>{REJECT_NOTE}</span>}
                 </>
               )}
               <span role="status" style={{ color: state === "confirmed" ? "var(--ok-fg)" : "var(--text-secondary)" }}>
                 {state === "confirmed" && <>Confirmed. {g.subject_name} now counts as using <a href={`/capabilities/${g.capability_slug}`}>{g.capability_name}</a>.</>}
-                {state === "rejected" && "Rejected. The guess is gone and counts nowhere."}
+                {state === "rejected" && `Removed. ${REJECT_NOTE}`}
               </span>
             </div>
           </div>

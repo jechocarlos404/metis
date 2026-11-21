@@ -439,7 +439,7 @@ export default function ProductsIsland({ canWrite = true }) {
         {productDialog?.mode === "edit" && confirmingDelete && <DeleteWhat product={product} features={features ?? []} />}
         {productDialog && (
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            <Input label="Name" value={productDialog.name} onChange={(e) => setProductDialog({ ...productDialog, name: e.target.value })} placeholder="PM tracker export" />
+            <Input label="Name" value={productDialog.name} onChange={(e) => setProductDialog({ ...productDialog, name: e.target.value })} placeholder="e.g. Trail planner" />
             <Input label="Summary" value={productDialog.summary} onChange={(e) => setProductDialog({ ...productDialog, summary: e.target.value })} />
             {!productDialog.external && (
               <Select label="Goal" value={productDialog.goalId} onChange={(e) => setProductDialog({ ...productDialog, goalId: e.target.value })}

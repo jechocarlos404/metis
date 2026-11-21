@@ -47,3 +47,11 @@ test("Home and Capabilities explain 'in N products' with the one sentence (R-N5)
     assert.doesNotMatch(src, /const REUSE_NOTE/, f);
   }
 });
+
+test("Needs attention's no-feature finding doesn't borrow the 'not built yet' pill's word (B44)", async () => {
+  const { readFileSync } = await import("node:fs");
+  const src = readFileSync(new URL("../src/components/islands/CapabilitiesIsland.jsx", import.meta.url), "utf8");
+  const line = src.split("\n").find((l) => l.trim().startsWith("aspirational_gap:"));
+  assert.ok(line);
+  assert.doesNotMatch(line, /NEED\.none\.label|not built yet/);
+});

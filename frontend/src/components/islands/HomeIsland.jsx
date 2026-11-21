@@ -76,7 +76,7 @@ export default function HomeIsland({ canWrite = false, isAdmin = false }) {
     return (
       <>
         <PageHeader title="Home" />
-        <GetStartedIsland canWrite={canWrite} isAdmin={isAdmin} products={products} onReload={load} />
+        <GetStartedIsland isAdmin={isAdmin} products={products} onReload={load} />
       </>
     );
   }

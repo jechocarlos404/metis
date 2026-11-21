@@ -1,7 +1,7 @@
 import React from "react";
 import { PageHeader } from "../shell/PageHeader.jsx";
 import { Button, Checkbox, Dialog, Icon, IconButton, Input, PriorityBadge, Select, StatusBadge, Tabs, Tag, DeleteConfirm, tabId } from "../../ds";
-import { EDGE, EDGE_INCOMING, LAYER, PRIORITY_HINT, andList, count, plain, priorityLabel, productOptions, statusLabel } from "../../lib/words.js";
+import { EDGE, EDGE_INCOMING, LAYER, PRIORITY_HINT, andList, count, featureDeleteKept, plain, priorityLabel, productOptions, statusLabel } from "../../lib/words.js";
 import { Term } from "../shared/Term.jsx";
 import { CapabilityPicker } from "../shared/CapabilityPicker.jsx";
 import { Guesses } from "../shared/Guesses.jsx";
@@ -18,13 +18,6 @@ const GROUPS = [
   { value: "capability", label: "Capability" },
   { value: "goal", label: "Goal" },
 ];
-
-// Rows a delete keeps but leaves without the deleted one (the API's
-// detaches), by name: "story Plan (Search epic)", "2 journey steps: a (J), b (J)".
-// The API's table labels are plural, as on /data.
-const keptRows = (detaches) => andList(detaches.map((t) => (t.count === 1
-  ? `${t.label.replace(/ies$/, "y").replace(/s$/, "").toLowerCase()} ${t.names[0]}`
-  : `${t.count} ${t.label.toLowerCase()}: ${t.names.join(", ")}`)));
 
 export default function FeaturesIsland({ canWrite = true }) {
   const [tab, setTab] = React.useState("directory");
@@ -427,7 +420,10 @@ export default function FeaturesIsland({ canWrite = true }) {
       }
       setDialog(null);
     } catch (e) {
-      setError(String(e.message));
+      // A name the product already has links to that feature (B51).
+      setError(e instanceof ApiError && e.status === 409 && e.existing?.id
+        ? <>{e.detail}. <a href={`/features?feature=${e.existing.id}`}>Open {e.existing.name}</a></>
+        : String(e.message));
     } finally {
       setSaving(false);
     }
@@ -729,18 +725,9 @@ export default function FeaturesIsland({ canWrite = true }) {
           {error && <div role="alert" style={{ fontSize: "var(--text-sm)", color: "var(--danger-fg)" }}>{error}</div>}
           {/* What stays but loses it: stories and journey steps that name it,
               and the links to other features it drops (B46). */}
-          {confirmingDelete && detaches?.length > 0 && (() => {
-            const kept = detaches.filter((t) => t.table !== "feature_edges");
-            const links = detaches.find((t) => t.table === "feature_edges");
-            return (
-              <div role="note" style={{ fontSize: "var(--text-sm)", color: "var(--text-body)" }}>
-                Deleting it {[
-                  kept.length > 0 && `clears it from ${keptRows(kept)}`,
-                  links && `drops ${links.count === 1 ? "the link" : `${links.count} links:`} ${andList(links.names)}`,
-                ].filter(Boolean).join(" and ")}.
-              </div>
-            );
-          })()}
+          {confirmingDelete && featureDeleteKept(detaches) && (
+            <div role="note" style={{ fontSize: "var(--text-sm)", color: "var(--text-body)" }}>{featureDeleteKept(detaches)}</div>
+          )}
           <Input label="Name (what the user gets, verb phrase)" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="Export tickets to Notion" />
           <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             <span style={{ fontSize: "var(--text-xs)", fontWeight: "var(--weight-medium)", color: "var(--text-heading)" }}>Description</span>

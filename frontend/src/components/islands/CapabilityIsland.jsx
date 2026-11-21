@@ -6,7 +6,7 @@ import { Term } from "../shared/Term.jsx";
 import { Guesses } from "../shared/Guesses.jsx";
 import { api } from "../../lib/api.js";
 import { readParam, writeParams } from "../../lib/url-state.js";
-import { FIT, MATURITY, NEED, andList, count, needKey, plain, statusLabel } from "../../lib/words.js";
+import { FIT, MATURITY, NEED, andList, capabilityDeleteKept, capabilityDeleteLinks, count, needKey, plain, statusLabel } from "../../lib/words.js";
 import { FIT_TONE, STANCE_TONE } from "../../lib/ontology.js";
 
 /**
@@ -55,18 +55,12 @@ function treeOptions(all, excluded) {
   return out;
 }
 
-// Rows a delete keeps but leaves without the deleted one (the API's
-// detaches), by name: "epic Search (Climb)", "2 stack slots: a (S), b (S)".
-// The API's table labels are plural, as on /data.
-const keptRows = (detaches) => andList(detaches.map((t) => (t.count === 1
-  ? `${t.label.replace(/ies$/, "y").replace(/s$/, "").toLowerCase()} ${t.names[0]}`
-  : `${t.count} ${t.label.toLowerCase()}: ${t.names.join(", ")}`)));
-
 export default function CapabilityIsland({ slug, canWrite = false }) {
   const [inventory, setInventory] = React.useState(null);
   const [supply, setSupply] = React.useState(null);
   const [goals, setGoals] = React.useState([]);
   const [motivations, setMotivations] = React.useState(null);
+  const [bundles, setBundles] = React.useState([]); // every capability a product added by hand
   const [notFound, setNotFound] = React.useState(false);
   const [error, setError] = React.useState(null);
   const [saved, setSaved] = React.useState(null); // what the last edit changed, said in place
@@ -86,14 +80,16 @@ export default function CapabilityIsland({ slug, canWrite = false }) {
 
   const load = React.useCallback(async () => {
     try {
-      const [inv, sup, goalList] = await Promise.all([
+      const [inv, sup, goalList, bundleList] = await Promise.all([
         api("/capabilities/inventory"),
         api(`/capabilities/${slug}/supply`),
         api("/goals"),
+        api("/product-bundles"),
       ]);
       setInventory(inv);
       setSupply(sup);
       setGoals(goalList);
+      setBundles(bundleList);
       const techs = await Promise.all((sup.answer ?? []).map((o) => api(`/tech/${o.tech}`).catch(() => null)));
       setTechNames(Object.fromEntries(techs.filter(Boolean).map((t) => [t.slug, t.name])));
       const entry = inv.find((c) => c.slug === slug);
@@ -144,6 +140,8 @@ export default function CapabilityIsland({ slug, canWrite = false }) {
   };
   const ours = groups(cap.products, false);
   const theirs = groups(cap.external_products, true);
+  // Products that added it by hand, with or without a feature for it (B46).
+  const byHand = bundles.filter((b) => b.capability_id === cap.id).sort((a, b) => a.product_name.localeCompare(b.product_name));
 
   const offers = supply.answer ?? [];
   const blockedBy = (supply.unresolved ?? []).flatMap((u) => u.blocked_by ?? []);
@@ -297,28 +295,18 @@ export default function CapabilityIsland({ slug, canWrite = false }) {
                 </span>
               )}
               {/* What goes with it: the links to it that a delete removes. */}
-              {confirmingDelete && (motivations?.length > 0 || guessCount > 0) && (
+              {confirmingDelete && capabilityDeleteLinks(motivations, guessCount) && (
                 <span style={{ fontSize: "var(--text-xs)", color: "var(--text-body)" }}>
-                  {[
-                    motivations?.length > 0 && `Unlinks ${motivations.length === 1 ? "goal" : "goals"} ${andList(motivations.map((g) => g.display_id))}`,
-                    guessCount > 0 && `drops ${count(guessCount, "guess", "guesses")} waiting for review`,
-                  ].filter(Boolean).join(" and ")}.
+                  {capabilityDeleteLinks(motivations, guessCount)}
                 </span>
               )}
               {/* What stays but loses it: epics and stack slots that name it,
                   and products that added it by hand (B46). */}
-              {confirmingDelete && detaches?.length > 0 && (() => {
-                const kept = detaches.filter((t) => t.table !== "product_bundles");
-                const byHand = detaches.find((t) => t.table === "product_bundles");
-                return (
-                  <span style={{ fontSize: "var(--text-xs)", color: "var(--text-body)" }}>
-                    {[
-                      kept.length > 0 && `Clears it from ${keptRows(kept)}`,
-                      byHand && `takes it off the capabilities ${andList(byHand.names)} added by hand`,
-                    ].filter(Boolean).join(" and ").replace(/^t/, "T")}.
-                  </span>
-                );
-              })()}
+              {confirmingDelete && capabilityDeleteKept(detaches) && (
+                <span style={{ fontSize: "var(--text-xs)", color: "var(--text-body)" }}>
+                  {capabilityDeleteKept(detaches)}
+                </span>
+              )}
               <DeleteConfirm armed={confirmingDelete} onArm={armDelete} onCancel={() => setConfirmingDelete(false)}
                 onConfirm={remove} disabled={saving} label="Delete" confirmLabel="Delete capability" />
             </span>
@@ -359,7 +347,7 @@ export default function CapabilityIsland({ slug, canWrite = false }) {
           <h2 style={H2}>Who uses it</h2>
           {ours.length === 0 ? (
             <div style={NOTE}>
-              None of our products uses it yet.{" "}
+              {byHand.length ? "No feature of ours uses it yet." : "None of our products uses it yet."}{" "}
               {canWrite ? <>Link a feature to it on <a href="/features">Features</a>.</> : "An editor or admin can link features to it."}
             </div>
           ) : (
@@ -367,6 +355,19 @@ export default function CapabilityIsland({ slug, canWrite = false }) {
               {!cap.ours && <div style={NOTE}>Not built yet: our features for it are planned or in progress.</div>}
               {ours.map((g) => <ProductGroup key={g.product?.id ?? "none"} group={g} slugByName={slugByName} external={false} />)}
             </>
+          )}
+          {byHand.length > 0 && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <div style={SUBHEAD} title="product_bundles">Added by hand (not counted)</div>
+              <div style={{ fontSize: "var(--text-sm)" }}>
+                {byHand.map((b, i) => (
+                  <React.Fragment key={b.id}>
+                    {i > 0 && ", "}
+                    <a href={`/products?product=${b.product_id}`}>{b.product_name}</a>
+                  </React.Fragment>
+                ))}
+              </div>
+            </div>
           )}
           {canWrite && <Guesses query={{ capability_id: cap.id }} name="subject" title="Features and technologies guessed to use it" onConfirmed={() => load()} onCount={setGuessCount} />}
           {theirs.length > 0 && (

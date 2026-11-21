@@ -102,22 +102,20 @@ def test_tool_names_are_the_question_keys():
     assert len(PROMPTS) == 3
 
 
-async def test_the_tech_tools_are_listed_once_the_catalog_has_a_technology(api):
-    """The technology plane stays hidden until it has data: with an empty
-    catalog only the inventory tools are listed, and a tech tool called by
-    name still answers. A catalog that can't be read hides nothing."""
+async def test_every_tool_is_listed_and_a_tech_tool_on_an_empty_catalog_says_so(api):
+    """A client lists tools once, when it connects, and is never told the
+    catalog filled, so a tool hidden then stays out of reach (D43). Every tool
+    is listed; on an empty catalog a technology tool answers, through the
+    SDK's own handlers as a client calls it, and says how one gets recorded."""
     import mcp.types as types
 
-    _, db = api
     listed = server.server.request_handlers[types.ListToolsRequest]
-
-    async def names():
-        return {t.name for t in (await listed(types.ListToolsRequest(method="tools/list"))).root.tools}
-
-    assert await names() == INVENTORY_TOOLS
-    assert server.TECH_TOOLS | INVENTORY_TOOLS == {t.name for t in TOOLS}
-    # Through the SDK's own handler, as a client calls it: an unlisted tool
-    # must still run, not be refused.
+    tools = (await listed(types.ListToolsRequest(method="tools/list"))).root.tools
+    assert [t.name for t in tools] == [t.name for t in TOOLS]
+    assert {t.name for t in TOOLS} - INVENTORY_TOOLS == {
+        "tech_search", "capability_supply", "tech_blast_radius", "tech_exposure",
+        "stack_redundancy", "tech_encounters", "stack_recommend", "propose_binding",
+    }
     called = server.server.request_handlers[types.CallToolRequest]
     answer = (
         await called(
@@ -129,18 +127,7 @@ async def test_the_tech_tools_are_listed_once_the_catalog_has_a_technology(api):
     ).root
     assert not answer.isError
     assert "No technology is recorded yet" in answer.content[0].text
-
-    async with db() as s:
-        await tech_service.create_technology(
-            s, TechnologyCreate(slug="redis", name="Redis", kind=TechKind.service)
-        )
-    assert await names() == {t.name for t in TOOLS}
-
-    async def unreachable(*args, **kwargs):
-        raise server.SetupError("Cannot reach the metis API.")
-
-    server.client.get = unreachable
-    assert await names() == {t.name for t in TOOLS}
+    assert not server.server.create_initialization_options().capabilities.tools.listChanged
 
 
 def test_no_tool_mutates():
@@ -820,6 +807,13 @@ async def test_redundancy_says_when_there_is_nothing_to_compare(api):
         await stack_service.record_usage(s, w["climb"].id, ProductTechnologyWrite(tech_id=quiet.id))
     text = await server._dispatch("stack_redundancy", {"product": "can-i-climb"})
     assert "Unresolved" not in text
+    # A technology recorded, no stack, nothing overlapping: it says what it
+    # compared rather than a bare 0 (D39).
+    _conventions(text)
+    assert (
+        "No two technologies can-i-climb uses answer the same capability natively or partly. "
+        "This compares its recorded technology uses, so it needs no stack."
+    ) in text.splitlines()
 
 
 async def test_own_products_are_not_scored(api):
@@ -1259,8 +1253,24 @@ async def test_an_unreachable_backend_says_which_and_the_setting(api, monkeypatc
     text = result.content[0].text
     assert text.startswith(
         "Keycloak refused to sign this server in as metis-mcp "
-        "(401: Invalid client credentials). Check KEYCLOAK_MCP_CLIENT_SECRET"
+        "(401: Invalid client credentials). Check METIS_MCP_CLIENT_SECRET"
     )
+
+
+def test_the_client_secret_is_read_under_the_name_env_example_gives(tmp_path, monkeypatch):
+    """.env.example and compose say METIS_MCP_CLIENT_SECRET; a stdio server
+    reading the root .env took only KEYCLOAK_MCP_CLIENT_SECRET (D46b). The
+    documented name wins, and the old one still works on its own."""
+    for name in ("METIS_MCP_CLIENT_SECRET", "KEYCLOAK_MCP_CLIENT_SECRET"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("METIS_MCP_CLIENT_SECRET=from-dot-env\n")
+    assert Settings().keycloak_mcp_client_secret == "from-dot-env"
+    (tmp_path / ".env").write_text("")
+    monkeypatch.setenv("KEYCLOAK_MCP_CLIENT_SECRET", "old-name")
+    assert Settings().keycloak_mcp_client_secret == "old-name"
+    monkeypatch.setenv("METIS_MCP_CLIENT_SECRET", "new-name")
+    assert Settings().keycloak_mcp_client_secret == "new-name"
 
 
 async def test_an_auth_off_server_against_an_auth_on_api_says_so(api, monkeypatch):

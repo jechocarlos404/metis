@@ -61,6 +61,71 @@ import urllib.parse
 import urllib.request
 
 
+#: Every key the format has, per kind of object. Any other key is refused by
+#: name: a misspelled one ("stauts") would otherwise be dropped without a word.
+#: `source` and `facets` are free-form, so their keys are not checked.
+KEYS = {
+    "file": {"format", "source", "goals", "capabilities", "motivations", "features", "edges",
+             "products", "technologies"},
+    "goals": {"ref", "goal_type", "parent_ref", "title", "description", "success_criteria",
+              "priority", "status"},
+    "capabilities": {"ref", "parent_ref", "name", "slug", "description", "maturity", "facets",
+                     "evidence_anchors"},
+    "motivations": {"goal_ref", "capability_ref"},
+    "features": {"ref", "capability_refs", "capability_ref", "unknown_capabilities",
+                 "capability_guesses", "product_ref", "name", "description", "facets", "status",
+                 "priority", "priority_rationale"},
+    "capability_guesses": {"capability_ref", "confidence", "basis"},
+    "edges": {"src_ref", "dst_ref", "kind"},
+    "products": {"ref", "goal_ref", "name", "summary", "body", "external", "bundle_refs",
+                 "decomposition"},
+    "decomposition": {"summary", "epics"},
+    "epics": {"title", "acceptance_criteria", "capability_ref", "stories"},
+    "stories": {"title", "description", "feature_ref", "tickets"},
+    "tickets": {"title", "description", "technical_approach", "acceptance_criteria",
+                "affected_files", "context_budget"},
+    "technologies": {"ref", "name", "slug", "kind", "layer", "products", "satisfies"},
+    "satisfies": {"capability_ref", "fit", "confidence", "basis"},
+}
+
+
+def _check_keys(errors, doc):
+    """Each object's keys against KEYS, named by the object's path."""
+    def check(where, item, kind):
+        if not isinstance(item, dict):
+            return {}
+        for key in item:
+            if key not in KEYS[kind]:
+                errors.append(f"{where}: unknown key {key!r}")
+        return item
+
+    def each(items):
+        return enumerate(items if isinstance(items, list) else [])
+
+    check("the file", doc, "file")
+    for collection in ("goals", "capabilities", "motivations", "features", "edges", "products",
+                       "technologies"):
+        for i, raw in each(doc.get(collection)):
+            ref = raw.get("ref") if isinstance(raw, dict) else None
+            where = f"{collection}[{i}]" if collection in ("motivations", "edges") else f"{collection}[{i}] ({ref})"
+            item = check(where, raw, collection)
+            if collection == "features":
+                for j, guess in each(item.get("capability_guesses")):
+                    check(f"{where}.capability_guesses[{j}]", guess, "capability_guesses")
+            if collection == "technologies":
+                for j, link in each(item.get("satisfies")):
+                    check(f"{where}.satisfies[{j}]", link, "satisfies")
+            if collection == "products":
+                decomp = check(f"{where}.decomposition", item.get("decomposition"), "decomposition")
+                for j, epic in each(decomp.get("epics")):
+                    ewhere = f"{where}.epics[{j}]"
+                    for k, story in each(check(ewhere, epic, "epics").get("stories")):
+                        swhere = f"{ewhere}.stories[{k}]"
+                        for t, ticket in each(check(swhere, story, "stories").get("tickets")):
+                            check(f"{swhere}.tickets[{t}]", ticket, "tickets")
+
+
+
 IN_APP = (
     "Deletes need a person signed in to the app as an editor or admin, and this "
     "script signs no one in. An editor or admin can remove it in the app "
@@ -95,6 +160,9 @@ class Api:
     def __init__(self, base_url, token=None):
         self.base = base_url.rstrip("/")
         self.token = token
+        # A read refused with the role sentence: every surface may read, so
+        # only the account's role refuses one (guesses are editor-only).
+        self.role_refused = None
 
     def request(self, method, path, payload=None):
         url = f"{self.base}{path}"
@@ -133,6 +201,8 @@ class Api:
         status, body = self.request("GET", path)
         if status == 200:
             return body
+        if status == 403 and isinstance(body, dict) and isinstance(body.get("detail"), str):
+            self.role_refused = body["detail"]
         return [] if status == 404 else None
 
     def delete(self, path):
@@ -227,12 +297,13 @@ class Unseeder:
             {p["name"]: p for p in self.inst_prods},
             lambda p: p.get("name"),
         )
-        # A feature is its product's: identity is (product, name), so two
-        # products may each have a "Sign in" without one unseed taking both.
+        # A feature is its product's: identity is (product, name ignoring case,
+        # as the API holds it), so two products may each have a "Sign in"
+        # without one unseed taking both.
         self.feats = self._match(
             "features",
-            lambda f: ((self.prods.get(f.get("product_ref")) or {}).get("id"), f.get("name")),
-            {(f.get("product_id"), f["name"]): f for f in self.inst_feats},
+            lambda f: ((self.prods.get(f.get("product_ref")) or {}).get("id"), (f.get("name") or "").lower()),
+            {(f.get("product_id"), f["name"].lower()): f for f in self.inst_feats},
             lambda f: f.get("name"),
         )
         self.techs = self._match(
@@ -276,9 +347,16 @@ class Unseeder:
         if self.unreadable:
             what = " or ".join(self.unreadable)
             if not dry_run:
+                # A viewer can't remove it in the app either, as the seeder says.
+                who = (
+                    f"This account isn't an editor or admin ({self.api.role_refused}), so it "
+                    "can't delete, from a script or in the app; an editor or admin can. Ask one "
+                    "to remove it in the app (Settings, Seed files: preview, then remove)."
+                    if self.api.role_refused else IN_APP
+                )
                 sys.exit(
                     f"error: this token cannot read {what}, so it cannot tell which "
-                    "capabilities and technologies are safe to delete. Nothing was deleted. " + IN_APP
+                    "capabilities and technologies are safe to delete. Nothing was deleted. " + who
                 )
             msg = (
                 f"this token cannot read {what}"
@@ -1015,6 +1093,15 @@ def main():
             f"error: {args.seed_file} is a metis-fill-gaps file. Unseeding it would delete the "
             "product's real features. Remove a single link on the desktop instead."
         )
+    # The loaders' key check: a misspelled collection ("featurse") would
+    # otherwise remove the rest and keep what it names, a half removal.
+    errors = []
+    _check_keys(errors, doc)
+    if errors:
+        print(f"{args.seed_file} failed validation, so nothing was removed:", file=sys.stderr)
+        for e in errors:
+            print(f"  - {e}", file=sys.stderr)
+        sys.exit(1)
 
     api = Api(args.base_url, args.token)
     status, _ = api.request("GET", "/api/health")

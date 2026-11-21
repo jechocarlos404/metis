@@ -48,6 +48,11 @@ class ToolError(Exception):
     pass
 
 
+def _said(detail) -> str:
+    """A refusal's sentence: a dict detail (a name clash) says it under `message`."""
+    return detail["message"] if isinstance(detail, dict) and "message" in detail else str(detail)
+
+
 # ---- reference resolution (agents may pass UUIDs, display IDs, or names) ----
 
 async def _resolve(session, model, ref: str, prefix: str, name_column=None):
@@ -123,8 +128,17 @@ def _feature_dict(f: Feature) -> dict[str, Any]:
     }
 
 
-def _capability_dict(c: Capability) -> dict[str, Any]:
+async def _standings(session: AsyncSession) -> dict[uuid.UUID, str]:
+    """Each capability's standing in the words its page heads it with
+    (words.js NEED): ours, only elsewhere, not built yet."""
     return {
+        e.id: "ours" if e.ours else "only elsewhere" if e.external_products else "not built yet"
+        for e in await capability_service.inventory(session)
+    }
+
+
+def _capability_dict(c: Capability, standings: dict[uuid.UUID, str] | None = None) -> dict[str, Any]:
+    out = {
         "id": str(c.id),
         "name": c.name,
         "description": c.description,
@@ -132,6 +146,14 @@ def _capability_dict(c: Capability) -> dict[str, Any]:
         "maturity": str(c.maturity),
         "evidence_anchors": list(c.evidence_anchors or []),
     }
+    if standings is not None:
+        # A read says where the capability stands, as its page does. Maturity
+        # describes our build, so a raw `planned` beside "only elsewhere"
+        # read as "still planned" (A54); it is given only when ours.
+        out["standing"] = standings.get(c.id, "not built yet")
+        if out["standing"] != "ours":
+            out["maturity"] = None
+    return out
 
 
 def _ticket_dict(t: Ticket) -> dict[str, Any]:
@@ -222,6 +244,7 @@ async def capability_inventory(ctx: ToolContext) -> ToolResult:
         {
             "name": e.name,
             "ours": e.ours,
+            "standing": "ours" if e.ours else "only elsewhere" if e.external_products else "not built yet",
             # Maturity describes our implementation; meaningless when not ours.
             "maturity": str(e.maturity) if e.ours else None,
             "products": [p.name for p in e.products],
@@ -329,7 +352,8 @@ async def existing_product_coverage(ctx: ToolContext, product: str) -> ToolResul
 
 async def list_capabilities(ctx: ToolContext) -> ToolResult:
     capabilities = await capability_service.list_capabilities(ctx.session)
-    return ToolResult(_dump([_capability_dict(c) for c in capabilities]))
+    standings = await _standings(ctx.session)
+    return ToolResult(_dump([_capability_dict(c, standings) for c in capabilities]))
 
 
 async def search_features(ctx: ToolContext, query: str) -> ToolResult:
@@ -511,7 +535,7 @@ async def motivate_capability(ctx: ToolContext, capability: str, goal: str) -> T
     except HTTPException as e:
         raise ToolError(str(e.detail)) from None
     return ToolResult(_dump({
-        "capability": _capability_dict(capability_obj),
+        "capability": _capability_dict(capability_obj, await _standings(ctx.session)),
         "meaning": f"{goal_obj.title} MOTIVATES {capability_obj.name}",
     }))
 
@@ -541,7 +565,7 @@ async def create_feature(
         )
         feature = await feature_service.create_feature(ctx.session, data, ctx.graph)
     except HTTPException as e:
-        raise ToolError(str(e.detail)) from None
+        raise ToolError(_said(e.detail)) from None
     except ValueError as e:
         raise ToolError(str(e)) from None
     return ToolResult(_dump(_feature_dict(feature)))
@@ -562,7 +586,7 @@ async def update_feature(ctx: ToolContext, feature: str, **fields) -> ToolResult
         data = FeatureUpdate(**{k: v for k, v in fields.items() if v not in (None, "")})
         updated = await feature_service.update_feature(ctx.session, feature_obj.id, data, ctx.graph)
     except HTTPException as e:
-        raise ToolError(str(e.detail)) from None
+        raise ToolError(_said(e.detail)) from None
     except ValueError as e:
         raise ToolError(str(e)) from None
     return ToolResult(_dump(_feature_dict(updated)))
@@ -621,7 +645,7 @@ async def capability_rollup(ctx: ToolContext, capability: str) -> ToolResult:
     capability_obj = await _resolve(ctx.session, Capability, capability, "CAP", Capability.name)
     rollup = await capability_service.rollup(ctx.session, capability_obj.id)
     return ToolResult(_dump({
-        "capability": _capability_dict(capability_obj),
+        "capability": _capability_dict(capability_obj, await _standings(ctx.session)),
         "rollup": rollup.model_dump(),
     }))
 
@@ -787,7 +811,7 @@ SHARED_TOOLS = [
     _tool("existing_product_coverage", "How much of an existing product (typically an external one) we could build from what we already have, as the product page says it: its features in four groups that sum to the total — buildable, partly known, missing, not described — then the capabilities we don't have, most useful first, and the closest of our products. Quote its groups, counts, rankings and words; never recompute or re-rank them.", {"product": _STR}, ["product"], existing_product_coverage),
     _tool("list_goals", "List all org and product goals with IDs, the goal each sits under (parent), the product each is for (product, null when none), criteria, priority, status.", {}, [], list_goals),
     _tool("list_products", "List all products (Specs) with IDs, names, status, version.", {}, [], list_products),
-    _tool("list_capabilities", "List the capability map (slow plane): IDs, names, parent, maturity, evidence anchors.", {}, [], list_capabilities),
+    _tool("list_capabilities", "List the capability map (slow plane): IDs, names, parent, standing (ours, only elsewhere, not built yet), maturity when ours, evidence anchors.", {}, [], list_capabilities),
     _tool("list_features", "List all features in the library with IDs, realized capability, facets, status, priority.", {}, [], list_features),
     _tool("search_features", "Find features like a query string (trigram + keyword search). Use before creating features to avoid duplicates.", {"query": _STR}, ["query"], search_features),
 ]

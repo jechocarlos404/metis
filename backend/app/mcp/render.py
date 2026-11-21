@@ -194,6 +194,14 @@ def stack_redundancy(envelope: dict) -> str:
     )
     if rows:
         lines += ["", "Flagged, not resolved — two answers can be a deliberate decision."]
+    elif not envelope.get("unresolved"):
+        # Technologies are recorded and none overlap. Say what was compared:
+        # recorded uses, not a stack, so a product with none still answers (D39).
+        slug = envelope["subject"]["slug"]
+        lines.append(
+            f"No two technologies {slug} uses answer the same capability natively or "
+            "partly. This compares its recorded technology uses, so it needs no stack."
+        )
     return _tail(envelope, lines)
 
 

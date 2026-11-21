@@ -18,7 +18,7 @@ from app.schemas.product import (
     ProductRead,
     ProductUpdate,
 )
-from app.services import capabilities as capability_service
+from app.services import admin_cascade, capabilities as capability_service
 from app.services import features as feature_service
 from app.services.slugs import unique_slug
 from app.services import decomposition as decomposition_service
@@ -85,6 +85,14 @@ async def update_product(
             session, product.id, getattr(request.app.state, "graph", None)
         )
     return product
+
+
+@router.get("/products/{product_id}/deletes", response_model=list[admin_cascade.NamedCount])
+async def deletes(product_id: uuid.UUID, session: AsyncSession = Depends(get_db)):
+    """What deleting it deletes with it (features, plan, stack, links), named,
+    so the delete can say so before anyone confirms."""
+    await decomposition_service.get_product(session, product_id)
+    return await admin_cascade.deletes(session, "products", product_id)
 
 
 @router.delete("/products/{product_id}", status_code=204)

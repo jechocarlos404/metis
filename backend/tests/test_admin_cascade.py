@@ -430,7 +430,10 @@ async def test_every_detach_is_a_set_null_foreign_key(db):
 async def test_a_guarded_delete_names_the_rows_it_leaves_unlinked(client, db):
     """Deleting a capability clears an epic's and a stack slot's reference to
     it; deleting a feature, a story's and a journey step's. Each is named, with
-    where it sits, before the delete, and the delete changes exactly those."""
+    where it sits, before the delete, and the delete changes exactly those.
+    The links each drops are named too (B46): the product that added the
+    capability by hand, and the feature's links to other features, in the
+    feature page's words."""
     from app.models import JourneyStep, StackSlot, TechStack
     from app.models.enums import TechLayer
     from app.schemas.journey import JourneyCreate, JourneyStepIn
@@ -451,6 +454,14 @@ async def test_a_guarded_delete_names_the_rows_it_leaves_unlinked(client, db):
         session.add_all([epic, StackSlot(stack_id=stack.id, layer=TechLayer.data, role="search index", capability_id=cap.id)])
         await session.flush()
         session.add(Story(epic_id=epic.id, feature_id=feature.id, title="Plan story"))
+        offline = await feature_service.create_feature(
+            session, FeatureCreate(name="Keep notes offline", product_id=product.id, unknown_capabilities=True)
+        )
+        session.add_all([
+            ProductBundle(product_id=product.id, capability_id=cap.id),
+            FeatureEdge(src_id=offline.id, dst_id=feature.id, kind=EdgeKind.DEPENDS_ON),
+            FeatureEdge(src_id=feature.id, dst_id=offline.id, kind=EdgeKind.RELATES_TO),
+        ])
         await session.commit()
         await journey_service.create_journey(
             session, JourneyCreate(name="Ride day", steps=[JourneyStepIn(feature_id=feature.id, label="Plan")])
@@ -464,11 +475,14 @@ async def test_a_guarded_delete_names_the_rows_it_leaves_unlinked(client, db):
     assert said(res.json()) == {
         "epics": (1, ["Search epic (Climb)"]),
         "stack_slots": (1, ["data::search index (Climb stack)"]),
+        "product_bundles": (1, ["Climb"]),
     }
     res = await client.get(f"/api/features/{feature.id}/detaches")
     assert said(res.json()) == {
         "stories": (1, ["Plan story (Search epic)"]),
         "journey_steps": (1, ["Plan (Ride day)"]),
+        "feature_edges": (2, ["\u201cKeep notes offline\u201d needs \u201cPlan a ride\u201d",
+                              "\u201cPlan a ride\u201d related to \u201cKeep notes offline\u201d"]),
     }
     assert (await client.get(f"/api/capabilities/{uuid.uuid4()}/detaches")).status_code == 404
     assert (await client.get(f"/api/features/{uuid.uuid4()}/detaches")).status_code == 404
@@ -480,6 +494,7 @@ async def test_a_guarded_delete_names_the_rows_it_leaves_unlinked(client, db):
         assert await count(session, Story) == 1 and await count(session, JourneyStep) == 1
         for model, fk in ((Epic, "capability_id"), (StackSlot, "capability_id"), (Story, "feature_id"), (JourneyStep, "feature_id")):
             assert await session.scalar(select(getattr(model, fk))) is None, model
+        assert await count(session, ProductBundle) == 0 and await count(session, FeatureEdge) == 0
 
     # Nothing to unlink: an empty list, so the dialog says nothing.
     async with db() as session:

@@ -8,7 +8,7 @@ marked dirty and rebuilt lazily — never the other way around.
 import uuid
 
 from fastapi import HTTPException
-from sqlalchemy import delete, select, text
+from sqlalchemy import delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
@@ -67,11 +67,36 @@ async def _require_product(session: AsyncSession, product_id: uuid.UUID | None) 
         raise HTTPException(404, f"Product {product_id} not found")
 
 
+async def _refuse_same_name(
+    session: AsyncSession, name: str, product_id: uuid.UUID | None, exclude_id: uuid.UUID | None = None
+) -> None:
+    """One feature per name in a product (B51): a second "keep notes when
+    OFFLINE" beside "Keep notes when offline" would split one feature in two,
+    so it is refused, naming the one that exists, as a capability's is."""
+    stmt = select(Feature).where(
+        func.lower(Feature.name) == name.strip().lower(),
+        Feature.product_id.is_not_distinct_from(product_id),
+    )
+    if exclude_id is not None:
+        stmt = stmt.where(Feature.id != exclude_id)
+    existing = await session.scalar(stmt.order_by(Feature.seq).limit(1))
+    if existing is not None:
+        where = "this product" if product_id is not None else "the features with no product"
+        raise HTTPException(
+            409,
+            detail={
+                "message": f'"{existing.name}" is already in {where}',
+                "existing": {"id": str(existing.id), "name": existing.name},
+            },
+        )
+
+
 async def create_feature(
     session: AsyncSession, data: FeatureCreate, graph=None
 ) -> Feature:
     ids = await _resolve_links(session, data.capability_ids, data.unknown_capabilities)
     await _require_product(session, data.product_id)
+    await _refuse_same_name(session, data.name, data.product_id)
     feature = Feature(**data.model_dump(exclude={"capability_ids"}))
     feature.capability_links = [FeatureCapability(capability_id=cid) for cid in ids]
     session.add(feature)
@@ -109,6 +134,10 @@ async def update_feature(
         await _resolve_links(session, feature.capability_ids, unknown)
     if fields.get("product_id") is not None:
         await _require_product(session, fields["product_id"])
+    if "name" in fields or "product_id" in fields:
+        await _refuse_same_name(
+            session, fields.get("name") or feature.name, fields.get("product_id", feature.product_id), feature.id
+        )
     for key, value in fields.items():
         setattr(feature, key, value)
     await session.commit()

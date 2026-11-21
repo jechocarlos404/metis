@@ -1,5 +1,6 @@
 from functools import lru_cache
 
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -27,7 +28,12 @@ class Settings(BaseSettings):
     # the desktop, because `azp` is signed.
     keycloak_desktop_client: str = "metis-web"
     keycloak_mcp_client: str = "metis-mcp"
-    keycloak_mcp_client_secret: str = "dev-mcp-secret"
+    # METIS_MCP_CLIENT_SECRET, the name .env.example and compose use, so the
+    # root .env reaches a stdio server too; the older name still works.
+    keycloak_mcp_client_secret: str = Field(
+        "dev-mcp-secret",
+        validation_alias=AliasChoices("metis_mcp_client_secret", "keycloak_mcp_client_secret"),
+    )
 
     # The MCP server calls the HTTP API rather than the services in-process, so
     # a chat transcript and an API log line up — and so the write boundary is

@@ -304,9 +304,15 @@ async def test_one_shared_word_is_not_a_near_name(db):
     """A did-you-mean must be near the whole name, not share a word or a
     fragment of one. Abbreviations, plurals and typos still are."""
     async with db() as session:
-        for name in ("Ride Prep Checklist", "Bookmarking", "User Authentication", "Payment Processing"):
+        for name in ("Ride Prep Checklist", "Bookmarking", "User Authentication", "Payment Processing",
+                     "Route Planning", "Goal Planning", "Cafe Directory", "Web Search", "Web Analytics",
+                     "Work Breakdown Planning"):
             await make_capability(session, name)
-        typed = ["Ride group chat", "Repair Booking", "Auth", "Payments", "Authentcation"]
+        typed = ["Ride group chat", "Repair Booking", "Auth", "Payments", "Authentcation",
+                 # One long shared word clears the score alone (D45, R-DYM).
+                 "Sprint Planning", "Pod Directory", "Wiki Search", "Route Search", "Sleep Analytics",
+                 # A typo or a changed ending in a name of several words is still near.
+                 "Route Planing", "Work Breakdown Plans"]
         report = await capability_service.coverage(
             session, CoverageRequest.model_validate({"features": [{"name": "x", "capabilities": typed}]})
         )
@@ -317,6 +323,13 @@ async def test_one_shared_word_is_not_a_near_name(db):
         "Auth": ["User Authentication"],
         "Payments": ["Payment Processing"],
         "Authentcation": ["User Authentication"],
+        "Sprint Planning": [],
+        "Pod Directory": [],
+        "Wiki Search": [],
+        "Route Search": [],
+        "Sleep Analytics": [],
+        "Route Planing": ["Route Planning"],
+        "Work Breakdown Plans": ["Work Breakdown Planning"],
     }
 
 

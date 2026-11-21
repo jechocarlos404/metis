@@ -31,8 +31,10 @@ resource that can't be read come back the same way. A subject that doesn't exist
 is an answer, not an error: `0 features are named '…'`, with the features listed
 when several share the name. When none has it, up to three near names follow as
 unconfirmed candidates, each leading with what the next call takes, as
-`capability` and `check_idea` offer them (trigram closeness over 0.6; case is
-ignored, so a case-only difference is always offered):
+`capability` and `check_idea` offer them (trigram closeness over 0.6, and the
+names share more than one word or every word of one is near in the other, so
+"Auth" offers User Authentication but "Sprint Planning" doesn't offer Route
+Planning; case is ignored, so a case-only difference is always offered):
 
 ```
 0 products have id or slug 'Plausible Analytics'. Call `products` for ids and slugs.
@@ -55,7 +57,7 @@ The inventory tools answer the portfolio questions:
 |---|---|---|
 | `products` | Every product, ours and external, with slug and id. Start here so you never guess an id. Given a product id or slug, it lists that product's features instead (name, raw status, id), so `feature_why` and `recheck` never need a guessed name. | `GET /api/products` (`?near=<name>` gives the near names a miss offers; features and journeys take it too), and `GET /api/features` for one product |
 | `capability_inventory` | What we can already do, most reused first: each capability's slug and exact name (a seed file reuses a capability by its name), its maturity when ours, and our products and features working on it at any status (a feature linked only to a sub-capability counts, and the row says how many do). Takes an optional `q` substring filter, applied in the server, and a `limit`. | `GET /api/capabilities/inventory` |
-| `check_idea` | How much of an idea we already have. Each need comes back `ours`, `only elsewhere` (not ours; an external product has it), `not built yet` (named, but no finished feature realizes it), or `no match` with near names listed as unconfirmed candidates. A capability is ours when a finished (`done`) feature of one of our products realizes it. Takes an optional `idea` name. Its `Open:` line pre-fills Home's idea check (`/home?idea=<name>&caps=<slug>,<slug>,...`: matched needs by slug, the rest as typed) and runs it, so the owner can save it as an idea with one click. The tool itself saves nothing. An idea holds at most 100 features and 300 capability names in all, a capability name at most 100 characters and a feature name at most 300 (the biggest real product has 52 features naming 110). Over a limit is refused with the limit named, by the tool's schema or by the API's `422`. | `POST /api/capabilities/coverage` (a read) |
+| `check_idea` | How much of an idea we already have. Each need comes back `ours`, `only elsewhere` (not ours; an external product has it), `not built yet` (named, but no finished feature realizes it), or `no match` with near names listed as unconfirmed candidates. A capability is ours when a finished (`done`) feature of one of our products realizes it. Takes an optional `idea` name. Its `Open:` line pre-fills Home's idea check (`/home?idea=<name>&caps=<slug>,<slug>,...`: matched needs by slug, the rest as typed) and runs it, so the owner can save it as an idea with one click. The tool itself saves nothing. An idea holds at most 100 features and 300 capability names in all, a capability name at most 100 characters and a feature name at most 300 (the biggest real product has 52 features naming 110). Over a limit is refused with the limit named, by the tool's schema or by the API's `422`. The request body is also capped at 64,000 bytes, refused with `413 Request body is over 64000 bytes.` before any limit is checked. Every limit used at once comes to 63,814 bytes as compact ASCII JSON (what this server sends), so accented letters (two bytes each in UTF-8) or spaced JSON (64,414 bytes) cross the byte cap first. | `POST /api/capabilities/coverage` (a read) |
 | `product_score` | How much of an external product, by id or slug, we could build: buildable, partly known, not described, missing a capability. It is a lower bound. Our own products are not scored, as on the desktop: their own features are what make their capabilities ours, so the score would measure itself. | `GET /api/products/{id}/coverage` |
 | `capability` | One capability by slug or name: our features and products, external products listed apart, the goals that motivate it directly, its rollup, and the evidence paths an export recorded. | inventory, then `GET /api/capabilities/{id}/scope`, `/motivations`, `/rollup` |
 | `feature_why` | Why a feature exists, by id or exact name: its capabilities, their parents, and the goals that motivate them. The goals of the feature's own product come first (a goal is its own when the goals API's `product_id` names that product: the product's goal and the tree around it, short of another product's goal, as on the desktop; someone else's product owns none); goals of other products, reached through a shared capability, are listed apart with their products. Each goal says which capability it motivates or which goal it is the parent of. | `GET /api/features/{id}/why`, plus `/api/features/{id}`, `/api/goals`, `/api/motivations`, `/api/products` |
@@ -64,9 +66,9 @@ The inventory tools answer the portfolio questions:
 | `recheck` | If a feature changes, what else to recheck. Takes a feature id or its exact name (a name several features share is listed, not picked). Breaks: features that depend on it, through links of links. Retest (same product): features sharing a confirmed capability, rarest shared capability first. Broad (many features): capabilities used by more than half of the product (and at least 6 features), counted rather than listed. Same capability elsewhere (info only): our other products with the same capabilities; metis does not know whether they share code. Guesses are never counted. | `GET /api/graph/recheck/{id}` |
 
 The technology and buy tools stay hidden on the desktop until there is data for
-them, and are listed here only once the catalog holds a technology (a client
-that listed tools before then sees them when it lists again). Called by name,
-each still answers:
+them, but this server always lists them: a client lists tools once, when it
+connects, and the server can't tell it the catalog filled (`listChanged` is
+false). With no technology recorded, each says so and how one gets recorded:
 
 | Tool | What it answers |
 |---|---|
@@ -83,8 +85,8 @@ Resources: `metis://ontology/model`, `metis://policy/adoptions`,
 `metis://tech/{slug}`, `metis://stacks/{product}`. Prompts:
 `check_this_dependency`, `choose_a_stack`, `explain_the_ontology`.
 
-Capability names match exactly, by slug; products, features and journeys by id,
-slug or exact name. A near name is a candidate for a human to confirm and is
+Capability names match exactly, by slug; products by id or slug; features and
+journeys by id or exact name. A near name is a candidate for a human to confirm and is
 never counted as a match. An empty answer or a gap is a real answer.
 
 ## Auth: two tokens
@@ -116,7 +118,7 @@ never counted as a match. An empty answer or a gap is a real answer.
 | `KEYCLOAK_INTERNAL_URL` | `http://localhost:8080` | Where the token request goes |
 | `KEYCLOAK_REALM` | `metis` | |
 | `KEYCLOAK_MCP_CLIENT` | `metis-mcp` | |
-| `KEYCLOAK_MCP_CLIENT_SECRET` | `dev-mcp-secret` | Matches `keycloak/metis-realm.json`. Change it anywhere real |
+| `METIS_MCP_CLIENT_SECRET` | `dev-mcp-secret` | Matches `keycloak/metis-realm.json`. Change it anywhere real. The older name `KEYCLOAK_MCP_CLIENT_SECRET` is still read when this one isn't set |
 | `MCP_SSE_TOKEN` | empty | Required for `--sse` |
 
 ## stdio (local agents)
@@ -126,7 +128,7 @@ source, using the backend's Python environment:
 
 ```sh
 cd backend
-python -m venv .venv && .venv/bin/pip install -r requirements.txt
+python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 .venv/bin/python -m app.mcp            # speaks MCP on stdin/stdout
 ```
 

@@ -86,3 +86,54 @@ async def test_deleting_an_unknown_product_is_404(app_graph):
     client, _ = app_graph
     res = await client.delete("/api/products/00000000-0000-0000-0000-000000000000")
     assert res.status_code == 404
+
+
+async def test_a_product_delete_names_everything_it_deletes(app_graph, db):
+    """The confirm named only the features (B47). `deletes` names every row
+    the delete takes, by table, from the closure the delete follows, and the
+    delete then removes exactly those."""
+    from app.models import (
+        Epic, FeatureCapability, ProductDecomposition, StackSlot, Story, TechStack,
+    )
+    from app.models.enums import DocStatus, TechLayer
+
+    http, graph = app_graph
+    async with db() as session:
+        cap = await capability_service.create_capability(session, CapabilityCreate(name="Trail notes"))
+        trail = Product(name="Trail Notes", slug="trail-notes")
+        session.add(trail)
+        await session.commit()
+        feature = await feature_service.create_feature(
+            session, FeatureCreate(name="Sync notes later", product_id=trail.id, capability_ids=[cap.id]), graph
+        )
+        plan = ProductDecomposition(product_id=trail.id, version=1, document={}, status=DocStatus.approved)
+        stack = TechStack(name="Trail stack", product_id=trail.id)
+        session.add_all([plan, stack])
+        await session.flush()
+        epic = Epic(product_id=trail.id, decomposition_id=plan.id, title="Offline epic")
+        session.add_all([epic, StackSlot(stack_id=stack.id, layer=TechLayer.data, role="note store")])
+        await session.flush()
+        session.add(Story(epic_id=epic.id, feature_id=feature.id, title="Sync story"))
+        await session.commit()
+        trail_id = trail.id
+
+    res = await http.get(f"/api/products/{trail_id}/deletes")
+    assert res.status_code == 200
+    said = {t["table"]: (t["count"], t["names"]) for t in res.json()}
+    assert said == {
+        "features": (1, ["Sync notes later"]),
+        "feature_capabilities": (1, ["Sync notes later → Trail notes"]),
+        "product_decompositions": (1, ["version 1"]),
+        "epics": (1, ["Offline epic"]),
+        "stories": (1, ["Sync story"]),
+        "tech_stacks": (1, ["Trail stack"]),
+        "stack_slots": (1, ["data::note store"]),
+    }
+    import uuid as _uuid
+    assert (await http.get(f"/api/products/{_uuid.uuid4()}/deletes")).status_code == 404
+
+    assert (await http.delete(f"/api/products/{trail_id}")).status_code == 204
+    async with db() as session:
+        for model in (Product, Feature, FeatureCapability, ProductDecomposition, Epic, Story, TechStack, StackSlot):
+            assert await session.scalar(select(func.count()).select_from(model)) == 0, model
+        assert await session.scalar(select(func.count()).select_from(Capability)) == 1

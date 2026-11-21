@@ -33,8 +33,10 @@ then copy it over both.
 - `source` is free-form provenance metadata; the loader ignores it.
 - Every object takes only the keys this document shows for it. Any other key
   is refused by name, with where it is (`features[3] (f-plan): unknown key
-  'stauts'`), so a misspelling never drops data without a word. `source` and
-  `facets` are free-form, so their keys are not checked.
+  'stauts'`), so a misspelling never drops data without a word. Removing a
+  seed refuses the same file the same way, before it removes anything, so a
+  misspelled `features` never removes the product's goals and keeps its
+  features. `source` and `facets` are free-form, so their keys are not checked.
 - Every collection is optional; omit or leave empty what you don't have.
 - Entities reference each other by `ref` — a short local string handle, unique within
   its own collection. Refs never reach the instance; the loader resolves them to real
@@ -294,7 +296,7 @@ satisfies. A technology is shared across products, like a capability.
 
 - **Idempotent, never deletes.** The loader matches existing entities (goals by
   (goal_type, title); capabilities by slug; products by name; features by
-  (product, name); technologies by slug; edges by (src, dst, kind); motivations,
+  (product, name ignoring case); technologies by slug; edges by (src, dst, kind); motivations,
   product technologies and satisfactions by pair) and reuses them instead of
   duplicating. It never deletes an entity or a confirmed link, and updates only
   two things: an existing feature gains the file's confirmed links it lacks and
@@ -323,7 +325,7 @@ satisfies. A technology is shared across products, like a capability.
   closest existing names, so a near-duplicate can be caught before the import
   (a name over 100 characters is listed without them; if the lookup fails, the
   dry run says so).
-- An existing feature (matched by (product, name)) is reused, and its confirmed
+- An existing feature (matched by (product, name), ignoring case) is reused, and its confirmed
   links only grow: every `capability_refs` entry it does not realize yet is
   added, and a link the file leaves out is never removed. A product's own seed
   is the authority on its own features, so when the file states `status`,

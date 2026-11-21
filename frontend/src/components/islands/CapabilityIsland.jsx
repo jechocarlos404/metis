@@ -305,12 +305,20 @@ export default function CapabilityIsland({ slug, canWrite = false }) {
                   ].filter(Boolean).join(" and ")}.
                 </span>
               )}
-              {/* What stays but loses it: epics and stack slots that name it. */}
-              {confirmingDelete && detaches?.length > 0 && (
-                <span style={{ fontSize: "var(--text-xs)", color: "var(--text-body)" }}>
-                  Clears it from {keptRows(detaches)}.
-                </span>
-              )}
+              {/* What stays but loses it: epics and stack slots that name it,
+                  and products that added it by hand (B46). */}
+              {confirmingDelete && detaches?.length > 0 && (() => {
+                const kept = detaches.filter((t) => t.table !== "product_bundles");
+                const byHand = detaches.find((t) => t.table === "product_bundles");
+                return (
+                  <span style={{ fontSize: "var(--text-xs)", color: "var(--text-body)" }}>
+                    {[
+                      kept.length > 0 && `Clears it from ${keptRows(kept)}`,
+                      byHand && `takes it off the capabilities ${andList(byHand.names)} added by hand`,
+                    ].filter(Boolean).join(" and ").replace(/^t/, "T")}.
+                  </span>
+                );
+              })()}
               <DeleteConfirm armed={confirmingDelete} onArm={armDelete} onCancel={() => setConfirmingDelete(false)}
                 onConfirm={remove} disabled={saving} label="Delete" confirmLabel="Delete capability" />
             </span>

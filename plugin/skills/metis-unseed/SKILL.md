@@ -140,7 +140,9 @@ If the point was to replace the data, re-seed now with the
   answer). Read them, fix the cause, and re-run; rows already gone count as
   `absent`.
 - **Exit 1** is a file or connection error, or a refusal: with auth on and a
-  read-only token, a real run stops before deleting anything.
+  read-only token, a real run stops before deleting anything. A file with a
+  key the format doesn't have (`featurse`) is refused by name, as the loader
+  refuses it, dry run included, before anything is read or deleted.
 - **Never unseed a `metis-seed-gaps.json`.** It re-states a product's real
   features so new links attach to them; unseeding it deletes those features.
   Refuse, and point the owner to the desktop to remove a single link.

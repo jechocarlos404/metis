@@ -25,6 +25,7 @@ VALIDATE = SKILLS / "metis-export" / "scripts" / "validate_seed.py"
 LOADER = SKILLS / "metis-seed-instance" / "scripts" / "seed_instance.py"
 HOOKS = ROOT / "plugin" / "hooks" / "metis_hooks.py"
 JS_IMPORTER = ROOT / "frontend" / "src" / "pages" / "api" / "seed" / "import.js"
+JS_UNSEED = ROOT / "frontend" / "src" / "pages" / "api" / "seed" / "unseed.js"
 SCRIPTS = sorted(SKILLS.glob("*/scripts/*.py"))
 
 VALID = {
@@ -173,6 +174,57 @@ def _validator(path):
 
 def test_the_two_python_validators_are_identical():
     assert _validator(VALIDATE) == _validator(LOADER)
+
+
+def _key_check(path):
+    """KEYS and _check_keys, the part of the validator a removal runs too."""
+    text = path.read_text()
+    return [text[text.index(start):text.index("\n\n\n", text.index(start))]
+            for start in ("#: Every key", "def _check_keys")]
+
+
+def test_the_removal_script_checks_keys_as_the_loaders_do():
+    assert _key_check(UNSEED) == _key_check(VALIDATE)
+
+
+def test_a_misspelled_key_stops_a_removal_before_it_reads_anything(tmp_path):
+    """A misspelled collection would remove the rest and keep what it names:
+    the product's goals go, its features stay (D42). Refused by name, dry run
+    included, before any request (no instance listens at the base URL)."""
+    seed = tmp_path / "seed.json"
+    doc = json.loads(json.dumps(VALID))
+    doc["featurse"] = doc.pop("features")
+    seed.write_text(json.dumps(doc))
+    result = _run(UNSEED, seed, "--dry-run", "--base-url", "http://127.0.0.1:9")
+    assert result.returncode == 1
+    assert "failed validation, so nothing was removed" in result.stderr
+    assert "  - the file: unknown key 'featurse'" in result.stderr
+    assert "cannot reach" not in result.stderr + result.stdout
+
+
+def test_the_in_app_removal_refuses_a_misspelled_key_by_name():
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is not installed; the in-app removal is checked where it is")
+    doc = json.loads(json.dumps(VALID))
+    doc["featurse"] = doc.pop("features")
+    script = (
+        f"import {{ POST }} from {json.dumps(JS_UNSEED.as_uri())};"
+        "let s = ''; process.stdin.on('data', (c) => (s += c));"
+        "process.stdin.on('end', async () => {"
+        "  globalThis.fetch = () => { throw new Error('no request may be sent'); };"
+        "  const request = new Request('http://metis.test/api/seed/unseed', {"
+        "    method: 'POST', body: JSON.stringify({ document: s, dryRun: true }) });"
+        "  const res = await POST({ request, locals: { accessToken: 't' } });"
+        "  console.log(JSON.stringify({ status: res.status, body: await res.json() }));"
+        "});"
+    )
+    result = subprocess.run(
+        [node, "--input-type=module", "-e", script], input=json.dumps(doc),
+        capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == {"status": 400, "body": {"detail": 'the file: unknown key "featurse"'}}
 
 
 @pytest.mark.parametrize("script", SCRIPTS, ids=lambda p: p.name)
@@ -555,3 +607,154 @@ def test_a_technology_list_that_fails_to_read_is_unreadable_not_empty(capsys):
     unseeder = _unseeder(_probe(), PROBE_SEED, failing={"/api/tech?limit=200&offset=0"})
     assert unseeder.unreadable == ["technologies"]
     assert "can't tell" in _run_unseed(unseeder, capsys)
+
+
+def test_a_viewer_hears_it_cannot_remove_in_the_app_either():
+    """Guesses are an editor-only read, so a viewer's real run stops there.
+    It hears what the seeder tells a viewer: not the read-only-token advice
+    (which says a signed-in person can), but that this account can't delete
+    in the app either, and an editor or admin can (D35)."""
+    module = _load(UNSEED, "unseed_instance")
+    routes = _probe()
+
+    class Api(module.Api):
+        def request(self, method, path, payload=None):
+            if path == "/api/guesses":
+                return 403, {"detail": "Requires editor or admin role"}
+            if method == "GET" and path in routes:
+                return 200, routes[path]
+            return 404, None
+
+    with pytest.raises(SystemExit) as stop:
+        module.Unseeder(Api("http://metis.test"), PROBE_SEED, dry_run=False)
+    said = str(stop.value)
+    assert said.startswith("error: this token cannot read guesses")
+    assert "Nothing was deleted." in said
+    assert "(Requires editor or admin role), so it can't delete, from a script or in the app" in said
+    assert "an editor or admin can. Ask one to remove it in the app" in said
+    assert "this script signs no one in" not in said
+
+
+#: B43: the instance holds "Plan a route" needs "Share a route"; a file adds
+#: "Export a route" and three links, two of which close a cycle with it.
+CYCLE_DOC = {
+    "features": [
+        {"ref": "f1", "name": "Plan a route"},
+        {"ref": "f2", "name": "Share a route"},
+        {"ref": "f3", "name": "Export a route"},
+    ],
+    "edges": [
+        {"src_ref": "f2", "dst_ref": "f1", "kind": "DEPENDS_ON"},
+        {"src_ref": "f2", "dst_ref": "f3", "kind": "DEPENDS_ON"},
+        {"src_ref": "f1", "dst_ref": "f3", "kind": "BLOCKS"},
+    ],
+}
+CYCLE_INSTANCE = [{"src_id": "F1", "dst_id": "F2", "kind": "DEPENDS_ON"}]
+CYCLE_SAID = [
+    "would be rejected: That would make a circular dependency: “Plan a route” already needs "
+    "“Share a route”. Remove a link in that chain first.",
+    "would be rejected: That would make a circular dependency: “Plan a route” already needs "
+    "“Export a route” through “Share a route”. Remove a link in that chain first.",
+]
+
+
+@pytest.mark.parametrize("dry_run", [True, False], ids=["dry run", "real run"])
+def test_the_loader_refuses_a_link_that_closes_a_cycle_with_the_instance(dry_run):
+    """The check passed a link the import then had refused (B43). Both runs
+    now run the API's cycle check against the instance's links, in the API's
+    words, and the real one never sends the refused link."""
+    module = _load(LOADER, "seed_instance")
+    posted = []
+
+    class Api(module.Api):
+        def request(self, method, path, payload=None):
+            if method == "GET" and path == "/api/features/edges":
+                return 200, CYCLE_INSTANCE
+            posted.append(payload)
+            return 201, {"id": "e"}
+
+    loader = module.Loader(Api("http://metis.test"), CYCLE_DOC, dry_run=dry_run)
+    loader.feat_ids = {"f1": "F1", "f2": "F2", "f3": "F3" if not dry_run else "dry-run:features:Export a route"}
+    loader.feat_names = {"F1": "Plan a route", "F2": "Share a route", "F3": "Export a route"}
+    loader.load_edges()
+    word = "would be rejected" if dry_run else "rejected"
+    assert loader.warnings == [
+        f"edge f2 -DEPENDS_ON-> f1 {CYCLE_SAID[0].replace('would be rejected', word)}",
+        f"edge f1 -BLOCKS-> f3 {CYCLE_SAID[1].replace('would be rejected', word)}",
+    ]
+    counts = {a: n for (c, a), n in loader.counts.items() if c == "edges"}
+    assert counts == ({"would reject": 2, "would create": 1} if dry_run else {"rejected": 2, "created": 1})
+    assert posted == ([] if dry_run else [{"src_id": "F2", "dst_id": "F3", "kind": "DEPENDS_ON"}])
+
+
+@pytest.mark.parametrize("dry_run", [True, False], ids=["dry run", "real run"])
+def test_the_in_app_check_refuses_a_link_that_closes_a_cycle_with_the_instance(dry_run):
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is not installed; the in-app importer is checked where it is")
+    script = (
+        f"import {{ Loader }} from {json.dumps(JS_IMPORTER.as_uri())};"
+        f"const dryRun = {json.dumps(dry_run)}; const posted = [];"
+        "const api = { get: async () => " + json.dumps(CYCLE_INSTANCE) + ","
+        "  post: async (route, payload) => { posted.push(payload); return { status: 201, body: { id: 'e' } }; } };"
+        f"const loader = new Loader(api, {json.dumps(CYCLE_DOC)}, dryRun);"
+        "loader.featureIds = new Map([['f1', 'F1'], ['f2', 'F2'], ['f3', dryRun ? 'dry-run:features:Export a route' : 'F3']]);"
+        "loader.featureNames = new Map([['F1', 'Plan a route'], ['F2', 'Share a route'], ['F3', 'Export a route']]);"
+        "await loader.loadEdges();"
+        "console.log(JSON.stringify({ warnings: loader.warnings, counts: loader.count('edges'), posted }));"
+    )
+    result = subprocess.run([node, "--input-type=module", "-e", script], capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, result.stderr
+    out = json.loads(result.stdout)
+    word = "would be rejected" if dry_run else "rejected"
+    assert out["warnings"] == [
+        f'link "Share a route" needs "Plan a route" {CYCLE_SAID[0].replace("would be rejected", word)}',
+        f'link "Plan a route" blocks "Export a route" {CYCLE_SAID[1].replace("would be rejected", word)}',
+    ]
+    assert out["counts"] == ({"would reject": 2, "would create": 1} if dry_run else {"rejected": 2, "created": 1})
+    assert out["posted"] == ([] if dry_run else [{"src_id": "F2", "dst_id": "F3", "kind": "DEPENDS_ON"}])
+
+
+#: B51: the API now refuses a feature whose name differs only in case from one
+#: in its product, so the seed paths take such a name as that feature.
+CASE_DOC = {"features": [{"ref": "f", "product_ref": "p", "name": "plan a ROUTE", "unknown_capabilities": True}]}
+CASE_INSTANCE = [{"id": "F1", "product_id": "P1", "name": "Plan a route", "capability_ids": [], "unknown_capabilities": True}]
+
+
+def test_the_loader_reuses_a_feature_named_in_another_case():
+    module = _load(LOADER, "seed_instance")
+
+    class Api(module.Api):
+        def request(self, method, path, payload=None):
+            return (200, CASE_INSTANCE) if (method, path) == ("GET", "/api/features") else (500, None)
+
+    loader = module.Loader(Api("http://metis.test"), CASE_DOC, dry_run=True)
+    loader.prod_ids = {"p": "P1"}
+    loader.load_features()
+    assert loader.feat_ids == {"f": "F1"}
+    assert {a: n for (c, a), n in loader.counts.items() if c == "features"} == {"reused": 1}
+
+
+def test_the_in_app_check_reuses_a_feature_named_in_another_case():
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is not installed; the in-app importer is checked where it is")
+    script = (
+        f"import {{ Loader }} from {json.dumps(JS_IMPORTER.as_uri())};"
+        "const api = { get: async () => " + json.dumps(CASE_INSTANCE) + ","
+        "  post: async () => { throw new Error('posted'); }, patch: async () => { throw new Error('patched'); } };"
+        f"const loader = new Loader(api, {json.dumps(CASE_DOC)}, true);"
+        "loader.productIds = new Map([['p', 'P1']]);"
+        "await loader.loadFeatures();"
+        "console.log(JSON.stringify({ id: loader.featureIds.get('f'), counts: loader.count('features') }));"
+    )
+    result = subprocess.run([node, "--input-type=module", "-e", script], capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == {"id": "F1", "counts": {"reused": 1}}
+
+
+def test_the_removal_finds_a_feature_named_in_another_case(capsys):
+    exact = _run_unseed(_unseeder(_probe(), PROBE_SEED), capsys)
+    doc = {**PROBE_SEED, "features": [{**PROBE_SEED["features"][0], "name": "PROBE Feature"}]}
+    assert _run_unseed(_unseeder(_probe(), doc), capsys) == exact
+    assert "Probe feature" in exact

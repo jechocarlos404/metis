@@ -616,6 +616,11 @@ class Api:
         return self.request("PATCH", path, payload)
 
 
+def _detail(body):
+    """The API's own sentence for a refusal (`detail`), not its JSON."""
+    return body["detail"] if isinstance(body, dict) and isinstance(body.get("detail"), str) else body
+
+
 class Loader:
     def __init__(self, api, doc, dry_run):
         self.api = api
@@ -819,7 +824,7 @@ class Loader:
             return set(have + missing)
         status, body = self.api.patch(f"/api/features/{current['id']}", payload)
         if status != 200:
-            self.warnings.append(f"feature {f['ref']} rejected ({status}): {body}")
+            self.warnings.append(f"feature {f['ref']} rejected ({status}): {_detail(body)}")
             self.note("features", "rejected")
             return set(have)
         self.note("features", "linked" if missing else "updated")
@@ -830,12 +835,14 @@ class Loader:
     def load_features(self):
         # On reuse, links only grow and the file's stated status, description
         # and unknown_capabilities win (update_reused_feature). Identity is
-        # (product, name): features belong to their product, so another
-        # product's "Sign in" is a different feature, not a reuse.
+        # (product, name ignoring case, as the API holds it): features belong
+        # to their product, so another product's "Sign in" is a different
+        # feature, not a reuse.
         instance = self.api.get("/api/features")
-        existing = {(f.get("product_id"), f["name"]): f for f in instance}
+        existing = {(f.get("product_id"), f["name"].lower()): f for f in instance}
+        self.feat_names = {f["id"]: f["name"] for f in instance}
         for f in self.doc.get("features") or []:
-            key = (self.prod_ids.get(f.get("product_ref")), f["name"])
+            key = (self.prod_ids.get(f.get("product_ref")), f["name"].lower())
             if key in existing:
                 self.feat_ids[f["ref"]] = existing[key]["id"]
                 self.note("features", "reused")
@@ -891,7 +898,7 @@ class Loader:
         if status in (200, 201):
             self.note("guesses", "updated" if exists else "created")
         else:
-            self.warnings.append(f"guess {label} rejected ({status}): {body}")
+            self.warnings.append(f"guess {label} rejected ({status}): {_detail(body)}")
             self.note("guesses", "rejected")
 
     def load_feature_guesses(self):
@@ -1035,28 +1042,79 @@ class Loader:
                     sys.exit(f"error: satisfaction {label} returned {status}: {body}")
 
     def load_edges(self):
-        existing = {
-            (e["src_id"], e["dst_id"], e["kind"]) for e in self.api.get("/api/features/edges")
-        }
+        instance = self.api.get("/api/features/edges")
+        existing = {(e["src_id"], e["dst_id"], e["kind"]) for e in instance}
+        # The API's cycle check, run here too so a dry run sees what the import
+        # will be refused: u -> v means u needs v, DEPENDS_ON as is and BLOCKS
+        # reversed; a link closes a cycle when v already reaches u.
+        needs = {}
+
+        def need(src, dst, kind):
+            return (src, dst) if kind == "DEPENDS_ON" else (dst, src) if kind == "BLOCKS" else None
+
+        def add(pair):
+            if pair:
+                needs.setdefault(pair[0], set()).add(pair[1])
+
+        def chain_from(start, goal):
+            back, queue = {start: None}, [start]
+            while queue:
+                node = queue.pop(0)
+                if node == goal:
+                    chain = []
+                    while node is not None:
+                        chain.insert(0, node)
+                        node = back[node]
+                    return chain
+                for nxt in sorted(needs.get(node, ())):
+                    if nxt not in back:
+                        back[nxt] = node
+                        queue.append(nxt)
+            return None
+
+        for e in instance:
+            add(need(e["src_id"], e["dst_id"], e["kind"]))
+        names = {f["ref"]: f.get("name") for f in self.doc.get("features") or []}
+
+        def node_of(ref):
+            """A feature the import would create has no id yet: its ref stands in."""
+            fid = self.feat_ids[ref]
+            return f"ref:{ref}" if str(fid).startswith(DRY_PREFIX) else fid
+
+        def name_of(node):
+            return f"\u201c{names.get(node[4:]) if node.startswith('ref:') else self.feat_names.get(node, node)}\u201d"
+
         for e in self.doc.get("edges") or []:
             kind = e.get("kind", "DEPENDS_ON")
-            src, dst = self.feat_ids[e["src_ref"]], self.feat_ids[e["dst_ref"]]
+            src, dst = node_of(e["src_ref"]), node_of(e["dst_ref"])
             label = f"{e['src_ref']} -{kind}-> {e['dst_ref']}"
             if (src, dst, kind) in existing:
                 self.note("edges", "reused")
                 continue
+            pair = need(src, dst, kind)
+            chain = pair and chain_from(pair[1], pair[0])
+            if chain:
+                said = [name_of(n) for n in chain]
+                through = f" through {', '.join(said[1:-1])}" if len(said) > 2 else ""
+                self.warnings.append(
+                    f"edge {label} {'would be rejected' if self.dry_run else 'rejected'}: That would make "
+                    f"a circular dependency: {said[0]} already needs {said[-1]}{through}. "
+                    "Remove a link in that chain first."
+                )
+                self.note("edges", "would reject" if self.dry_run else "rejected")
+                continue
             if self.dry_run:
+                add(pair)
                 self.note("edges", "would create")
                 continue
             status, body = self.api.post(
                 "/api/features/edges", {"src_id": src, "dst_id": dst, "kind": kind}
             )
             if status == 201:
+                add(pair)
                 self.note("edges", "created")
             else:
-                # Most likely a cycle-closing precedence edge, rejected by the
-                # API against edges already in the instance. Skip and report.
-                self.warnings.append(f"edge {label} rejected ({status}): {body}")
+                self.warnings.append(f"edge {label} rejected ({status}): {_detail(body)}")
                 self.note("edges", "rejected")
 
     def load_product_rows(self):

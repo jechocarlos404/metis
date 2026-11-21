@@ -146,6 +146,9 @@ function featureCapabilityRefs(feature) {
   return null;
 }
 
+/** The API's own sentence for a refusal (`detail`), not its JSON. */
+const detailOf = (body) => (typeof body?.detail === "string" ? body.detail : JSON.stringify(body));
+
 /** Each object's keys against KEYS, named by the object's path. */
 function checkKeys(errors, doc) {
   const isObject = (item) => item !== null && typeof item === "object" && !Array.isArray(item);
@@ -501,9 +504,10 @@ function parentsFirst(items) {
 }
 
 
-/** Feature identity: (product, name). A missing product is its own bucket. */
+/** Feature identity: (product, name ignoring case, as the API holds it). A
+ * missing product is its own bucket. */
 function featureKey(productId, name) {
-  return `${productId ?? ""}\u0000${name}`;
+  return `${productId ?? ""}\u0000${(name ?? "").toLowerCase()}`;
 }
 
 class UpstreamApi {
@@ -815,7 +819,7 @@ class Loader {
     }
     const { status, body } = await this.api.patch(`/api/features/${current.id}`, payload);
     if (status !== 200) {
-      this.warnings.push(`feature ${JSON.stringify(feature.name)} rejected (${status}): ${JSON.stringify(body)}`);
+      this.warnings.push(`feature ${JSON.stringify(feature.name)} rejected (${status}): ${detailOf(body)}`);
       this.note("features", "rejected");
       return new Set(have);
     }
@@ -830,6 +834,7 @@ class Loader {
     // (product, name): another product's "Sign in" is a different feature.
     const instance = await this.api.get("/api/features");
     const existing = new Map(instance.map((feature) => [featureKey(feature.product_id, feature.name), feature]));
+    this.featureNames = new Map(instance.map((feature) => [feature.id, feature.name]));
     // A feature of the file's products that the file doesn't name may be one
     // of its new features under an old name.
     const productIds = new Set(this.productIds.values());
@@ -892,7 +897,7 @@ class Loader {
     if (status === 200 || status === 201) {
       this.note("guesses", current ? "updated" : "created");
     } else {
-      this.warnings.push(`guess ${label} rejected (${status}): ${JSON.stringify(body)}`);
+      this.warnings.push(`guess ${label} rejected (${status}): ${detailOf(body)}`);
       this.note("guesses", "rejected");
     }
   }
@@ -1037,20 +1042,63 @@ class Loader {
   }
 
   async loadEdges() {
-    const existing = new Set(
-      (await this.api.get("/api/features/edges")).map((edge) => `${edge.src_id}:${edge.dst_id}:${edge.kind}`),
-    );
+    const instance = await this.api.get("/api/features/edges");
+    const existing = new Set(instance.map((edge) => `${edge.src_id}:${edge.dst_id}:${edge.kind}`));
+    // The API's cycle check, run here too so the check sees what the import
+    // will be refused (B43): u -> v means u needs v, DEPENDS_ON as is and
+    // BLOCKS reversed; a link closes a cycle when v already reaches u.
+    const needs = new Map();
+    const need = (src, dst, kind) => (kind === "DEPENDS_ON" ? [src, dst] : kind === "BLOCKS" ? [dst, src] : null);
+    const add = (pair) => pair && needs.set(pair[0], new Set([...(needs.get(pair[0]) || []), pair[1]]));
+    for (const edge of instance) add(need(edge.src_id, edge.dst_id, edge.kind));
+    const chainFrom = (from, to) => {
+      const back = new Map([[from, null]]);
+      for (const queue = [from]; queue.length > 0;) {
+        const node = queue.shift();
+        if (node === to) {
+          const chain = [];
+          for (let at = to; at !== null; at = back.get(at)) chain.unshift(at);
+          return chain;
+        }
+        for (const next of [...(needs.get(node) || [])].sort()) {
+          if (!back.has(next)) { back.set(next, node); queue.push(next); }
+        }
+      }
+      return null;
+    };
+    // A feature the import would create has no id yet: its ref stands in.
+    const nodeOf = (ref) => {
+      const id = this.featureIds.get(ref);
+      return String(id).startsWith("dry-run:") ? `ref:${ref}` : id;
+    };
+    const nameOf = (node) => `“${node.startsWith("ref:")
+      ? (this.doc.features || []).find((f) => f.ref === node.slice(4))?.name
+      : this.featureNames?.get(node) ?? node}”`;
     for (const edge of this.doc.edges || []) {
       const kind = edge.kind || "DEPENDS_ON";
-      const src = this.featureIds.get(edge.src_ref);
-      const dst = this.featureIds.get(edge.dst_ref);
+      const src = nodeOf(edge.src_ref);
+      const dst = nodeOf(edge.dst_ref);
       const key = `${src}:${dst}:${kind}`;
       const label = `${this.named("features", edge.src_ref)} ${EDGE[kind] ?? kind} ${this.named("features", edge.dst_ref)}`;
       if (existing.has(key)) {
         this.note("edges", "reused");
         continue;
       }
+      const pair = need(src, dst, kind);
+      const chain = pair && chainFrom(pair[1], pair[0]);
+      if (chain) {
+        // The API's own sentence, so the check and the import say the same.
+        const names = chain.map(nameOf);
+        const through = names.length > 2 ? ` through ${names.slice(1, -1).join(", ")}` : "";
+        this.warnings.push(
+          `link ${label} ${this.dryRun ? "would be rejected" : "rejected"}: That would make a circular ` +
+          `dependency: ${names[0]} already needs ${names.at(-1)}${through}. Remove a link in that chain first.`,
+        );
+        this.note("edges", this.dryRun ? "would reject" : "rejected");
+        continue;
+      }
       if (this.dryRun) {
+        add(pair);
         this.note("edges", "would create");
         continue;
       }
@@ -1060,9 +1108,10 @@ class Loader {
         kind,
       });
       if (status === 201) {
+        add(pair);
         this.note("edges", "created");
       } else {
-        this.warnings.push(`link ${label} rejected (${status}): ${JSON.stringify(body)}`);
+        this.warnings.push(`link ${label} rejected (${status}): ${detailOf(body)}`);
         this.note("edges", "rejected");
       }
     }
@@ -1292,4 +1341,4 @@ export async function POST({ request, locals }) {
   }
 }
 
-export { validateSeed, Loader };
+export { validateSeed, checkKeys, Loader };

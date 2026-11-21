@@ -15,6 +15,7 @@ const STATUS_DOT = { pending: "var(--text-secondary)", in_progress: "var(--warn-
 const linkDistance = (e) => (e.kind === "PART_OF" ? 170 : 320);
 const linkStrength = (e) => (e.kind === "PART_OF" ? 0.05 : 0.002);
 const sharesWidth = (w) => 0.6 + Math.min(w, 6) * 0.5;
+const CANVAS_MARGIN = 20;
 
 /** Goals linked by the capabilities they share, with a side panel for the selected goal. */
 export function GoalNetworkView({ goals, capsByGoal, selectedId, onSelect }) {
@@ -30,10 +31,12 @@ export function GoalNetworkView({ goals, capsByGoal, selectedId, onSelect }) {
   const keyRef = React.useRef(null);
   const toolbarRef = React.useRef(null);
   const canvasRef = React.useRef(null);
+  const rowRef = React.useRef(null);
+  const [room, setRoom] = React.useState(null); // the canvas's width, and the height it may grow to
   const [hoveredId, setHoveredId] = React.useState(null);
   const [focusedId, setFocusedId] = React.useState(null); // the goal last focused on the canvas
 
-  const data = React.useMemo(() => buildGoalNetwork(goals, capsByGoal), [goals, capsByGoal]);
+  const data = React.useMemo(() => buildGoalNetwork(goals, capsByGoal, room), [goals, capsByGoal, room]);
   const adjacency = React.useMemo(() => buildAdjacency(data.edges), [data]);
 
   const adjacencyRef = React.useRef(adjacency);
@@ -78,7 +81,27 @@ export function GoalNetworkView({ goals, capsByGoal, selectedId, onSelect }) {
     };
   }, []);
 
+  // The room the trees are laid out for (C41): the drawing's width, and the
+  // height the scroller shows less the canvas's margins, its border and hint
+  // room, and the toolbar's strip. None depends on the canvas's own height.
   useIsomorphicLayoutEffect(() => {
+    const measure = () => {
+      const toolbar = toolbarRef.current;
+      const strip = toolbar.offsetTop + toolbar.offsetHeight + 8
+        + canvasRef.current.offsetHeight - svgRef.current.clientHeight;
+      const w = svgRef.current.clientWidth;
+      const h = rowRef.current.clientHeight - 2 * CANVAS_MARGIN - strip;
+      setRoom((r) => (r && r.w === w && r.h === h && r.strip === strip ? r : { w, h, strip }));
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(canvasRef.current);
+    observer.observe(rowRef.current);
+    return () => observer.disconnect();
+  }, []);
+
+  useIsomorphicLayoutEffect(() => {
+    if (!room) return; // laid out once the canvas is measured, so it opens on that layout
     engineRef.current?.update(data.nodes, data.edges);
     if (!hasFitRef.current && data.nodes.length) {
       hasFitRef.current = true;
@@ -134,8 +157,8 @@ export function GoalNetworkView({ goals, capsByGoal, selectedId, onSelect }) {
     // Side by side, the canvas fills the height and the list scrolls on its
     // own; stacked (.graph-goal-row wraps), the list leads (base.css).
     <div className="graph-goal-network" style={{ flex: 1, display: "flex", minHeight: 0 }}>
-      <div className="graph-goal-row" style={{ flex: 1, display: "flex", minHeight: 0, overflowY: "auto" }}>
-        <div ref={canvasRef} className="graph-hint-room" style={{ flex: "999 1 420px", minHeight: 420, position: "relative", margin: 20, background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", overflow: "hidden", minWidth: 0 }}>
+      <div ref={rowRef} className="graph-goal-row" style={{ flex: 1, display: "flex", minHeight: 0, overflowY: "auto" }}>
+        <div ref={canvasRef} className="graph-hint-room" style={{ flex: "999 1 420px", minHeight: Math.max(420, data.height ? data.height + room.strip : 0), position: "relative", margin: CANVAS_MARGIN, background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", overflow: "hidden", minWidth: 0 }}>
           <svg ref={svgRef} role="group" aria-label="Goals linked by the capabilities they share. Arrow keys move between goals."
             style={{ width: "100%", height: "100%", display: "block", cursor: "grab", touchAction: "none" }}>
             <g ref={viewportRef}>

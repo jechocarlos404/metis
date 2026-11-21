@@ -38,6 +38,8 @@ export function CapabilityPicker({ id = "capability-picker", options, value, onC
   const current = active ?? (matches[0] && literal(matches[0]) ? 0 : -1);
   const exact = options.some((o) => slugify(o.name) === slugify(q));
   const canAddNew = allowNew && slugify(q) && !exact && !picked.has(slugify(q));
+  // Without allowNew, a name nobody has gets a line saying so, never a blank.
+  const noMatch = !allowNew && slugify(q) && !matches.length && !exact;
 
   const add = (name) => {
     onChange([...value, name]);
@@ -104,6 +106,9 @@ export function CapabilityPicker({ id = "capability-picker", options, value, onC
             </li>
           )}
         </ul>
+      )}
+      {open && noMatch && (
+        <div role="status" style={{ marginTop: 4, fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>No capability named “{query.trim()}”.</div>
       )}
     </div>
   );

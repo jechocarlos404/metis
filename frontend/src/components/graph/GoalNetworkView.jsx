@@ -1,5 +1,5 @@
 import React from "react";
-import { StatusBadge } from "../../ds";
+import { Select, StatusBadge } from "../../ds";
 import { createForceGraph } from "./forceGraphEngine.js";
 import { buildGoalNetwork, buildAdjacency, NODE_W, GOAL_H, GOAL_LINES } from "./graph-data.js";
 import { CardLabel, GraphCaption, GraphToolbar, controlInsets } from "./FeatureGraphView.jsx";
@@ -246,6 +246,13 @@ function GoalPanel({ goals, edges, capsByGoal, selectedId, onSelect }) {
       {g.title}
     </button>
   );
+  // Every goal, one target 34px tall: the canvas's boxes are 21x10 at 390
+  // after Fit, and the links below reach only goals that share or nest
+  // (43 of 48). This is the same pick as pressing a goal on the canvas.
+  const picker = (
+    <Select aria-label="Goal" value={selectedId ?? ""} onChange={(e) => e.target.value && onSelect(e.target.value)}
+      options={[{ value: "", label: "Pick a goal…", disabled: true }, ...goals.map((g) => ({ value: g.id, label: `${g.display_id} · ${g.title}` }))]} />
+  );
 
   if (!goal) {
     const shares = edges.filter((e) => e.kind === "SHARES");
@@ -253,6 +260,7 @@ function GoalPanel({ goals, edges, capsByGoal, selectedId, onSelect }) {
     const most = [...shares].sort((a, b) => b.weight - a.weight || a.id.localeCompare(b.id)).slice(0, 6);
     return (
       <aside className="graph-goal-panel" style={panel}>
+        {picker}
         <div style={{ color: "var(--text-secondary)" }}>Pick a goal to see which other goals rely on the same capabilities.</div>
         <div style={{ color: "var(--text-secondary)" }}>{count(sharing.size, "goal")} of {goals.length} share a capability with another goal.</div>
         {most.length > 0 && (
@@ -285,6 +293,7 @@ function GoalPanel({ goals, edges, capsByGoal, selectedId, onSelect }) {
 
   return (
     <aside className="graph-goal-panel" style={panel} aria-label="Selected goal">
+      {picker}
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
         <div style={head}>{goal.goal_type === "org" ? "org goal" : "product goal"} · {goal.display_id}</div>
         <div style={{ fontWeight: "var(--weight-semibold)", color: "var(--text-heading)" }}>{goal.title}</div>

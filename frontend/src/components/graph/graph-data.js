@@ -460,7 +460,9 @@ export function buildHubGraph(features, { hubs, byFeature, empty, quietBroad = f
   const sideHubs = new Set([...sideOf.values()].flat());
   const byUse = (a, b) => (a === empty?.id) - (b === empty?.id)
     || usage.get(b) - usage.get(a) || hubById.get(a).name.localeCompare(hubById.get(b).name);
-  const placed = [...usage.keys()].filter((id) => !sideHubs.has(id)).sort(byUse);
+  // Placed by size, "linked to none" counted like the rest (B35).
+  const placed = [...usage.keys()].filter((id) => !sideHubs.has(id))
+    .sort((a, b) => usage.get(b) - usage.get(a) || byUse(a, b));
 
   // One block per hub (the hub, then the features it places alone) and one
   // per set of two or more hubs that place the same features.
@@ -485,6 +487,10 @@ export function buildHubGraph(features, { hubs, byFeature, empty, quietBroad = f
   // Each hub goes as near as it can to the hubs it shares features with, and
   // each shared block as near as it can to the mean of its hubs, once they
   // are all down. One free half cell around every block keeps groups apart.
+  // A hub that shares no feature with another ("linked to none", always)
+  // has nothing pulling it: it goes where it widens the spread of the hubs
+  // least, then as near the biggest hub as it can, under its own cards when
+  // that is nearer, so a grouped graph can open with it in view (B35).
   const together = new Map(placed.map((id) => [id, new Map()]));
   for (const mean of meanOf.values()) {
     for (const a of mean) for (const b of mean) {
@@ -500,36 +506,49 @@ export function buildHubGraph(features, { hubs, byFeature, empty, quietBroad = f
   // Extent of what is placed so far, in grid units, and how big it would
   // look in a wide frame: growing it costs as much as straying from `want`.
   let box = null;
+  let hubBox = null; // the hubs placed so far, in grid units
   const extent = (bx) => Math.max((bx.x1 - bx.x0) * UNIT_W / Math.sqrt(ASPECT), (bx.y1 - bx.y0) * UNIT_H * Math.sqrt(ASPECT));
-  const put = (b, want) => {
+  const grow = (bx, x0, y0, x1, y1) => ({ x0: Math.min(bx.x0, x0), y0: Math.min(bx.y0, y0), x1: Math.max(bx.x1, x1), y1: Math.max(bx.y1, y1) });
+  // A block's hub, in half cells from the block's top: on top of its cards, or under them.
+  const hubRow = (b, under) => (under ? b.rows * 2 + 1 : 1);
+  const put = (b, want, loner = false) => {
     const fw = b.cols * 2;
     const fh = b.rows * 2 + (b.hub ? 2 : 0);
-    const cx = Math.round(want.x / UNIT_W - fw / 2);
-    const cy = Math.round(want.y / UNIT_H - fh / 2);
     const now = box ? extent(box) : 0;
     let best = null;
-    for (let r = 4; !best; r *= 2) {
-      for (let gx = cx - r; gx <= cx + r; gx++) {
-        for (let gy = cy - r; gy <= cy + r; gy++) {
-          // Distance in screen terms: sideways is cheaper, the frame is wide.
-          const dx = (gx - cx) * UNIT_W / Math.sqrt(ASPECT);
-          const dy = (gy - cy) * UNIT_H * Math.sqrt(ASPECT);
-          const grown = box
-            ? extent({ x0: Math.min(box.x0, gx), y0: Math.min(box.y0, gy), x1: Math.max(box.x1, gx + fw), y1: Math.max(box.y1, gy + fh) }) - now
-            : 0;
-          const cost = dx * dx + dy * dy + GROW_COST * grown * grown;
-          if (best && cost >= best.cost) continue;
-          if (free(gx, gy, fw, fh)) best = { gx, gy, cost };
+    // A loner looks across all that is placed, not only near `want`.
+    for (let r = 4; !best || (loner && r <= Math.max(box.x1 - box.x0, box.y1 - box.y0)); r *= 2) {
+      for (const under of loner ? [false, true] : [false]) {
+        // `want` is for the block's middle; for a loner, for its hub.
+        const cx = Math.round(want.x / UNIT_W - fw / 2);
+        const cy = Math.round(want.y / UNIT_H - (loner ? hubRow(b, under) : fh / 2));
+        for (let gx = cx - r; gx <= cx + r; gx++) {
+          for (let gy = cy - r; gy <= cy + r; gy++) {
+            // Distance in screen terms: sideways is cheaper, the frame is wide.
+            const dx = (gx - cx) * UNIT_W / Math.sqrt(ASPECT);
+            const dy = (gy - cy) * UNIT_H * Math.sqrt(ASPECT);
+            const grown = box ? extent(grow(box, gx, gy, gx + fw, gy + fh)) - now : 0;
+            const cost = dx * dx + dy * dy + GROW_COST * grown * grown;
+            const hx = gx + fw / 2;
+            const hy = gy + hubRow(b, under);
+            const spread = loner ? extent(grow(hubBox, hx, hy, hx, hy)) - extent(hubBox) : 0;
+            if (best && (spread > best.spread || (spread === best.spread && cost >= best.cost))) continue;
+            if (free(gx, gy, fw, fh)) best = { gx, gy, cost, spread, under };
+          }
         }
       }
     }
-    box = box
-      ? { x0: Math.min(box.x0, best.gx), y0: Math.min(box.y0, best.gy), x1: Math.max(box.x1, best.gx + fw), y1: Math.max(box.y1, best.gy + fh) }
-      : { x0: best.gx, y0: best.gy, x1: best.gx + fw, y1: best.gy + fh };
+    box = box ? grow(box, best.gx, best.gy, best.gx + fw, best.gy + fh) : { x0: best.gx, y0: best.gy, x1: best.gx + fw, y1: best.gy + fh };
     for (let x = best.gx; x < best.gx + fw; x++) for (let y = best.gy; y < best.gy + fh; y++) taken.add(`${x},${y}`);
     b.x = (best.gx + fw / 2) * UNIT_W;
     b.y = (best.gy + fh / 2) * UNIT_H;
-    if (b.hub) hubPos.set(b.hub, { x: b.x, y: b.y - b.h / 2 + CELL_H / 2 });
+    b.under = best.under;
+    if (b.hub) {
+      const hx = best.gx + fw / 2;
+      const hy = best.gy + hubRow(b, b.under);
+      hubPos.set(b.hub, { x: hx * UNIT_W, y: hy * UNIT_H });
+      hubBox = hubBox ? grow(hubBox, hx, hy, hx, hy) : { x0: hx, y0: hy, x1: hx, y1: hy };
+    }
   };
   const meanAt = (ids, weight = () => 1) => {
     let x = 0;
@@ -547,23 +566,26 @@ export function buildHubGraph(features, { hubs, byFeature, empty, quietBroad = f
   const sharedBlocks = list.filter((b) => !b.hub);
   for (const id of placed) {
     const near = together.get(id);
-    put(blocks.get(id), meanAt([...near.keys()], (h) => near.get(h)));
+    const loner = !near.size && hubPos.size > 0;
+    put(blocks.get(id), loner ? hubPos.get(placed[0]) : meanAt([...near.keys()], (h) => near.get(h)), loner);
     for (const b of sharedBlocks) {
       if (b.x == null && b.hubs.every((h) => hubPos.has(h))) put(b, meanAt(b.hubs));
     }
   }
 
-  // Blocks -> anchors: the hub on top, then a row-major grid, last row centred.
+  // Blocks -> anchors: the hub, then a row-major grid, last row centred and
+  // furthest from the hub (at the bottom, or the top when the hub is under).
   const anchor = new Map();
   for (const b of list) {
     const top = b.y - b.h / 2;
-    if (b.hub) anchor.set(b.hub, { x: b.x, y: top + CELL_H / 2 });
-    const gridTop = top + (b.hub ? CELL_H : 0);
+    if (b.hub) anchor.set(b.hub, hubPos.get(b.hub));
+    const gridTop = top + (b.hub && !b.under ? CELL_H : 0);
     b.items.forEach((id, i) => {
       const row = Math.floor(i / b.cols);
       const inRow = row === b.rows - 1 ? b.items.length - row * b.cols : b.cols;
       const col = i % b.cols;
-      anchor.set(id, { x: b.x + (col - (inRow - 1) / 2) * CELL_W, y: gridTop + (row + 0.5) * CELL_H });
+      const at = b.under ? b.rows - 1 - row : row;
+      anchor.set(id, { x: b.x + (col - (inRow - 1) / 2) * CELL_W, y: gridTop + (at + 0.5) * CELL_H });
     });
   }
 

@@ -6,6 +6,7 @@ import { readParam, useParamRestore, writeParams } from "../../lib/url-state.js"
 import { GoalNetworkView } from "../graph/GoalNetworkView.jsx";
 import { DONE_WHEN, NEED, PRIORITY_HINT, andList, count, needKey, statusLabel } from "../../lib/words.js";
 import { capabilityCount, deleteEffects } from "../graph/goal-facts.js";
+import { CapabilityPicker } from "../shared/CapabilityPicker.jsx";
 
 const EMPTY_DRAFT = { goal_type: "product", parent_goal_id: "", title: "", description: "", success_criteria: "", priority: "3", status: "pending" };
 
@@ -14,6 +15,7 @@ export default function GoalsIsland({ canWrite = true }) {
   const [products, setProducts] = React.useState([]);
   const productById = React.useMemo(() => Object.fromEntries(products.map((p) => [p.id, p])), [products]);
   const [capsByGoal, setCapsByGoal] = React.useState({});
+  const [capabilityOptions, setCapabilityOptions] = React.useState([]); // the inventory, for "Link a capability"
   const [highlight, setHighlight] = React.useState(null); // ?goal=<id>, scrolled to once loaded
   const [view, setView] = React.useState("list"); // ?view=network, read after mount (the server has no URL)
   const [picked, setPicked] = React.useState(null); // ?goal=<id> selected in the network
@@ -40,6 +42,7 @@ export default function GoalsIsland({ canWrite = true }) {
       (caps[m.goal_id] ??= []).push({ id: m.capability_id, name: m.capability_name, slug: c?.slug, need: needKey(c) });
     }
     setCapsByGoal(caps);
+    setCapabilityOptions(capabilities.map((c) => ({ id: c.id, name: c.name, slug: c.slug })));
     setGoals(goalList);
     // Each goal says which product it belongs to (the goals API's product_id);
     // a delete also needs which products have a goal as theirs (goal_id).
@@ -49,6 +52,19 @@ export default function GoalsIsland({ canWrite = true }) {
   React.useEffect(() => {
     load().catch((e) => setError(String(e.message)));
   }, [load]);
+
+  // The same link the capability page makes (POST /capabilities/{id}/motivations).
+  const linkCapability = async (goal, capability) => {
+    setError(null);
+    try {
+      await api(`/capabilities/${capability.id}/motivations`, { method: "POST", body: { goal_id: goal.id } });
+      await load();
+      setNotice({ tone: "ok", title: `Linked ${capability.name}`, detail: `${goal.display_id} ${goal.title}` });
+    } catch (e) {
+      setError(String(e.message));
+    }
+  };
+  const linking = canWrite ? { options: capabilityOptions, onLink: linkCapability } : null;
 
   const loaded = goals != null;
   React.useEffect(() => {
@@ -274,6 +290,7 @@ export default function GoalsIsland({ canWrite = true }) {
                   highlightStyle={highlightStyle}
                   editButton={editButton}
                   canWrite={canWrite}
+                  linking={linking}
                   emptyText="No product goals under this org goal yet."
                 />
               </div>
@@ -283,7 +300,7 @@ export default function GoalsIsland({ canWrite = true }) {
                 <div style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>
                   These product goals aren't under an org goal. Edit one to choose its parent.
                 </div>
-                <GoalList goals={unparented} productById={productById} capsByGoal={capsByGoal} highlightStyle={highlightStyle} editButton={editButton} canWrite={canWrite} />
+                <GoalList goals={unparented} productById={productById} capsByGoal={capsByGoal} highlightStyle={highlightStyle} editButton={editButton} canWrite={canWrite} linking={linking} />
               </div>
             )}
           </div>
@@ -419,7 +436,8 @@ function DeleteWhat({ goal, effects: { capabilities, products, children } }) {
   );
 }
 
-function GoalList({ goals, productById, capsByGoal, highlightStyle, editButton, emptyText, canWrite }) {
+function GoalList({ goals, productById, capsByGoal, highlightStyle, editButton, emptyText, canWrite, linking }) {
+  const [linkingId, setLinkingId] = React.useState(null); // the goal whose "Link a capability" is open
   return (
     <>
       <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "16px 0 10px", fontFamily: "var(--font-mono)", fontSize: "var(--text-2xs)", letterSpacing: "var(--tracking-caps)", textTransform: "uppercase", color: "var(--text-secondary)" }}>
@@ -429,6 +447,7 @@ function GoalList({ goals, productById, capsByGoal, highlightStyle, editButton, 
         {goals.map((g) => {
           const owner = productById[g.product_id];
           const caps = capsByGoal[g.id] || [];
+          const choices = linking ? linking.options.filter((o) => !caps.some((c) => c.id === o.id)) : [];
           return (
             <div key={g.id} id={`goal-${g.id}`} style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 14, background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", boxShadow: "var(--shadow-card)", padding: "14px 18px", ...highlightStyle(g.id) }}>
               <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-secondary)", width: 46 }}>{g.display_id}</span>
@@ -447,7 +466,7 @@ function GoalList({ goals, productById, capsByGoal, highlightStyle, editButton, 
                 )}
                 <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", marginTop: 4, display: "flex", gap: 6, flexWrap: "wrap" }}>
                   {caps.length === 0 ? (
-                    <span>{canWrite ? "No capabilities linked. Link one from a capability's page." : "No capabilities linked."}</span>
+                    <span>No capabilities linked.</span>
                   ) : (
                     <>
                       <span>{count(caps.length, "capability", "capabilities")}:</span>
@@ -460,7 +479,27 @@ function GoalList({ goals, productById, capsByGoal, highlightStyle, editButton, 
                       ))}
                     </>
                   )}
+                  {linking && linkingId !== g.id && (
+                    <button type="button" onClick={() => setLinkingId(g.id)}
+                      style={{ border: "none", background: "none", padding: 0, cursor: "pointer", font: "inherit", color: "var(--text-accent)" }}>
+                      Link a capability
+                    </button>
+                  )}
                 </div>
+                {linking && linkingId === g.id && (
+                  <div style={{ marginTop: 6, display: "flex", gap: 8, alignItems: "flex-start" }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <CapabilityPicker id={`goal-${g.id}-link`} label={`Capability ${g.display_id} needs`} value={[]}
+                        options={choices}
+                        onChange={(names) => {
+                          const picked = choices.find((o) => o.name === names[names.length - 1]);
+                          if (picked) linking.onLink(g, picked);
+                          setLinkingId(null);
+                        }} placeholder="Type a capability…" />
+                    </div>
+                    <Button size="sm" variant="ghost" onClick={() => setLinkingId(null)}>Cancel</Button>
+                  </div>
+                )}
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 10, marginLeft: "auto" }}>
                 {g.priority != null && <PriorityBadge priority={g.priority} rationale={PRIORITY_HINT} />}

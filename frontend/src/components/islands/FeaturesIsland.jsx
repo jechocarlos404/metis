@@ -334,6 +334,7 @@ export default function FeaturesIsland({ canWrite = true }) {
       name: detail.name,
       description: detail.description ?? "",
       capabilityIds: detail.capability_ids,
+      newCapabilities: [],
       unknownCapabilities: detail.unknown_capabilities,
       productId: detail.product_id ?? "",
       layer: detail.facets?.layer ?? "service",
@@ -348,27 +349,47 @@ export default function FeaturesIsland({ canWrite = true }) {
 
   // The shared picker speaks names; the API takes ids. Names are not unique
   // (only slugs are), so keep the ids already linked and look up only new names.
-  const draftCapabilityNames = draft.capabilityIds.map((id) => capabilityById.get(id)?.name).filter(Boolean);
+  // A name nobody has yet waits in newCapabilities until Save creates it.
+  const draftCapabilityNames = [...draft.capabilityIds.map((id) => capabilityById.get(id)?.name).filter(Boolean), ...draft.newCapabilities];
   const setDraftCapabilityNames = (names) => setDraft((d) => {
     const wanted = new Set(names.map((n) => n.toLowerCase()));
     const kept = d.capabilityIds.filter((id) => wanted.has(capabilityById.get(id)?.name.toLowerCase()));
     const keptNames = new Set(kept.map((id) => capabilityById.get(id).name.toLowerCase()));
-    const added = names.filter((n) => !keptNames.has(n.toLowerCase()))
-      .map((n) => capabilityByName.get(n.toLowerCase())?.id).filter(Boolean);
-    return { ...d, capabilityIds: [...kept, ...added] };
+    const rest = names.filter((n) => !keptNames.has(n.toLowerCase()));
+    const added = rest.map((n) => capabilityByName.get(n.toLowerCase())?.id).filter(Boolean);
+    return { ...d, capabilityIds: [...kept, ...added], newCapabilities: rest.filter((n) => !capabilityByName.has(n.toLowerCase())) };
   });
 
   // At least one capability, unless the rest are declared unknown.
-  const canSave = Boolean(draft.name.trim()) && (draft.capabilityIds.length > 0 || draft.unknownCapabilities);
+  const canSave = Boolean(draft.name.trim()) && (draft.capabilityIds.length + draft.newCapabilities.length > 0 || draft.unknownCapabilities);
   const save = async () => {
     if (!canSave) return;
     setSaving(true);
     setError(null);
     try {
+      // New capabilities first, once each: one made is linked by id from here
+      // on, so Save again after a failed save doesn't make it twice.
+      const made = [];
+      try {
+        for (const name of draft.newCapabilities) made.push(await api("/capabilities", { method: "POST", body: { name } }));
+      } finally {
+        // Each one made is kept by id, even when the next one or the feature fails.
+        if (made.length) {
+          setCapabilities((cs) => [...cs, ...made]);
+          setDraft((d) => ({
+            ...d,
+            capabilityIds: [...d.capabilityIds, ...made.map((c) => c.id)],
+            newCapabilities: d.newCapabilities.filter((n) => !made.some((c) => c.name === n)),
+            added: [...(d.added ?? []), ...made.map((c) => c.name)],
+          }));
+        }
+      }
+      const added = [...(draft.added ?? []), ...made.map((c) => c.name)]; // said once the feature saves
+      const newLine = added.length ? ` New capability: ${andList(added)}.` : "";
       const body = {
         name: draft.name.trim(),
         description: draft.description.trim() || null,
-        capability_ids: draft.capabilityIds,
+        capability_ids: [...draft.capabilityIds, ...made.map((c) => c.id)],
         unknown_capabilities: draft.unknownCapabilities,
         product_id: draft.productId || null,
         priority: draft.priority === "" ? null : Number(draft.priority),
@@ -382,7 +403,7 @@ export default function FeaturesIsland({ canWrite = true }) {
         await load();
         selectFeature(created.id);
         const product = productById.get(created.product_id);
-        setNotice(`Created ${created.name}${product ? ` in ${product.name}` : ""}.`);
+        setNotice(`Created ${created.name}${product ? ` in ${product.name}` : ""}.${newLine}`);
       } else {
         // Said in place afterwards, as capabilities and goals do.
         const was = new Set(detail.capability_ids);
@@ -402,7 +423,7 @@ export default function FeaturesIsland({ canWrite = true }) {
         });
         await load();
         await refreshDetail(detail.id);
-        setNotice(changes.length ? `Saved ${body.name}: ${[...new Set(changes)].join(", ")}.` : `Saved ${body.name}. Nothing changed.`);
+        setNotice((changes.length ? `Saved ${body.name}: ${[...new Set(changes)].join(", ")}.` : `Saved ${body.name}. Nothing changed.`) + newLine);
       }
       setDialog(null);
     } catch (e) {
@@ -722,7 +743,7 @@ export default function FeaturesIsland({ canWrite = true }) {
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             <span aria-hidden="true" style={{ fontSize: "var(--text-xs)", fontWeight: "var(--weight-medium)", color: "var(--text-heading)" }}>Built on</span>
             <CapabilityPicker id="feature-capabilities" label="Built on" options={capabilityOptions} value={draftCapabilityNames}
-              onChange={setDraftCapabilityNames} allowNew={false} placeholder="Type a capability…" />
+              onChange={setDraftCapabilityNames} allowNew placeholder="Type a capability…" />
             <Checkbox label="Some capabilities are unknown. Link only the ones you can name."
               checked={draft.unknownCapabilities} onChange={(on) => setDraft({ ...draft, unknownCapabilities: on })} />
           </div>
@@ -740,7 +761,7 @@ export default function FeaturesIsland({ canWrite = true }) {
   );
 }
 
-const EMPTY_DRAFT = { name: "", description: "", capabilityIds: [], unknownCapabilities: false, productId: "", layer: "service", priority: "3", status: "pending" };
+const EMPTY_DRAFT = { name: "", description: "", capabilityIds: [], newCapabilities: [], unknownCapabilities: false, productId: "", layer: "service", priority: "3", status: "pending" };
 
 // The relationship picker, one group per product: this feature's own first,
 // then the rest by name, "No product" last; features by name inside each.
@@ -801,6 +822,11 @@ function FeatureLink({ feature, onSelect, active, style }) {
 
 function FeaturePanel({ detail, canWrite, onEdit, onGuessConfirmed, onSelect, productIds, productById, capabilityById, journeys, why, goals, allNodes, edgeDraft, onEdgeDraft, edgeError, onAddEdge, onRemoveEdge, recheck, onRecheck, onClearRecheck }) {
   const layer = detail.facets?.layer;
+  // Typing narrows the other-feature list (487 on the real data); the pick stays exact, by id.
+  const [find, setFind] = React.useState("");
+  const narrowed = find.trim()
+    ? allNodes.filter((n) => n.id === edgeDraft.targetId || n.name.toLowerCase().includes(find.trim().toLowerCase()))
+    : allNodes;
   return (
     <>
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -876,15 +902,16 @@ function FeaturePanel({ detail, canWrite, onEdit, onGuessConfirmed, onSelect, pr
           <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 4 }}>
             <Select label="This feature" value={edgeDraft.kind} onChange={(e) => onEdgeDraft({ ...edgeDraft, kind: e.target.value })}
               options={EDGE_KINDS.map((k) => ({ value: k, label: plain(EDGE, k) }))} />
+            <Input aria-label="Narrow the feature list" value={find} onChange={(e) => setFind(e.target.value)} placeholder="Type to narrow the list…" />
             <Select aria-label="Other feature" value={edgeDraft.targetId} onChange={(e) => onEdgeDraft({ ...edgeDraft, targetId: e.target.value })}>
               <option value="">Pick a feature…</option>
-              {pickerGroups(allNodes, detail.id, productIds[0] ?? "", productById).map(([pid, label, nodes]) => (
+              {pickerGroups(narrowed, detail.id, productIds[0] ?? "", productById).map(([pid, label, nodes]) => (
                 <optgroup key={pid} label={label}>
                   {nodes.map((n) => <option key={n.id} value={n.id}>{n.name}</option>)}
                 </optgroup>
               ))}
             </Select>
-            <Button size="sm" variant="secondary" disabled={!edgeDraft.targetId} onClick={onAddEdge} style={{ gap: 6 }}>
+            <Button size="sm" variant="secondary" disabled={!edgeDraft.targetId} onClick={() => { onAddEdge(); setFind(""); }} style={{ gap: 6 }}>
               <Icon name="plus" size={13} />Add relationship
             </Button>
             {edgeError && <div role="alert" style={{ ...NOTE, color: "var(--danger-fg)" }}>{edgeError}</div>}
@@ -930,7 +957,7 @@ function RecheckList({ recheck, onSelect, onClear }) {
       {nothing && <div style={SMALL_NOTE}>Nothing depends on it and it shares no capability, so nothing else needs a recheck.</div>}
       {breaks.length > 0 && (
         <>
-          <div style={{ fontSize: "var(--text-xs)", fontWeight: "var(--weight-medium)", color: "var(--danger-fg)" }}>Breaks: {count(breaks.length, "feature")} need it</div>
+          <div style={{ fontSize: "var(--text-xs)", fontWeight: "var(--weight-medium)", color: "var(--danger-fg)" }}>Breaks: {count(breaks.length, "feature")} {breaks.length === 1 ? "needs" : "need"} it</div>
           {breaks.map((f) => row(f, via(f), f.via.join(" > ")))}
         </>
       )}

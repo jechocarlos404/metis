@@ -835,13 +835,14 @@ class Loader:
     def load_features(self):
         # On reuse, links only grow and the file's stated status, description
         # and unknown_capabilities win (update_reused_feature). Identity is
-        # (product, name): features belong to their product, so another
-        # product's "Sign in" is a different feature, not a reuse.
+        # (product, name ignoring case, as the API holds it): features belong
+        # to their product, so another product's "Sign in" is a different
+        # feature, not a reuse.
         instance = self.api.get("/api/features")
-        existing = {(f.get("product_id"), f["name"]): f for f in instance}
+        existing = {(f.get("product_id"), f["name"].lower()): f for f in instance}
         self.feat_names = {f["id"]: f["name"] for f in instance}
         for f in self.doc.get("features") or []:
-            key = (self.prod_ids.get(f.get("product_ref")), f["name"])
+            key = (self.prod_ids.get(f.get("product_ref")), f["name"].lower())
             if key in existing:
                 self.feat_ids[f["ref"]] = existing[key]["id"]
                 self.note("features", "reused")

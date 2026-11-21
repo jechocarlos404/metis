@@ -296,7 +296,7 @@ satisfies. A technology is shared across products, like a capability.
 
 - **Idempotent, never deletes.** The loader matches existing entities (goals by
   (goal_type, title); capabilities by slug; products by name; features by
-  (product, name); technologies by slug; edges by (src, dst, kind); motivations,
+  (product, name ignoring case); technologies by slug; edges by (src, dst, kind); motivations,
   product technologies and satisfactions by pair) and reuses them instead of
   duplicating. It never deletes an entity or a confirmed link, and updates only
   two things: an existing feature gains the file's confirmed links it lacks and
@@ -325,7 +325,7 @@ satisfies. A technology is shared across products, like a capability.
   closest existing names, so a near-duplicate can be caught before the import
   (a name over 100 characters is listed without them; if the lookup fails, the
   dry run says so).
-- An existing feature (matched by (product, name)) is reused, and its confirmed
+- An existing feature (matched by (product, name), ignoring case) is reused, and its confirmed
   links only grow: every `capability_refs` entry it does not realize yet is
   added, and a link the file leaves out is never removed. A product's own seed
   is the authority on its own features, so when the file states `status`,

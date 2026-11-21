@@ -146,9 +146,10 @@ class Unseeder {
       (product) => product.name,
       new Map(this.instProducts.map((product) => [product.name, product])),
     );
-    // A feature is its product's: identity is (product, name), so two products
-    // may each have a "Sign in" without one unseed taking both.
-    const featureKey = (productId, name) => `${productId ?? ""}\u0000${name}`;
+    // A feature is its product's: identity is (product, name ignoring case, as
+    // the API holds it), so two products may each have a "Sign in" without one
+    // unseed taking both.
+    const featureKey = (productId, name) => `${productId ?? ""}\u0000${(name ?? "").toLowerCase()}`;
     this.features = this.match(
       "features",
       (feature) => featureKey(this.products.get(feature.product_ref)?.id, feature.name),

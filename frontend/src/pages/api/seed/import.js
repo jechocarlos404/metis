@@ -504,9 +504,10 @@ function parentsFirst(items) {
 }
 
 
-/** Feature identity: (product, name). A missing product is its own bucket. */
+/** Feature identity: (product, name ignoring case, as the API holds it). A
+ * missing product is its own bucket. */
 function featureKey(productId, name) {
-  return `${productId ?? ""}\u0000${name}`;
+  return `${productId ?? ""}\u0000${(name ?? "").toLowerCase()}`;
 }
 
 class UpstreamApi {

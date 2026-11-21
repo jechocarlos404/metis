@@ -713,3 +713,48 @@ def test_the_in_app_check_refuses_a_link_that_closes_a_cycle_with_the_instance(d
     ]
     assert out["counts"] == ({"would reject": 2, "would create": 1} if dry_run else {"rejected": 2, "created": 1})
     assert out["posted"] == ([] if dry_run else [{"src_id": "F2", "dst_id": "F3", "kind": "DEPENDS_ON"}])
+
+
+#: B51: the API now refuses a feature whose name differs only in case from one
+#: in its product, so the seed paths take such a name as that feature.
+CASE_DOC = {"features": [{"ref": "f", "product_ref": "p", "name": "plan a ROUTE", "unknown_capabilities": True}]}
+CASE_INSTANCE = [{"id": "F1", "product_id": "P1", "name": "Plan a route", "capability_ids": [], "unknown_capabilities": True}]
+
+
+def test_the_loader_reuses_a_feature_named_in_another_case():
+    module = _load(LOADER, "seed_instance")
+
+    class Api(module.Api):
+        def request(self, method, path, payload=None):
+            return (200, CASE_INSTANCE) if (method, path) == ("GET", "/api/features") else (500, None)
+
+    loader = module.Loader(Api("http://metis.test"), CASE_DOC, dry_run=True)
+    loader.prod_ids = {"p": "P1"}
+    loader.load_features()
+    assert loader.feat_ids == {"f": "F1"}
+    assert {a: n for (c, a), n in loader.counts.items() if c == "features"} == {"reused": 1}
+
+
+def test_the_in_app_check_reuses_a_feature_named_in_another_case():
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is not installed; the in-app importer is checked where it is")
+    script = (
+        f"import {{ Loader }} from {json.dumps(JS_IMPORTER.as_uri())};"
+        "const api = { get: async () => " + json.dumps(CASE_INSTANCE) + ","
+        "  post: async () => { throw new Error('posted'); }, patch: async () => { throw new Error('patched'); } };"
+        f"const loader = new Loader(api, {json.dumps(CASE_DOC)}, true);"
+        "loader.productIds = new Map([['p', 'P1']]);"
+        "await loader.loadFeatures();"
+        "console.log(JSON.stringify({ id: loader.featureIds.get('f'), counts: loader.count('features') }));"
+    )
+    result = subprocess.run([node, "--input-type=module", "-e", script], capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == {"id": "F1", "counts": {"reused": 1}}
+
+
+def test_the_removal_finds_a_feature_named_in_another_case(capsys):
+    exact = _run_unseed(_unseeder(_probe(), PROBE_SEED), capsys)
+    doc = {**PROBE_SEED, "features": [{**PROBE_SEED["features"][0], "name": "PROBE Feature"}]}
+    assert _run_unseed(_unseeder(_probe(), doc), capsys) == exact
+    assert "Probe feature" in exact

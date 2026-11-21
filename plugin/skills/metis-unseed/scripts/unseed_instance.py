@@ -297,12 +297,13 @@ class Unseeder:
             {p["name"]: p for p in self.inst_prods},
             lambda p: p.get("name"),
         )
-        # A feature is its product's: identity is (product, name), so two
-        # products may each have a "Sign in" without one unseed taking both.
+        # A feature is its product's: identity is (product, name ignoring case,
+        # as the API holds it), so two products may each have a "Sign in"
+        # without one unseed taking both.
         self.feats = self._match(
             "features",
-            lambda f: ((self.prods.get(f.get("product_ref")) or {}).get("id"), f.get("name")),
-            {(f.get("product_id"), f["name"]): f for f in self.inst_feats},
+            lambda f: ((self.prods.get(f.get("product_ref")) or {}).get("id"), (f.get("name") or "").lower()),
+            {(f.get("product_id"), f["name"].lower()): f for f in self.inst_feats},
             lambda f: f.get("name"),
         )
         self.techs = self._match(

@@ -380,16 +380,19 @@ export function UnseedPanel({ onRemoved }) {
         <Button size="sm" variant="secondary" disabled={action != null || !text.trim()} onClick={() => run(true)}>
           {action === "preview" ? "Previewing…" : "Preview removal"}
         </Button>
-        <DeleteConfirm armed={confirming} onArm={() => setConfirming(true)} onCancel={() => setConfirming(false)}
-          onConfirm={() => run(false)} disabled={action != null || !text.trim() || !result?.dryRun}
-          label="Remove" confirmLabel="Remove what the preview lists" style={{ flexWrap: "wrap" }} />
-        {action === "delete" && <span role="status" style={SMALL}>Removing…</span>}
       </div>
       <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>
         Anything another product still uses is kept, and the preview says why.
       </div>
       {error && <div role="alert" style={{ fontSize: "var(--text-xs)", color: "var(--danger-fg)", whiteSpace: "pre-line" }}>{error}</div>}
       {result && <RemovalBox title={result.dryRun ? "Preview: this is what would be removed" : "Removed"} result={result} tone={result.warnings?.length ? "danger" : undefined} />}
+      {/* After the list it confirms, so it is read before Remove is pressed (B38). */}
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+        <DeleteConfirm armed={confirming} onArm={() => setConfirming(true)} onCancel={() => setConfirming(false)}
+          onConfirm={() => run(false)} disabled={action != null || !text.trim() || !result?.dryRun}
+          label="Remove" confirmLabel="Remove what the preview lists" style={{ flexWrap: "wrap" }} />
+        {action === "delete" && <span role="status" style={SMALL}>Removing…</span>}
+      </div>
     </div>
   );
 }

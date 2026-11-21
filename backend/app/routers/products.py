@@ -4,6 +4,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth import Principal, current_user
+from app.auth.deps import author
 from app.db import get_db
 from app.models import Feature, Goal, Product
 from app.schemas.capability import CapabilityRead, ProductCoverage
@@ -159,9 +161,10 @@ async def create_decomposition(
     product_id: uuid.UUID,
     data: DecompositionCreate,
     session: AsyncSession = Depends(get_db),
+    principal: Principal = Depends(current_user),
 ):
     return await decomposition_service.create_prd_draft(
-        session, product_id, data.document, data.created_by
+        session, product_id, data.document, author(principal, data.created_by)
     )
 
 

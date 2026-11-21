@@ -57,6 +57,7 @@ class ProductBundleRead(ORMModel):
 
 class DecompositionCreate(BaseModel):
     document: PRDDocument
+    #: Used only with auth off: with auth on, the signed-in person is recorded.
     created_by: str = "user"
 
 

@@ -57,8 +57,14 @@ def test_every_write_refusal_opens_a_screen_that_exists(path):
         ("/api/guesses", "/settings#seed-files"),
         (f"/api/guesses/{ID}/confirm", "/features"),
         ("/api/graph/refresh", "/features"),
-        ("/api/stacks/usage", "/stacks"),
+        # Seed files carry a product's technology uses; no screen records them.
+        ("/api/stacks/usage", "/settings#seed-files"),
+        # /stacks only binds a slot, so only binding is sent there.
         (f"/api/stacks/slots/{ID}/bind", f"/stacks?slot={ID}"),
+        ("/api/stacks", "/ontology"),
+        (f"/api/stacks/slots/{ID}", "/ontology"),
+        (f"/api/stacks/{ID}/concerns", "/ontology"),
+        ("/api/constraints", "/ontology"),
         ("/api/tech/qdrant/adoption", "/tech/qdrant"),
         (f"/api/tech/satisfactions/{ID}", "/tech"),
         # Something not shaped like an id doesn't ride along into the href.
@@ -77,3 +83,37 @@ def test_the_screen_is_the_one_that_does_it(path, href):
 def test_the_seed_files_anchor_exists():
     island = PAGES.parent / "components" / "islands" / "SettingsIsland.jsx"
     assert 'id="seed-files"' in island.read_text()
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/stacks",
+        "/api/stacks/instantiate",
+        f"/api/stacks/{ID}",
+        f"/api/stacks/{ID}/slots",
+        f"/api/stacks/slots/{ID}",
+        f"/api/stacks/{ID}/concerns/{ID}",
+    ],
+)
+def test_a_stack_write_no_screen_makes_says_so(path):
+    message, href = human_action(path)
+    assert message == (
+        "No screen creates or changes a stack, and seed files don't carry one: "
+        "a person with editor access records it through metis's API."
+    )
+    assert href == "/ontology"
+
+
+def test_technology_uses_point_at_seed_files_and_constraints_name_no_stack():
+    message, _ = human_action("/api/stacks/usage")
+    assert message.startswith("No screen records which technologies a product uses: a seed file")
+    message, _ = human_action(f"/api/concerns/{ID}")
+    assert "stack" not in message and message.startswith("No screen records constraints")
+
+
+def test_binding_still_goes_to_the_slot():
+    assert human_action(f"/api/stacks/slots/{ID}/bind") == (
+        "Binding a slot is a human action.",
+        f"/stacks?slot={ID}",
+    )

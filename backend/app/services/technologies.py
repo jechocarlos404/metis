@@ -17,7 +17,7 @@ from datetime import date, timedelta
 
 import networkx as nx
 from fastapi import HTTPException
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
@@ -80,6 +80,8 @@ DEPTH_RANK = [EncounterDepth.evaluated, EncounterDepth.touched, EncounterDepth.s
 #: REQUIRES ∪ RUNS_ON is jointly acyclic. ALTERNATIVE_TO is symmetric and
 #: SUPERSEDES/WRAPS annotate; none of them participate in the cycle check.
 ACYCLIC_KINDS = {TechEdgeKind.REQUIRES, TechEdgeKind.RUNS_ON}
+#: Advisory lock key serializing REQUIRES/RUNS_ON writes (see `create_edge`).
+EDGE_LOCK = 0x6D6574697302
 
 #: A release line inside this window counts as exposure, not as a surprise.
 EOL_HORIZON_DAYS = 180
@@ -548,14 +550,17 @@ async def create_edge(session: AsyncSession, data: TechEdgeCreate) -> TechEdge:
         raise HTTPException(422, "An edge cannot connect a technology to itself")
     await get_technology(session, data.src_id)
     await get_technology(session, data.dst_id)
-    if data.kind in ACYCLIC_KINDS and await _would_create_cycle(
-        session, data.src_id, data.dst_id
-    ):
-        raise HTTPException(
-            422,
-            f"{data.kind} edge would create a cycle in REQUIRES ∪ RUNS_ON — "
-            "break the existing chain first.",
-        )
+    if data.kind in ACYCLIC_KINDS:
+        # Held until this transaction ends, so two opposite edges sent together
+        # can't both pass the check (same as `features.create_edge`).
+        await session.execute(text("select pg_advisory_xact_lock(:key)"), {"key": EDGE_LOCK})
+        if await _would_create_cycle(session, data.src_id, data.dst_id):
+            await session.commit()  # ends the transaction, releasing the lock
+            raise HTTPException(
+                422,
+                f"{data.kind} edge would create a cycle in REQUIRES ∪ RUNS_ON — "
+                "break the existing chain first.",
+            )
     existing = await session.scalar(
         select(TechEdge).where(
             TechEdge.src_id == data.src_id,
@@ -564,6 +569,7 @@ async def create_edge(session: AsyncSession, data: TechEdgeCreate) -> TechEdge:
         )
     )
     if existing is not None:
+        await session.commit()  # releases the lock
         return existing
     edge = TechEdge(**data.model_dump())
     session.add(edge)

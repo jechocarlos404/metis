@@ -65,8 +65,20 @@ def test_every_write_refusal_opens_a_screen_that_exists(path):
         (f"/api/stacks/slots/{ID}", "/ontology"),
         (f"/api/stacks/{ID}/concerns", "/ontology"),
         ("/api/constraints", "/ontology"),
-        ("/api/tech/qdrant/adoption", "/tech/qdrant"),
-        (f"/api/tech/satisfactions/{ID}", "/tech"),
+        # The one technology write a screen makes (the form is on /tech/{slug};
+        # the path names no technology, so the catalog opens).
+        ("/api/tech/encounters", "/tech"),
+        (f"/api/tech/encounters/{ID}", "/tech"),
+        # Seed files carry technologies and what they satisfy; no screen does.
+        ("/api/tech", "/settings#seed-files"),
+        ("/api/tech/qdrant", "/settings#seed-files"),
+        (f"/api/tech/satisfactions/{ID}", "/settings#seed-files"),
+        # Versions, vendors, links and stance: the API only.
+        ("/api/tech/qdrant/adoption", "/ontology"),
+        ("/api/tech/qdrant/versions", "/ontology"),
+        (f"/api/tech/versions/{ID}", "/ontology"),
+        ("/api/tech/vendors", "/ontology"),
+        (f"/api/tech/edges/{ID}", "/ontology"),
         # Something not shaped like an id doesn't ride along into the href.
         ("/api/features/a%2Fb", "/features"),
     ],
@@ -110,6 +122,26 @@ def test_technology_uses_point_at_seed_files_and_constraints_name_no_stack():
     assert message.startswith("No screen records which technologies a product uses: a seed file")
     message, _ = human_action(f"/api/concerns/{ID}")
     assert "stack" not in message and message.startswith("No screen records constraints")
+
+
+def test_a_technology_write_no_screen_makes_says_so():
+    """R-W5 for technologies (D44): only an encounter has a form; the refusal
+    says where the rest come from rather than opening /tech, which can't."""
+    for path in ("/api/tech", "/api/tech/qdrant", "/api/tech/satisfactions"):
+        assert human_action(path) == (
+            "No screen records a technology or the capabilities it satisfies: a seed file "
+            "carries them, or a person with editor access records them through metis's API.",
+            "/settings#seed-files",
+        )
+    for path in ("/api/tech/qdrant/versions", "/api/tech/qdrant/adoption", "/api/tech/vendors",
+                 f"/api/tech/vendors/{ID}", "/api/tech/edges", f"/api/tech/versions/{ID}"):
+        message, href = human_action(path)
+        assert message.startswith("No screen records a technology's versions, vendor, links")
+        assert "seed files don't carry them" in message and href == "/ontology"
+    message, href = human_action("/api/tech/encounters")
+    assert message.startswith("This is a human action") and href == "/tech"
+    model = (PAGES.parents[2] / "backend" / "app" / "ontology" / "model.md").read_text()
+    assert "A technology's versions, vendor, links to other technologies and the group's stance" in model
 
 
 def test_binding_still_goes_to_the_slot():

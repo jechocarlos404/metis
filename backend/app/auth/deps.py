@@ -102,9 +102,8 @@ _SCREENS = tuple(
         # Guesses arrive in seed files and are confirmed where they show.
         (r"/api/guesses", "/settings#seed-files"),
         (r"/api/guesses/.*", "/features"),
-        (r"/api/tech/(vendors|edges|satisfactions|encounters|versions)(/.*)?", "/tech"),
-        (r"/api/tech/(?P<id>[a-z0-9-]+)(/.*)?", "/tech/{id}"),
-        (r"/api/tech", "/tech"),
+        # The one technology write a screen makes; the rest are in _NO_SCREEN.
+        (r"/api/tech/encounters(/.*)?", "/tech"),
         (rf"/api/chat/threads/{_ID}(/.*)?", "/chat/{id}"),
         (r"/api/chat(/.*)?", "/chat"),
         (r"/api/users(/.*)?", "/users"),
@@ -118,7 +117,10 @@ _SCREENS = tuple(
 #: a screen that can't do it: `/stacks` only binds a slot, and the owner chose
 #: not to add a form for the rest. `/ontology` describes the buy plane and
 #: names binding as its one screen write. Seed files carry a product's
-#: technology uses, never a stack (`ontology/seed-format.md`).
+#: technology uses, never a stack (`ontology/seed-format.md`). Of the
+#: technology writes only an encounter has a screen (`/tech/{slug}`); a seed
+#: file carries technologies and what they satisfy, never versions, vendors,
+#: links between technologies or a stance.
 _NO_SCREEN = tuple(
     (re.compile(pattern), message, href)
     for pattern, message, href in (
@@ -133,6 +135,20 @@ _NO_SCREEN = tuple(
             "No screen creates or changes a stack, and seed files don't carry one: "
             "a person with editor access records it through metis's API.",
             "/ontology",
+        ),
+        (
+            r"(?:/api/tech/(vendors|edges|versions)(/.*)?|/api/tech/[^/]+/(versions|adoption))",
+            "No screen records a technology's versions, vendor, links to other technologies "
+            "or stance, and seed files don't carry them: "
+            "a person with editor access records them through metis's API.",
+            "/ontology",
+        ),
+        (
+            r"(?:/api/tech(/satisfactions(/.*)?)?|/api/tech/(?!encounters$)[^/]+)",
+            "No screen records a technology or the capabilities it satisfies: "
+            "a seed file carries them, or a person with editor access records them "
+            "through metis's API.",
+            "/settings#seed-files",
         ),
         (
             r"/api/(constraints|concerns)(/.*)?",

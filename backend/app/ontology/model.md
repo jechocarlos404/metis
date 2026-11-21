@@ -318,6 +318,11 @@ linkable. Only `/ontology` earns its own entry, in the Help position.
 human presses, and nothing else in the system presses it.
 Stacks, slots, concerns and constraints have no form: an editor records them through the
 API (`POST /api/stacks`, `/api/stacks/instantiate`); seed files never carry them.
+A technology's versions, vendor, links to other technologies and the group's stance have
+no form either: an editor records them through the API (`POST /api/tech/{slug}/versions`,
+`/api/tech/vendors`, `/api/tech/edges`, `PUT /api/tech/{slug}/adoption`); seed files never
+carry them. Technologies themselves, and the capabilities they satisfy, come in seed
+files. The one technology write with a screen is an encounter, on `/tech/[slug]`.
 
 ## Not built
 

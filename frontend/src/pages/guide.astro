@@ -140,8 +140,11 @@ import AppLayout from "../layouts/AppLayout.astro";
         <li>
           <strong>Claude Code</strong>: install the plugin, which connects over SSE (below) and adds skills such as
           <code>metis-check-idea</code>.
-          <pre><code>/plugin marketplace add /path/to/metis
+          <div class="cmd">
+            <pre tabindex="0" role="region" aria-label="Claude Code commands"><code>/plugin marketplace add /path/to/metis
 /plugin install metis@metis</code></pre>
+            <button type="button" class="copy" hidden>Copy<span class="sr"> the Claude Code commands</span></button>
+          </div>
         </li>
         <li>
           <strong>SSE</strong>: put a token in metis's <code>.env</code> as <code>METIS_MCP_SSE_TOKEN</code> (there
@@ -149,18 +152,25 @@ import AppLayout from "../layouts/AppLayout.astro";
           <code>http://localhost:8001/sse</code>, on this machine only, and every request must send
           <code>Authorization: Bearer &lt;that token&gt;</code>. The plugin reads the same value from
           <code>METIS_MCP_TOKEN</code>.
-          <pre><code>echo "METIS_MCP_SSE_TOKEN=$(openssl rand -hex 32)" &gt;&gt; .env
+          <div class="cmd">
+            <pre tabindex="0" role="region" aria-label="SSE commands"><code>echo "METIS_MCP_SSE_TOKEN=$(openssl rand -hex 32)" &gt;&gt; .env
 docker compose --profile mcp up -d --build mcp</code></pre>
+            <button type="button" class="copy" hidden>Copy<span class="sr"> the SSE commands</span></button>
+          </div>
         </li>
         <li>
           <strong>stdio</strong>, for an agent on the same machine, once the backend's <code>.venv</code> is installed
           (<code>pip install -r requirements.txt</code> in <code>backend</code>): it needs no bearer token, but with
           auth on it still signs in through Keycloak.
-          <pre><code>PYTHONPATH=/path/to/metis/backend \
+          <div class="cmd">
+            <pre tabindex="0" role="region" aria-label="stdio command"><code>PYTHONPATH=/path/to/metis/backend \
 MCP_API_BASE_URL=http://localhost:8000 \
   /path/to/metis/backend/.venv/bin/python -m app.mcp</code></pre>
+            <button type="button" class="copy" hidden>Copy<span class="sr"> the stdio command</span></button>
+          </div>
         </li>
       </ul>
+      <p role="status" class="sr" id="copied"></p>
       <p>
         Every tool and setting is in <code>docs/mcp.md</code> in the repository, and the plugin's in
         <code>plugin/README.md</code>.
@@ -196,13 +206,49 @@ MCP_API_BASE_URL=http://localhost:8000 \
   li { min-width: 0; } /* a long command scrolls in its box instead of widening the list */
   p { margin: 0 0 var(--space-3); }
   ul + p { margin-top: var(--space-3); }
+  /* A command too long for its box scrolls; a shade on each cut edge says so,
+     and goes once that edge is scrolled to. Copy takes the whole of it. */
+  .cmd { margin: var(--space-2) 0 0; display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-1); }
   pre {
-    margin: var(--space-2) 0 0; padding: var(--space-2) var(--space-3); overflow-x: auto;
-    background: var(--surface-card); border: 1px solid var(--border-hairline); border-radius: var(--radius-sm);
+    margin: 0; padding: var(--space-2) var(--space-3); overflow-x: auto; align-self: stretch;
+    border: 1px solid var(--border-hairline); border-radius: var(--radius-sm);
     font-size: var(--text-sm);
+    background:
+      linear-gradient(to right, var(--surface-card) 30%, transparent) left / 2.5rem 100% no-repeat local,
+      linear-gradient(to left, var(--surface-card) 30%, transparent) right / 2.5rem 100% no-repeat local,
+      linear-gradient(to right, var(--border-default), transparent) left / 1rem 100% no-repeat scroll,
+      linear-gradient(to left, var(--border-default), transparent) right / 1rem 100% no-repeat scroll,
+      var(--surface-card);
   }
+  .copy {
+    font: inherit; font-size: var(--text-xs); color: var(--text-accent); background: none; border: none;
+    padding: 2px 0; cursor: pointer;
+  }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; margin: 0; }
   .more { margin-top: var(--space-8); color: var(--text-secondary); font-size: var(--text-sm); }
   @media (max-width: 560px) {
     .terms > div { grid-template-columns: minmax(0, 1fr); gap: var(--space-1); }
   }
 </style>
+
+<script>
+  // Copy shows only where the clipboard works; it copies the command as written.
+  const status = document.getElementById("copied");
+  for (const button of document.querySelectorAll(".copy")) {
+    if (!navigator.clipboard) continue;
+    button.hidden = false;
+    const label = button.firstChild;
+    button.addEventListener("click", async () => {
+      const pre = button.parentElement.querySelector("pre");
+      try {
+        await navigator.clipboard.writeText(pre.innerText);
+        label.textContent = "Copied";
+        status.textContent = `Copied the ${pre.getAttribute("aria-label")}.`;
+      } catch {
+        label.textContent = "Copy failed";
+        status.textContent = "Couldn't copy. Select the text instead.";
+      }
+      setTimeout(() => { label.textContent = "Copy"; }, 2000);
+    });
+  }
+</script>

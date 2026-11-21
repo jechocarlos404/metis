@@ -67,6 +67,8 @@ derivations go stale, and a stale risk number is worse than none.
 
 ```sh
 cp .env.example .env      # optional: add LLM provider keys
+# required while auth is on: sign-in refuses while SESSION_SECRET is unset or the
+# public default, so set it in .env to the output of: openssl rand -hex 32
 docker compose up --build
 ```
 
@@ -461,6 +463,7 @@ All optional — see `.env.example`:
 | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_REGION` | Bedrock (Claude models) |
 | `OLLAMA_BASE_URL` | Ollama; compose default reaches host Ollama at `host.docker.internal:11434` |
 | `AUTH_ENABLED` | `false` makes every request an admin on the desktop surface — scripts only |
+| `SESSION_SECRET` | Signs the web session cookie. Required while auth is on: sign-in refuses while it is unset or the public default (`openssl rand -hex 32`) |
 | `METIS_MCP_SSE_TOKEN` | Required for the MCP server's SSE mode |
 | `METIS_MCP_CLIENT_SECRET` | The `metis-mcp` Keycloak client's secret, which the MCP server signs in with (dev default `dev-mcp-secret`) |
 | `ANTHROPIC_MODELS` etc. | Override the model dropdowns (comma-separated) |
@@ -468,7 +471,9 @@ All optional — see `.env.example`:
 ## Development
 
 ```sh
-# settings, once: compose and the backend below both read this file
+# settings, once: compose and the backend below both read this file. With auth
+# on, set SESSION_SECRET in it first (openssl rand -hex 32): sign-in refuses
+# while it is unset or the public default.
 cp .env.example .env
 
 # database, and Keycloak: the backend checks every token against it and the
@@ -487,6 +492,9 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
 # frontend, in a second terminal from the repo root (uvicorn holds this one)
 cd frontend
 npm install
+# npm run dev reads SESSION_SECRET and AUTH_ENABLED (and the Keycloak settings)
+# from its environment, not from .env, so export the root file's first
+set -a; . ../.env; set +a
 npm run dev            # http://localhost:4321, proxies to localhost:8000
 ```
 

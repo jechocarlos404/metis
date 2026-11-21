@@ -4,6 +4,7 @@ export const prerender = false;
 
 import { authorizeUrl, clientId, pkceChallenge, randomState, redirectUri } from "../../lib/oidc.js";
 import { writeOidcState } from "../../lib/session.js";
+import { signInPage } from "../../lib/auth-page.js";
 
 // A path on this site only. `//host` and `/\host` leave it, and browsers drop
 // tabs and newlines before resolving, so `/<tab>/host` does too.
@@ -14,7 +15,12 @@ export async function GET({ url, cookies, redirect }) {
   const returnTo = asked && LOCAL_PATH.test(asked) ? asked : "/";
   const state = randomState();
   const { verifier, challenge } = await pkceChallenge();
-  await writeOidcState(cookies, { state, verifier, returnTo });
+  try {
+    await writeOidcState(cookies, { state, verifier, returnTo });
+  } catch (err) {
+    // The session secret is unusable (session.js says why); no sign-in can work.
+    return signInPage(503, err.message, { title: "Sign-in unavailable", heading: "Sign-in can't start", retry: false });
+  }
 
   const authorize = new URL(authorizeUrl());
   authorize.search = new URLSearchParams({

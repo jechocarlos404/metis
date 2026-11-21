@@ -13,7 +13,7 @@ const FINDINGS = {
   unmotivated_capability: { label: "No goal explains it", tone: "danger", hint: "No goal links to it or to anything under it" },
   // Its own words: a narrower set than the "not built yet" pill, which also
   // covers capabilities whose features are planned or in progress (B44).
-  aspirational_gap: { label: "No feature builds it", tone: NEED.none.tone, hint: "Promised, but no feature of ours, finished or not, builds it" },
+  aspirational_gap: { label: "No feature builds it", tone: NEED.none.tone, hint: "Planned, alpha or beta, yet no feature in metis, finished or not, links to it or to anything under it" },
   unlinked_feature: { label: "Feature with no capability", tone: "warn", hint: "It can't count toward reuse or coverage until it has one" },
   stale_map: { label: "Map may be out of date", tone: "warn", hint: "Not imported from its seed file in 30 days, or ever" },
 };

@@ -155,7 +155,8 @@ docker compose --profile mcp up -d --build mcp</code></pre>
         <li>
           <strong>stdio</strong>, for an agent on the same machine: it needs no bearer token, but with auth on it still
           signs in through Keycloak.
-          <pre><code>PYTHONPATH=/path/to/metis/backend MCP_API_BASE_URL=http://localhost:8000 \
+          <pre><code>PYTHONPATH=/path/to/metis/backend \
+MCP_API_BASE_URL=http://localhost:8000 \
   /path/to/metis/backend/.venv/bin/python -m app.mcp</code></pre>
         </li>
       </ul>
@@ -191,7 +192,9 @@ docker compose --profile mcp up -d --build mcp</code></pre>
   dt { font-weight: var(--weight-semibold); color: var(--text-heading); }
   dd { margin: 0; text-wrap: pretty; }
   ul { padding-left: var(--space-5); margin: 0; display: grid; gap: var(--space-2); }
+  li { min-width: 0; } /* a long command scrolls in its box instead of widening the list */
   p { margin: 0 0 var(--space-3); }
+  ul + p { margin-top: var(--space-3); }
   pre {
     margin: var(--space-2) 0 0; padding: var(--space-2) var(--space-3); overflow-x: auto;
     background: var(--surface-card); border: 1px solid var(--border-hairline); border-radius: var(--radius-sm);

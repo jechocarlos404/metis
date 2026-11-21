@@ -9,6 +9,7 @@ from app.schemas.common import Stamped, display
 class StrategyCreate(BaseModel):
     phases: list[dict[str, Any]] = Field(default_factory=list)
     rationale: str | None = None
+    #: Used only with auth off: with auth on, the signed-in person is recorded.
     created_by: str = "user"
 
 

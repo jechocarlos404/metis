@@ -187,6 +187,15 @@ def authorize(method: str, principal: Principal, path: str = "") -> None:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Requires editor or admin role")
 
 
+def author(principal: Principal, claimed: str) -> str:
+    """Who a write is recorded as made by. With auth on, the signed-in person
+    as their token names them, whatever the client sent; with auth off (local
+    dev, tests) the client's value or its default stands."""
+    if principal is DEV_PRINCIPAL:
+        return claimed
+    return principal.username or principal.email or principal.sub
+
+
 async def enforce_rbac(
     request: Request, principal: Principal = Depends(current_user)
 ) -> Principal:

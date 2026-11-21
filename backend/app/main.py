@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, HTTPException, Request
@@ -156,6 +157,12 @@ async def surface_first(request: Request, principal: Principal = Depends(current
 
 def create_app() -> FastAPI:
     settings = get_settings()
+    # `metis.access` (who read people) and `metis.chat` log at INFO; nothing
+    # else configures logging, so without this they never reach stderr.
+    metis_log = logging.getLogger("metis")
+    metis_log.setLevel(logging.INFO)
+    if not metis_log.handlers:  # create_app runs once per test
+        metis_log.addHandler(logging.StreamHandler())
     app = FastAPI(title="Metis API", version="0.1.0", lifespan=lifespan)
     app.add_exception_handler(RequestValidationError, validation_error)
     app.add_exception_handler(StarletteHTTPException, http_error)

@@ -67,6 +67,7 @@ export default function CapabilityIsland({ slug, canWrite = false }) {
   const [supply, setSupply] = React.useState(null);
   const [goals, setGoals] = React.useState([]);
   const [motivations, setMotivations] = React.useState(null);
+  const [bundles, setBundles] = React.useState([]); // every capability a product added by hand
   const [notFound, setNotFound] = React.useState(false);
   const [error, setError] = React.useState(null);
   const [saved, setSaved] = React.useState(null); // what the last edit changed, said in place
@@ -86,14 +87,16 @@ export default function CapabilityIsland({ slug, canWrite = false }) {
 
   const load = React.useCallback(async () => {
     try {
-      const [inv, sup, goalList] = await Promise.all([
+      const [inv, sup, goalList, bundleList] = await Promise.all([
         api("/capabilities/inventory"),
         api(`/capabilities/${slug}/supply`),
         api("/goals"),
+        api("/product-bundles"),
       ]);
       setInventory(inv);
       setSupply(sup);
       setGoals(goalList);
+      setBundles(bundleList);
       const techs = await Promise.all((sup.answer ?? []).map((o) => api(`/tech/${o.tech}`).catch(() => null)));
       setTechNames(Object.fromEntries(techs.filter(Boolean).map((t) => [t.slug, t.name])));
       const entry = inv.find((c) => c.slug === slug);
@@ -144,6 +147,8 @@ export default function CapabilityIsland({ slug, canWrite = false }) {
   };
   const ours = groups(cap.products, false);
   const theirs = groups(cap.external_products, true);
+  // Products that added it by hand, with or without a feature for it (B46).
+  const byHand = bundles.filter((b) => b.capability_id === cap.id).sort((a, b) => a.product_name.localeCompare(b.product_name));
 
   const offers = supply.answer ?? [];
   const blockedBy = (supply.unresolved ?? []).flatMap((u) => u.blocked_by ?? []);
@@ -359,7 +364,7 @@ export default function CapabilityIsland({ slug, canWrite = false }) {
           <h2 style={H2}>Who uses it</h2>
           {ours.length === 0 ? (
             <div style={NOTE}>
-              None of our products uses it yet.{" "}
+              {byHand.length ? "No feature of ours uses it yet." : "None of our products uses it yet."}{" "}
               {canWrite ? <>Link a feature to it on <a href="/features">Features</a>.</> : "An editor or admin can link features to it."}
             </div>
           ) : (
@@ -367,6 +372,19 @@ export default function CapabilityIsland({ slug, canWrite = false }) {
               {!cap.ours && <div style={NOTE}>Not built yet: our features for it are planned or in progress.</div>}
               {ours.map((g) => <ProductGroup key={g.product?.id ?? "none"} group={g} slugByName={slugByName} external={false} />)}
             </>
+          )}
+          {byHand.length > 0 && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <div style={SUBHEAD} title="product_bundles">Added by hand (not counted)</div>
+              <div style={{ fontSize: "var(--text-sm)" }}>
+                {byHand.map((b, i) => (
+                  <React.Fragment key={b.id}>
+                    {i > 0 && ", "}
+                    <a href={`/products?product=${b.product_id}`}>{b.product_name}</a>
+                  </React.Fragment>
+                ))}
+              </div>
+            </div>
           )}
           {canWrite && <Guesses query={{ capability_id: cap.id }} name="subject" title="Features and technologies guessed to use it" onConfirmed={() => load()} onCount={setGuessCount} />}
           {theirs.length > 0 && (

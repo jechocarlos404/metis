@@ -376,6 +376,20 @@ def products(rows: list[dict]) -> str:
     return _end(lines, "/products")
 
 
+def product_features(product: dict, features: list[dict]) -> str:
+    """One product's features, so an agent can pass one to feature_why or
+    recheck without guessing a name. Statuses raw, in the API's order."""
+    counts = {s: sum(1 for f in features if f["status"] == s) for s in ("done", "in_progress", "pending")}
+    said = ", ".join(f"{n} {s}" for s, n in counts.items() if n)
+    whose = "external" if product["external"] else "ours"
+    lines = [f"{len(features)} feature(s) of {product['slug']} ({whose}){': ' + said if said else ''}.", ""]
+    lines += _table([["  " + f["name"], f["status"], f["id"]] for f in features])
+    if not features:
+        lines.append("None recorded yet: features are added on the desktop or by a seed file.")
+    lines.append("")
+    return _end(lines, f"/features?product={product['id']}")
+
+
 def _through(entry: dict) -> str:
     """The feature count rolls up the submap; say how much of it is a
     sub-capability's link, as `capability` does."""

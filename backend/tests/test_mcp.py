@@ -552,6 +552,30 @@ async def test_products_lists_ours_and_external(api):
     assert rows == {"can-i-climb": "2026-11-01T12:00:00Z", "rival": "never"}
 
 
+async def test_products_given_one_lists_its_features_for_the_tools_that_take_one(api):
+    """No tool needed a name to list a product's features, yet feature_why
+    and recheck need one. products with a product lists them, with status
+    and the id the next call takes."""
+    w = await _world(*api)
+    text = await server._dispatch("products", {"product": "can-i-climb"})
+    _conventions(text)
+    lines = text.splitlines()
+    assert lines[0] == "2 feature(s) of can-i-climb (ours): 1 done, 1 pending."
+    rows = {line.split("  ")[1].strip(): line.split()[-2:] for line in lines[2:4]}
+    assert rows["Estimate climb power"][0] == "done"
+    assert rows["Show ride history"] == ["pending", str(w["forecast"].id)]
+    assert lines[-1] == f"Open: /features?product={w['climb'].id}"
+    why = await server._dispatch("feature_why", {"feature": rows["Show ride history"][1]})
+    assert not why.startswith("0 features")
+
+    by_id = await server._dispatch("products", {"product": str(w["rival"].id)})
+    assert by_id.startswith("3 feature(s) of rival (external): 3 pending.")
+    assert (await server._dispatch("products", {"product": "Rival"})).splitlines()[1] == (
+        'Near names, unconfirmed: rival "Rival"'
+    )
+    assert (await server._dispatch("products", {})).startswith("2 product(s): 1 ours, 1 external.")
+
+
 async def test_a_products_stacks_resource_holds_only_its_own_stacks(api):
     app, db = api
     w = await _world(app, db)

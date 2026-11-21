@@ -200,9 +200,18 @@ TOOLS = [
             "List products, ours and external, with id, slug, name and "
             "seeded_at (when its seed file was last imported, ISO, or never). The "
             "inventory's navigation tool — the other tools take an id or slug "
-            "it returns, so agents never guess."
+            "it returns, so agents never guess. Given one product, lists its "
+            "features instead: name, status and id, for feature_why and recheck."
         ),
-        inputSchema={"type": "object", "properties": {}},
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "product": {
+                    "type": "string",
+                    "description": "Product id or slug, optional: list its features",
+                }
+            },
+        },
     ),
     Tool(
         name="capability_inventory",
@@ -531,7 +540,13 @@ async def _dispatch(name: str, args: dict) -> str:
         return await _propose(args)
 
     if name == "products":
-        return render.products(await client.get("/api/products"))
+        if not args.get("product"):
+            return render.products(await client.get("/api/products"))
+        product = await _product(args["product"])
+        if product is None:
+            return await _no_product(args["product"])
+        features = [f for f in await client.get("/api/features") if f["product_id"] == product["id"]]
+        return render.product_features(product, features)
 
     if name == "capability_inventory":
         return render.capability_inventory(

@@ -133,8 +133,8 @@ import AppLayout from "../layouts/AppLayout.astro";
 
       <h2>For AI agents</h2>
       <p>
-        Agents can ask metis the same questions over MCP, read only: a write comes back refused, naming the screen
-        where a person can make it.
+        Agents can ask metis the same questions over MCP, read only: a write comes back refused, since writes are a
+        person's action on the desktop.
       </p>
       <ul>
         <li>
@@ -153,8 +153,9 @@ import AppLayout from "../layouts/AppLayout.astro";
 docker compose --profile mcp up -d --build mcp</code></pre>
         </li>
         <li>
-          <strong>stdio</strong>, for an agent on the same machine: it needs no bearer token, but with auth on it still
-          signs in through Keycloak.
+          <strong>stdio</strong>, for an agent on the same machine, once the backend's <code>.venv</code> is installed
+          (<code>pip install -r requirements.txt</code> in <code>backend</code>): it needs no bearer token, but with
+          auth on it still signs in through Keycloak.
           <pre><code>PYTHONPATH=/path/to/metis/backend \
 MCP_API_BASE_URL=http://localhost:8000 \
   /path/to/metis/backend/.venv/bin/python -m app.mcp</code></pre>

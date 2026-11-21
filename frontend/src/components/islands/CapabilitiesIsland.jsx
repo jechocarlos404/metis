@@ -18,7 +18,7 @@ const FINDINGS = {
 // "never imported from a seed file." → "Never imported from a seed file."
 const sentence = (text) => text.charAt(0).toUpperCase() + text.slice(1);
 // metis knows which products use a capability, not whether they share its code.
-const REUSE_NOTE = "Products: our products whose features use the capability, whether they share the code or each built it separately.";
+const REUSE_NOTE = "The product count is our products whose features use the capability, whether they share the code or each built it separately.";
 const VIEWS = [
   { value: "tree", label: "Tree" },
   { value: "reused", label: "Most reused", hint: REUSE_NOTE },

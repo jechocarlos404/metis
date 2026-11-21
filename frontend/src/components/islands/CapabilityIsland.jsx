@@ -6,7 +6,7 @@ import { Term } from "../shared/Term.jsx";
 import { Guesses } from "../shared/Guesses.jsx";
 import { api } from "../../lib/api.js";
 import { readParam, writeParams } from "../../lib/url-state.js";
-import { FIT, MATURITY, NEED, andList, count, needKey, plain, statusLabel } from "../../lib/words.js";
+import { FIT, MATURITY, NEED, andList, capabilityDeleteKept, capabilityDeleteLinks, count, needKey, plain, statusLabel } from "../../lib/words.js";
 import { FIT_TONE, STANCE_TONE } from "../../lib/ontology.js";
 
 /**
@@ -54,13 +54,6 @@ function treeOptions(all, excluded) {
   walk(null, 0);
   return out;
 }
-
-// Rows a delete keeps but leaves without the deleted one (the API's
-// detaches), by name: "epic Search (Climb)", "2 stack slots: a (S), b (S)".
-// The API's table labels are plural, as on /data.
-const keptRows = (detaches) => andList(detaches.map((t) => (t.count === 1
-  ? `${t.label.replace(/ies$/, "y").replace(/s$/, "").toLowerCase()} ${t.names[0]}`
-  : `${t.count} ${t.label.toLowerCase()}: ${t.names.join(", ")}`)));
 
 export default function CapabilityIsland({ slug, canWrite = false }) {
   const [inventory, setInventory] = React.useState(null);
@@ -302,28 +295,18 @@ export default function CapabilityIsland({ slug, canWrite = false }) {
                 </span>
               )}
               {/* What goes with it: the links to it that a delete removes. */}
-              {confirmingDelete && (motivations?.length > 0 || guessCount > 0) && (
+              {confirmingDelete && capabilityDeleteLinks(motivations, guessCount) && (
                 <span style={{ fontSize: "var(--text-xs)", color: "var(--text-body)" }}>
-                  {[
-                    motivations?.length > 0 && `Unlinks ${motivations.length === 1 ? "goal" : "goals"} ${andList(motivations.map((g) => g.display_id))}`,
-                    guessCount > 0 && `drops ${count(guessCount, "guess", "guesses")} waiting for review`,
-                  ].filter(Boolean).join(" and ")}.
+                  {capabilityDeleteLinks(motivations, guessCount)}
                 </span>
               )}
               {/* What stays but loses it: epics and stack slots that name it,
                   and products that added it by hand (B46). */}
-              {confirmingDelete && detaches?.length > 0 && (() => {
-                const kept = detaches.filter((t) => t.table !== "product_bundles");
-                const byHand = detaches.find((t) => t.table === "product_bundles");
-                return (
-                  <span style={{ fontSize: "var(--text-xs)", color: "var(--text-body)" }}>
-                    {[
-                      kept.length > 0 && `Clears it from ${keptRows(kept)}`,
-                      byHand && `takes it off the capabilities ${andList(byHand.names)} added by hand`,
-                    ].filter(Boolean).join(" and ").replace(/^t/, "T")}.
-                  </span>
-                );
-              })()}
+              {confirmingDelete && capabilityDeleteKept(detaches) && (
+                <span style={{ fontSize: "var(--text-xs)", color: "var(--text-body)" }}>
+                  {capabilityDeleteKept(detaches)}
+                </span>
+              )}
               <DeleteConfirm armed={confirmingDelete} onArm={armDelete} onCancel={() => setConfirmingDelete(false)}
                 onConfirm={remove} disabled={saving} label="Delete" confirmLabel="Delete capability" />
             </span>

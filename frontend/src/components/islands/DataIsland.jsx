@@ -225,6 +225,13 @@ export default function DataIsland() {
   };
 
   const previewData = preview?.data;
+  // The title counts what goes, as the button does: rows under a selected one
+  // go with it. Until the preview is in, it can only count the selection.
+  const previewTitle = !previewData
+    ? `Delete ${selected.size} ${selected.size === 1 ? ent.singular : ent.label.toLowerCase()}?`
+    : previewData.total_deletes.length === 1
+      ? `Delete ${tally(previewData.total_deletes[0])}?`
+      : `Delete ${count(previewData.total_rows, "row")}?`;
 
   return (
     <>
@@ -332,10 +339,13 @@ export default function DataIsland() {
               <DeleteConfirm armed={confirming} onArm={() => setConfirming(true)} onCancel={() => setConfirming(false)} onConfirm={removeOne} disabled={saving}
                 label="Delete" confirmLabel={"Delete row"} style={{ marginRight: "auto" }} />
             )}
-            <Button size="sm" variant="secondary" onClick={() => setDialog(null)}>Cancel</Button>
-            <Button size="sm" variant="accent" disabled={saving} onClick={save}>
-              {dialog?.mode === "new" ? `Create ${ent.singular}` : "Save"}
-            </Button>
+            {/* While a delete is armed, Keep is the one way back. */}
+            {!confirming && <>
+              <Button size="sm" variant="secondary" onClick={() => setDialog(null)}>Cancel</Button>
+              <Button size="sm" variant="accent" disabled={saving} onClick={save}>
+                {dialog?.mode === "new" ? `Create ${ent.singular}` : "Save"}
+              </Button>
+            </>}
           </>
         }
       >
@@ -353,7 +363,7 @@ export default function DataIsland() {
       {/* Cascade preview — the whole point of the bulk path. */}
       <Dialog
         open={preview != null}
-        title={`Delete ${selected.size} ${selected.size === 1 ? ent.singular : ent.label.toLowerCase()}?`}
+        title={previewTitle}
         width="600px"
         onClose={() => setPreview(null)}
         footer={
@@ -361,7 +371,7 @@ export default function DataIsland() {
             <DeleteConfirm armed={confirming} onArm={() => setConfirming(true)} onCancel={() => setConfirming(false)} onConfirm={runBulkDelete}
               disabled={saving || !previewData} label="Delete"
               confirmLabel={`Delete ${count(previewData?.total_rows ?? 0, "row")}`} style={{ marginRight: "auto" }} />
-            <Button size="sm" variant="secondary" onClick={() => setPreview(null)}>Cancel</Button>
+            {!confirming && <Button size="sm" variant="secondary" onClick={() => setPreview(null)}>Cancel</Button>}
           </>
         }
       >
@@ -394,6 +404,8 @@ export default function DataIsland() {
                     {r.missing ? `${shortId(r.id)} (already gone)` : r.label}
                   </span>
                   <span style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                    {/* The row itself goes too; its chips count what goes with it. */}
+                    {r.deletes.length > 0 && <span style={{ ...MUTED, fontSize: "var(--text-xs)", alignSelf: "center" }}>also deletes</span>}
                     {r.deletes.map((t) => <span key={t.table} title={rawTable(t)}><Tag>{tally(t)}</Tag></span>)}
                     {r.deletes.length === 0 && !r.missing && <span style={MUTED}>no dependents</span>}
                   </span>

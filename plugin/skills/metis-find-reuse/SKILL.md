@@ -26,7 +26,7 @@ Read-only: the metis MCP server refuses every write.
    - its name and description, to confirm it really is the same thing,
    - our products that have it, and external products listed apart,
    - our features that realize it, with status and product,
-   - its maturity (`ga` and `beta` are proven),
+   - its maturity (`ga` and `beta` are in use),
    - `Evidence (...)`: the recorded paths, when an export recorded any.
 
 3. **Choose where to look.** Prefer a product whose features using this

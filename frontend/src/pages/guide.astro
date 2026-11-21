@@ -133,8 +133,35 @@ import AppLayout from "../layouts/AppLayout.astro";
 
       <h2>For AI agents</h2>
       <p>
-        Agents can ask metis the same questions over MCP, read only. See <code>docs/mcp.md</code> in the repository
-        for how to connect one.
+        Agents can ask metis the same questions over MCP, read only: a write comes back refused, naming the screen
+        where a person can make it.
+      </p>
+      <ul>
+        <li>
+          <strong>Claude Code</strong>: install the plugin, which connects over SSE (below) and adds skills such as
+          <code>metis-check-idea</code>.
+          <pre><code>/plugin marketplace add /path/to/metis
+/plugin install metis@metis</code></pre>
+        </li>
+        <li>
+          <strong>SSE</strong>: put a token in metis's <code>.env</code> as <code>METIS_MCP_SSE_TOKEN</code> (there
+          is no default; the service won't start without it), then start the service from the metis checkout. It listens on
+          <code>http://localhost:8001/sse</code>, on this machine only, and every request must send
+          <code>Authorization: Bearer &lt;that token&gt;</code>. The plugin reads the same value from
+          <code>METIS_MCP_TOKEN</code>.
+          <pre><code>echo "METIS_MCP_SSE_TOKEN=$(openssl rand -hex 32)" &gt;&gt; .env
+docker compose --profile mcp up -d --build mcp</code></pre>
+        </li>
+        <li>
+          <strong>stdio</strong>, for an agent on the same machine: it needs no bearer token, but with auth on it still
+          signs in through Keycloak.
+          <pre><code>PYTHONPATH=/path/to/metis/backend MCP_API_BASE_URL=http://localhost:8000 \
+  /path/to/metis/backend/.venv/bin/python -m app.mcp</code></pre>
+        </li>
+      </ul>
+      <p>
+        Every tool and setting is in <code>docs/mcp.md</code> in the repository, and the plugin's in
+        <code>plugin/README.md</code>.
       </p>
 
       <p class="more">
@@ -165,6 +192,11 @@ import AppLayout from "../layouts/AppLayout.astro";
   dd { margin: 0; text-wrap: pretty; }
   ul { padding-left: var(--space-5); margin: 0; display: grid; gap: var(--space-2); }
   p { margin: 0 0 var(--space-3); }
+  pre {
+    margin: var(--space-2) 0 0; padding: var(--space-2) var(--space-3); overflow-x: auto;
+    background: var(--surface-card); border: 1px solid var(--border-hairline); border-radius: var(--radius-sm);
+    font-size: var(--text-sm);
+  }
   .more { margin-top: var(--space-8); color: var(--text-secondary); font-size: var(--text-sm); }
   @media (max-width: 560px) {
     .terms > div { grid-template-columns: minmax(0, 1fr); gap: var(--space-1); }

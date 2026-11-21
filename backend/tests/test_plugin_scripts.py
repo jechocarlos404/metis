@@ -42,6 +42,46 @@ VALID = {
 }
 
 
+#: Every key the format allows, on every kind of object. Each validator must
+#: take it clean, which holds their key lists together.
+EVERY_KEY = {
+    "format": "metis-seed/v1",
+    "source": {"name": "every key", "generated_by": "test"},
+    "goals": [
+        {"ref": "g1", "goal_type": "org", "parent_ref": None, "title": "Riders climb more",
+         "description": "d", "success_criteria": "s", "priority": 1, "status": "pending"},
+    ],
+    "capabilities": [
+        {"ref": "c1", "parent_ref": None, "name": "Route Planning", "slug": "route-planning",
+         "description": "d", "maturity": "ga", "facets": {"area": "maps"}, "evidence_anchors": ["src/route.py"]},
+        {"ref": "c2", "parent_ref": "c1", "name": "Elevation", "maturity": "beta"},
+    ],
+    "motivations": [{"goal_ref": "g1", "capability_ref": "c1"}],
+    "features": [
+        {"ref": "f1", "capability_refs": ["c1"], "unknown_capabilities": False,
+         "capability_guesses": [{"capability_ref": "c2", "confidence": "high", "basis": "b"}],
+         "product_ref": "p1", "name": "Plan a route", "description": "d", "facets": {"k": "v"},
+         "status": "done", "priority": 1, "priority_rationale": "r"},
+        {"ref": "f2", "capability_ref": "c1", "product_ref": "p1", "name": "Share a route"},
+    ],
+    "edges": [{"src_ref": "f2", "dst_ref": "f1", "kind": "DEPENDS_ON"}],
+    "products": [
+        {"ref": "p1", "goal_ref": "g1", "name": "Saddlebag", "summary": "s", "body": "b", "external": False,
+         "bundle_refs": ["c2"], "decomposition": {"summary": "s", "epics": [
+             {"title": "E", "acceptance_criteria": ["a"], "capability_ref": "c1", "stories": [
+                 {"title": "S", "description": "d", "feature_ref": "f1", "tickets": [
+                     {"title": "T", "description": "d", "technical_approach": "t", "acceptance_criteria": ["a"],
+                      "affected_files": ["src/route.py"], "context_budget": "M"}]}]}]}},
+    ],
+    "technologies": [
+        {"ref": "t1", "name": "Valhalla", "slug": "valhalla", "kind": "service", "layer": "api",
+         "products": ["p1"], "satisfies": [
+             {"capability_ref": "c1", "fit": "native"},
+             {"capability_ref": "c2", "fit": "partial", "confidence": "low", "basis": "b"}]},
+    ],
+}
+
+
 def _broken(**changes):
     doc = json.loads(json.dumps(VALID))
     doc.update(changes)
@@ -51,6 +91,7 @@ def _broken(**changes):
 #: One valid document and one per kind of mistake the validators catch.
 DOCS = [
     VALID,
+    EVERY_KEY,
     _broken(format="metis-seed/v2"),
     _broken(capabilities=[{"ref": "c1", "name": "A"}, {"ref": "c1", "name": "B"}]),
     _broken(features=[{"ref": "f1", "name": "Plan", "capability_refs": ["nope"]}]),
@@ -79,6 +120,11 @@ DOCS = [
                        "satisfies": [{"capability_ref": "c1", "fit": "native", "note": "x"}]}],
     ),
 ]
+
+
+def test_every_key_the_format_has_is_taken():
+    for path in (VALIDATE, LOADER):
+        assert _load(path, path.stem).validate(EVERY_KEY) == [], path
 
 
 def test_a_misspelled_key_is_named_with_where_it_is():
@@ -141,7 +187,7 @@ def test_every_script_starts(script):
 def test_validate_seed_accepts_a_good_file_and_names_what_is_wrong(tmp_path):
     good, bad = tmp_path / "good.json", tmp_path / "bad.json"
     good.write_text(json.dumps(VALID))
-    bad.write_text(json.dumps(DOCS[3]))
+    bad.write_text(json.dumps(DOCS[4]))
     result = _run(VALIDATE, good)
     assert result.returncode == 0, result.stderr
     assert "is valid: 1 goals, 1 capabilities, 1 motivations, 2 features, 1 edges" in result.stdout
@@ -157,7 +203,7 @@ def _unquoted(results):
 def test_every_validator_gives_the_same_errors():
     """Both Python copies and the desktop importer's JavaScript one."""
     expected = [_load(VALIDATE, "validate_seed").validate(d) for d in DOCS]
-    assert expected[0] == [] and all(expected[1:]), expected
+    assert expected[:2] == [[], []] and all(expected[2:]), expected
     assert [_load(LOADER, "seed_instance").validate(d) for d in DOCS] == expected
     node = shutil.which("node")
     if node is None:

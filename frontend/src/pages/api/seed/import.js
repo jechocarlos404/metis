@@ -812,8 +812,11 @@ class Loader {
     // (product, name): another product's "Sign in" is a different feature.
     const instance = await this.api.get("/api/features");
     const existing = new Map(instance.map((feature) => [featureKey(feature.product_id, feature.name), feature]));
+    // A feature of the file's products that the file doesn't name may be one
+    // of its new features under an old name.
     const productIds = new Set(this.productIds.values());
-    this.productsHadFeatures = instance.some((feature) => productIds.has(feature.product_id));
+    const named = new Set((this.doc.features || []).map((f) => featureKey(this.productIds.get(f.product_ref), f.name)));
+    this.unnamedFeatures = instance.some((f) => productIds.has(f.product_id) && !named.has(featureKey(f.product_id, f.name)));
     for (const feature of this.doc.features || []) {
       const key = featureKey(this.productIds.get(feature.product_ref), feature.name);
       if (existing.has(key)) {
@@ -1173,9 +1176,9 @@ class Loader {
     const products = this.count("products");
     const features = this.count("features");
     const added = (features["would create"] ?? 0) + (features.created ?? 0);
-    // Only a product with features of its own can have them under old names
-    // (a product an earlier, failed import created has none).
-    if ((products.reused ?? 0) > 0 && added > 0 && this.productsHadFeatures) {
+    // Only a feature the file doesn't name can be one of its new ones under an
+    // old name (rerunning a file that failed partway has none).
+    if ((products.reused ?? 0) > 0 && added > 0 && this.unnamedFeatures) {
       this.warnings.push(
         `This file names a product metis already has and adds ${added === 1 ? "1 feature whose name doesn't" : `${added} features whose names don't`} match its existing ones. ` +
           "If they describe features it already has under new wording, importing creates duplicates: compare with the product's feature list first.",

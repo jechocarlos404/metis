@@ -511,6 +511,17 @@ describe("dry run and re-import", () => {
     assert.equal(metis.capabilities.length + metis.products.length + metis.features.length + metis.edges.length, 6);
   });
 
+  test("rerunning a file whose import stopped after some features adds the rest with no rewording warning", async () => {
+    use(new FakeMetis());
+    const [first, second] = fresh().features;
+    await importSeed({ ...fresh(), features: [first], edges: [] }, { dryRun: false });
+    const { status, body } = await importSeed(fresh(), { dryRun: false });
+    assert.equal(status, 200);
+    assert.deepEqual(body.counts.features, { reused: 1, created: 1 });
+    assert.deepEqual(body.warnings, []);
+    assert.deepEqual(metis.features.map((f) => f.name).sort(), [first.name, second.name].sort());
+  });
+
   test("a file that adds features to a product that has some warns they may be rewordings", async () => {
     use(new FakeMetis());
     await importSeed(fresh(), { dryRun: false });

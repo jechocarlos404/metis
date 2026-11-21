@@ -174,8 +174,11 @@ that must not change in `env` explicitly.
 METIS_MCP_SSE_TOKEN=<long random string>
 METIS_MCP_CLIENT_SECRET=<metis-mcp secret>
 
-docker compose --profile mcp up -d
+docker compose --profile mcp up -d --build
 ```
+
+`--build` rebuilds the image from this checkout; without it, compose serves
+whatever image it built last.
 
 The `mcp` service is built from the backend image and runs
 `python -m app.mcp --sse --port 8001`. It reaches the backend at

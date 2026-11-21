@@ -365,11 +365,14 @@ Tools return **text, not JSON** — an agent quotes text back to a user but para
 JSON, and paraphrase is where `workaround` quietly becomes "partial support."
 
 ```sh
-docker compose --profile mcp up -d mcp  # SSE on 127.0.0.1:8001
+# .env: METIS_MCP_SSE_TOKEN=<long random string>
+docker compose --profile mcp up -d --build mcp  # SSE on 127.0.0.1:8001
 ```
 
-The server refuses to start SSE without `MCP_SSE_TOKEN`: it holds an API token, and an
-open port would lend it to anyone who can reach the address.
+`--build` rebuilds the image from this checkout, so a stale one isn't served. The
+server refuses to start SSE without that token (compose hands `METIS_MCP_SSE_TOKEN` to
+it): it holds an API token, and an open port would lend it to anyone who can reach the
+address.
 
 **Claude Code plugin.** [`plugin/`](plugin/README.md) brings this server to a coding
 session in any repo, with eight skills (among them `metis-check-idea`,

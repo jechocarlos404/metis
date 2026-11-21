@@ -1158,6 +1158,12 @@ class Loader:
             }
         )
 
+    def written(self):
+        """What a real load has written so far, by kind: "capabilities 2 created"."""
+        return [
+            f"{c} {n} {a}" for (c, a), n in self.counts.items() if a in ("created", "updated", "linked")
+        ]
+
     def report(self):
         order = [
             "goals",
@@ -1228,16 +1234,29 @@ def main():
         sys.exit(f"error: {args.base_url}/api/health returned {status} — is the instance up?")
 
     loader = Loader(api, doc, args.dry_run)
-    loader.load_goals()
-    loader.load_capabilities()
-    loader.load_motivations()
-    loader.load_product_rows()
-    loader.load_features()
-    loader.load_feature_guesses()
-    loader.load_edges()
-    loader.load_technologies()
-    loader.load_products()
-    loader.mark_seeded()
+    try:
+        loader.load_goals()
+        loader.load_capabilities()
+        loader.load_motivations()
+        loader.load_product_rows()
+        loader.load_features()
+        loader.load_feature_guesses()
+        loader.load_edges()
+        loader.load_technologies()
+        loader.load_products()
+        loader.mark_seeded()
+    except SystemExit as stop:
+        # Each row is its own API call, so a failure partway leaves what came
+        # before it. Say what that is, and that the same file finishes the job.
+        if not loader.written():
+            raise
+        print(stop.code, file=sys.stderr)
+        sys.exit(
+            "The load stopped partway. Before it stopped, it wrote: "
+            + "; ".join(loader.written())
+            + ". Those stay. Loading this file again is safe: it finds those by name and"
+            " slug, and adds only the rest."
+        )
 
     print(("dry run — nothing written" if args.dry_run else "seed complete") + ":")
     loader.report()

@@ -303,6 +303,10 @@ satisfies. A technology is shared across products, like a capability.
   or (capability, technology) pair takes the file's `confidence` and `basis`.
   The only row that goes away is a guess the file confirms. Re-running the same
   file is safe: the second run changes nothing.
+- A load is not one transaction: each row is its own API call, so a load that
+  fails partway keeps what it wrote before the failure. Both loaders then say
+  what that is, and loading the same file again finishes the job, since
+  everything already written is found by name and slug.
 - After a load that writes (not a dry run), the loader records that every product
   in the file was just seeded; metis shows that time as how fresh the product's
   map is. This is bookkeeping, not a change to the product.

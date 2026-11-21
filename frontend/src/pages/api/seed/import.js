@@ -14,6 +14,21 @@ const CONFIDENCES = new Set(["low", "medium", "high"]);
 const TECH_KINDS = new Set(["language", "framework", "library", "runtime", "service", "model", "protocol"]);
 const TECH_LAYERS = new Set(["data", "api", "web", "agent", "infra", "ops"]);
 const TECH_FITS = new Set(["native", "partial", "workaround"]);
+// Each kind an import counts, in the words the Settings page counts it in.
+const KINDS = {
+  goals: ["goal", "goals"],
+  capabilities: ["capability", "capabilities"],
+  motivations: ["goal link", "goal links"],
+  features: ["feature", "features"],
+  edges: ["link between features", "links between features"],
+  products: ["product", "products"],
+  bundles: ["capability added by hand", "capabilities added by hand"],
+  decompositions: ["plan document", "plan documents"],
+  technologies: ["technology", "technologies"],
+  tech_usage: ["technology in use", "technologies in use"],
+  satisfactions: ["technology link", "technology links"],
+  guesses: ["guess", "guesses"],
+};
 // Every key the format has, per kind of object. Any other key is refused by
 // name: a misspelled one ("stauts") would otherwise be dropped without a word.
 // `source` and `facets` are free-form, so their keys are not checked.
@@ -573,6 +588,23 @@ class Loader {
     return JSON.stringify(item?.name ?? ref);
   }
 
+  /** What a real import has written so far, in plain words ("1 goal and 2
+   * capabilities"), and the same as counts: rows created, features updated. */
+  written() {
+    const said = { created: [], updated: [] };
+    const counts = {};
+    for (const [kind, [one, many]] of Object.entries(KINDS)) {
+      for (const [action, n] of Object.entries(this.count(kind))) {
+        const verb = action === "created" ? "created" : ["updated", "linked"].includes(action) ? "updated" : null;
+        if (!verb) continue;
+        said[verb].push(count(n, one, many));
+        (counts[kind] ??= {})[action] = n;
+      }
+    }
+    const words = [said.created.length > 0 && `created ${andList(said.created)}`, said.updated.length > 0 && `updated ${andList(said.updated)}`];
+    return { words: andList(words.filter(Boolean)), counts };
+  }
+
   count(collection) {
     return Object.fromEntries(
       Object.entries(this.counts)
@@ -780,6 +812,8 @@ class Loader {
     // (product, name): another product's "Sign in" is a different feature.
     const instance = await this.api.get("/api/features");
     const existing = new Map(instance.map((feature) => [featureKey(feature.product_id, feature.name), feature]));
+    const productIds = new Set(this.productIds.values());
+    this.productsHadFeatures = instance.some((feature) => productIds.has(feature.product_id));
     for (const feature of this.doc.features || []) {
       const key = featureKey(this.productIds.get(feature.product_ref), feature.name);
       if (existing.has(key)) {
@@ -1139,7 +1173,9 @@ class Loader {
     const products = this.count("products");
     const features = this.count("features");
     const added = (features["would create"] ?? 0) + (features.created ?? 0);
-    if ((products.reused ?? 0) > 0 && added > 0) {
+    // Only a product with features of its own can have them under old names
+    // (a product an earlier, failed import created has none).
+    if ((products.reused ?? 0) > 0 && added > 0 && this.productsHadFeatures) {
       this.warnings.push(
         `This file names a product metis already has and adds ${added === 1 ? "1 feature whose name doesn't" : `${added} features whose names don't`} match its existing ones. ` +
           "If they describe features it already has under new wording, importing creates duplicates: compare with the product's feature list first.",
@@ -1213,14 +1249,22 @@ export async function POST({ request, locals }) {
     });
   }
 
+  const loader = new Loader(new UpstreamApi(locals.accessToken), doc, dryRun);
   try {
-    const result = await new Loader(new UpstreamApi(locals.accessToken), doc, dryRun).run();
+    const result = await loader.run();
     return new Response(JSON.stringify(result), {
       status: 200,
       headers: { "content-type": "application/json" },
     });
   } catch (error) {
-    return new Response(JSON.stringify({ detail: String(error.message || error) }), {
+    // Each row is its own API call, so a failure partway leaves what came
+    // before it. Say what that is, and that the same file finishes the job.
+    const { words, counts } = dryRun ? { words: "" } : loader.written();
+    const detail = String(error.message || error) + (words
+      ? `\nThe import stopped partway. Before it stopped, it ${words}; those stay. ` +
+        "Importing this file again is safe: it finds those by name and slug, and adds only the rest."
+      : "");
+    return new Response(JSON.stringify({ detail, ...(words ? { partial: true, counts } : {}) }), {
       status: 500,
       headers: { "content-type": "application/json" },
     });

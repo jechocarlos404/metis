@@ -486,6 +486,50 @@ describe("dry run and re-import", () => {
     assert.deepEqual(again.body.warnings, []);
   });
 
+  test("an import that fails partway says what it wrote, and the same file finishes it", async () => {
+    use(new FakeMetis());
+    const doc = fresh();
+    metis.failing.set("POST /api/features", [503, { detail: "upstream down" }]);
+    const failed = await importSeed(doc, { dryRun: false });
+    assert.equal(failed.status, 500);
+    assert.equal(failed.body.partial, true, failed.body.detail);
+    assert.deepEqual(failed.body.counts, { capabilities: { created: 2 }, products: { created: 1 } });
+    assert.match(failed.body.detail, /^POST \/api\/features for Search the inventory returned 503/);
+    assert.equal(
+      failed.body.detail.split("\n")[1],
+      "The import stopped partway. Before it stopped, it created 2 capabilities and 1 product; those stay. " +
+        "Importing this file again is safe: it finds those by name and slug, and adds only the rest.",
+    );
+    metis.failing.clear();
+    const again = await importSeed(doc, { dryRun: false });
+    assert.equal(again.status, 200);
+    assert.deepEqual(again.body.counts.capabilities, { reused: 2 });
+    assert.deepEqual(again.body.counts.products, { reused: 1 });
+    assert.deepEqual(again.body.counts.features, { created: 2 });
+    assert.deepEqual(again.body.counts.edges, { created: 1 });
+    assert.deepEqual(again.body.warnings, [], "a product with no features has none under old names");
+    assert.equal(metis.capabilities.length + metis.products.length + metis.features.length + metis.edges.length, 6);
+  });
+
+  test("a file that adds features to a product that has some warns they may be rewordings", async () => {
+    use(new FakeMetis());
+    await importSeed(fresh(), { dryRun: false });
+    const reworded = seed({ features: [{ ref: "f-new", product_ref: "p", name: "Find in the inventory", capability_refs: ["c-search"] }] });
+    const { body } = await importSeed(reworded);
+    assert.equal(body.warnings.length, 1);
+    assert.match(body.warnings[0], /^This file names a product metis already has and adds 1 feature whose name doesn't match/);
+  });
+
+  test("a failure before anything is written says only what failed", async () => {
+    use(new FakeMetis());
+    metis.failing.set("GET /api/goals", [503, { detail: "upstream down" }]);
+    const { status, body } = await importSeed(fresh(), { dryRun: false });
+    assert.equal(status, 500);
+    assert.equal(body.partial, undefined);
+    assert.match(body.detail, /^GET \/api\/goals returned 503/);
+    assert.ok(!body.detail.includes("partway"));
+  });
+
   test("a recorded use that lost its product is named, since an import doesn't link it back", async () => {
     use(new FakeMetis({ products: [{ name: "Metis" }] }));
     metis.techs.push({ id: "tech-n", slug: "nestjs", name: "NestJS" });

@@ -319,6 +319,37 @@ def test_the_hooks_say_their_line_and_stay_silent_without_metis(tmp_path, metis)
         assert _hook(name, event, closed, tmp_path / "cold") is None, name
 
 
+def test_a_load_that_fails_partway_says_what_it_wrote_and_that_the_same_file_finishes_it(
+    tmp_path, monkeypatch, capsys
+):
+    module = _load(LOADER, "seed_instance")
+    made = []
+
+    class Api(module.Api):
+        """A fresh instance in memory: every list is empty, every write is
+        made, except that a feature can't be created."""
+        def request(self, method, path, payload=None):
+            if method == "POST" and path == "/api/features":
+                return 503, {"detail": "upstream down"}
+            if method == "POST":
+                made.append(path)
+                return 201, {"id": f"id-{len(made)}", **(payload or {})}
+            return 200, {"status": "ok"} if path == "/api/health" else []
+
+    monkeypatch.setattr(module, "Api", Api)
+    seed = tmp_path / "seed.json"
+    seed.write_text(json.dumps(VALID))
+    monkeypatch.setattr(sys, "argv", ["seed_instance.py", str(seed), "--base-url", "http://metis.test"])
+    with pytest.raises(SystemExit) as stop:
+        module.main()
+    assert str(stop.value.code) == (
+        "The load stopped partway. Before it stopped, it wrote: goals 1 created; capabilities 1 "
+        "created; motivations 1 created; products 1 created. Those stay. Loading this file again is safe: it finds those by "
+        "name and slug, and adds only the rest."
+    )
+    assert capsys.readouterr().err.startswith("error: POST /api/features for 'Plan a route' returned 503")
+
+
 # ---- the unseed script against an instance in memory ----
 
 

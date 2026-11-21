@@ -160,6 +160,9 @@ class Api:
     def __init__(self, base_url, token=None):
         self.base = base_url.rstrip("/")
         self.token = token
+        # A read refused with the role sentence: every surface may read, so
+        # only the account's role refuses one (guesses are editor-only).
+        self.role_refused = None
 
     def request(self, method, path, payload=None):
         url = f"{self.base}{path}"
@@ -198,6 +201,8 @@ class Api:
         status, body = self.request("GET", path)
         if status == 200:
             return body
+        if status == 403 and isinstance(body, dict) and isinstance(body.get("detail"), str):
+            self.role_refused = body["detail"]
         return [] if status == 404 else None
 
     def delete(self, path):
@@ -341,9 +346,16 @@ class Unseeder:
         if self.unreadable:
             what = " or ".join(self.unreadable)
             if not dry_run:
+                # A viewer can't remove it in the app either, as the seeder says.
+                who = (
+                    f"This account isn't an editor or admin ({self.api.role_refused}), so it "
+                    "can't delete, from a script or in the app; an editor or admin can. Ask one "
+                    "to remove it in the app (Settings, Seed files: preview, then remove)."
+                    if self.api.role_refused else IN_APP
+                )
                 sys.exit(
                     f"error: this token cannot read {what}, so it cannot tell which "
-                    "capabilities and technologies are safe to delete. Nothing was deleted. " + IN_APP
+                    "capabilities and technologies are safe to delete. Nothing was deleted. " + who
                 )
             msg = (
                 f"this token cannot read {what}"

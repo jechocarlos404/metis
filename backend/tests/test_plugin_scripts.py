@@ -607,3 +607,29 @@ def test_a_technology_list_that_fails_to_read_is_unreadable_not_empty(capsys):
     unseeder = _unseeder(_probe(), PROBE_SEED, failing={"/api/tech?limit=200&offset=0"})
     assert unseeder.unreadable == ["technologies"]
     assert "can't tell" in _run_unseed(unseeder, capsys)
+
+
+def test_a_viewer_hears_it_cannot_remove_in_the_app_either():
+    """Guesses are an editor-only read, so a viewer's real run stops there.
+    It hears what the seeder tells a viewer: not the read-only-token advice
+    (which says a signed-in person can), but that this account can't delete
+    in the app either, and an editor or admin can (D35)."""
+    module = _load(UNSEED, "unseed_instance")
+    routes = _probe()
+
+    class Api(module.Api):
+        def request(self, method, path, payload=None):
+            if path == "/api/guesses":
+                return 403, {"detail": "Requires editor or admin role"}
+            if method == "GET" and path in routes:
+                return 200, routes[path]
+            return 404, None
+
+    with pytest.raises(SystemExit) as stop:
+        module.Unseeder(Api("http://metis.test"), PROBE_SEED, dry_run=False)
+    said = str(stop.value)
+    assert said.startswith("error: this token cannot read guesses")
+    assert "Nothing was deleted." in said
+    assert "(Requires editor or admin role), so it can't delete, from a script or in the app" in said
+    assert "an editor or admin can. Ask one to remove it in the app" in said
+    assert "this script signs no one in" not in said

@@ -726,12 +726,20 @@ export default function FeaturesIsland({ canWrite = true }) {
       >
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
           {error && <div role="alert" style={{ fontSize: "var(--text-sm)", color: "var(--danger-fg)" }}>{error}</div>}
-          {/* What stays but loses it: stories and journey steps that name it. */}
-          {confirmingDelete && detaches?.length > 0 && (
-            <div role="note" style={{ fontSize: "var(--text-sm)", color: "var(--text-body)" }}>
-              Deleting it clears it from {keptRows(detaches)}.
-            </div>
-          )}
+          {/* What stays but loses it: stories and journey steps that name it,
+              and the links to other features it drops (B46). */}
+          {confirmingDelete && detaches?.length > 0 && (() => {
+            const kept = detaches.filter((t) => t.table !== "feature_edges");
+            const links = detaches.find((t) => t.table === "feature_edges");
+            return (
+              <div role="note" style={{ fontSize: "var(--text-sm)", color: "var(--text-body)" }}>
+                Deleting it {[
+                  kept.length > 0 && `clears it from ${keptRows(kept)}`,
+                  links && `drops ${links.count === 1 ? "the link" : `${links.count} links:`} ${andList(links.names)}`,
+                ].filter(Boolean).join(" and ")}.
+              </div>
+            );
+          })()}
           <Input label="Name (what the user gets, verb phrase)" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="Export tickets to Notion" />
           <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             <span style={{ fontSize: "var(--text-xs)", fontWeight: "var(--weight-medium)", color: "var(--text-heading)" }}>Description</span>

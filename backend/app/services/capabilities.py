@@ -13,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 from collections import defaultdict
 
 from fastapi import HTTPException
-from sqlalchemy import Text, func, literal, or_, select, true
+from sqlalchemy import Text, distinct, exists, func, literal, or_, select, true
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -497,7 +497,51 @@ def name_closeness(column, name: str):
 #: "Repair Booking" offered "Bookmarking" at 0.54). Real near names score well
 #: above it: "Auth" for "User Authentication" 0.80, "Payments" for "Payment
 #: Processing" 0.78, the typo "Authentcation" 0.71, a case-only difference 1.
+#: One long shared word still clears it on its own ("Sprint Planning" and
+#: "Route Planning" 0.60, "Pod Directory" and "Cafe Directory" 0.71), which
+#: `words_agree` stops.
 NEAR = 0.6
+
+
+def _words(text):
+    """The words of `text`, lowercased: what pg_trgm splits on. A column list
+    keeps the value text (D41)."""
+    words = func.regexp_split_to_table(func.lower(text), "[^[:alnum:]]+")
+    return words.table_valued("word").render_derived(name="words", with_types=False)
+
+
+def _covers(a, b):
+    """Every word of `a` is near somewhere in `b`."""
+    w = _words(a)
+    return ~exists(
+        select(1)
+        .select_from(w)
+        .where(w.c.word != "", func.word_similarity(w.c.word, b) < NEAR)
+        .correlate_except(w)
+    )
+
+
+def _shared(a, b):
+    """How many distinct words of `a` are near somewhere in `b`."""
+    w = _words(a)
+    return (
+        select(func.count(distinct(w.c.word)))
+        .select_from(w)
+        .where(w.c.word != "", func.word_similarity(w.c.word, b) >= NEAR)
+        .correlate_except(w)
+        .scalar_subquery()
+    )
+
+
+def words_agree(column, name):
+    """A near score is not enough when it comes from one shared word: the
+    names must share more than one, or every word of one must be near in the
+    other ("Auth" in "User Authentication", a typo, a word added or dropped).
+    On metis's capabilities this drops 157 of 188 near pairs, every one a
+    single shared word ("Goal Planning" for "Route Planning"), and keeps all
+    the abbreviations, plurals, typos and case differences above; feature
+    names, which share several words, lose 4 of 102."""
+    return or_(_covers(name, column), _covers(column, name), _shared(name, column) > 1)
 
 
 async def near_names(session: AsyncSession, model, names: list[str]) -> dict[str, list]:
@@ -515,7 +559,7 @@ async def near_names(session: AsyncSession, model, names: list[str]) -> dict[str
     score = name_closeness(model.name, typed.c.typed_name)
     near = (
         select(model.id, score.label("score"), model.seq)
-        .where(score > NEAR)
+        .where(score > NEAR, words_agree(model.name, typed.c.typed_name))
         .order_by(score.desc(), model.seq)
         .limit(3)
         .lateral("near")

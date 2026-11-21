@@ -31,8 +31,10 @@ resource that can't be read come back the same way. A subject that doesn't exist
 is an answer, not an error: `0 features are named '…'`, with the features listed
 when several share the name. When none has it, up to three near names follow as
 unconfirmed candidates, each leading with what the next call takes, as
-`capability` and `check_idea` offer them (trigram closeness over 0.6; case is
-ignored, so a case-only difference is always offered):
+`capability` and `check_idea` offer them (trigram closeness over 0.6, and the
+names share more than one word or every word of one is near in the other, so
+"Auth" offers User Authentication but "Sprint Planning" doesn't offer Route
+Planning; case is ignored, so a case-only difference is always offered):
 
 ```
 0 products have id or slug 'Plausible Analytics'. Call `products` for ids and slugs.

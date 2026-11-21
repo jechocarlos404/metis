@@ -1052,6 +1052,17 @@ describe("validateSeed", () => {
     assert.deepEqual(errors, ["capabilities[0] (c-search): slug must be a non-empty string (give one when the name yields none)"]);
   });
 
+  test("a misspelled key is refused by name, where it is, before touching the instance", async () => {
+    use(new FakeMetis());
+    const doc = seed({ features: [{ ref: "f-plan", product_ref: "p", name: PLAN, capability_refs: ["c-search"], stauts: "done" }] });
+    doc.capabilites = [];
+    assert.deepEqual(validateSeed(doc), ['the file: unknown key "capabilites"', 'features[0] (f-plan): unknown key "stauts"']);
+    const { status, body } = await importSeed(doc, { dryRun: false });
+    assert.equal(status, 400);
+    assert.equal(body.detail, 'the file: unknown key "capabilites"\nfeatures[0] (f-plan): unknown key "stauts"');
+    assert.deepEqual(metis.requests, []);
+  });
+
   test("the endpoint refuses an invalid file before touching the instance", async () => {
     use(new FakeMetis());
     const { status, body } = await importSeed({ ...seed(), format: "nope" }, { dryRun: false });

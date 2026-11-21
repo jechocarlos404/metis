@@ -45,6 +45,32 @@ CONFIDENCES = {"low", "medium", "high"}
 TECH_KINDS = {"language", "framework", "library", "runtime", "service", "model", "protocol"}
 TECH_LAYERS = {"data", "api", "web", "agent", "infra", "ops"}
 TECH_FITS = {"native", "partial", "workaround"}
+#: Every key the format has, per kind of object. Any other key is refused by
+#: name: a misspelled one ("stauts") would otherwise be dropped without a word.
+#: `source` and `facets` are free-form, so their keys are not checked.
+KEYS = {
+    "file": {"format", "source", "goals", "capabilities", "motivations", "features", "edges",
+             "products", "technologies"},
+    "goals": {"ref", "goal_type", "parent_ref", "title", "description", "success_criteria",
+              "priority", "status"},
+    "capabilities": {"ref", "parent_ref", "name", "slug", "description", "maturity", "facets",
+                     "evidence_anchors"},
+    "motivations": {"goal_ref", "capability_ref"},
+    "features": {"ref", "capability_refs", "capability_ref", "unknown_capabilities",
+                 "capability_guesses", "product_ref", "name", "description", "facets", "status",
+                 "priority", "priority_rationale"},
+    "capability_guesses": {"capability_ref", "confidence", "basis"},
+    "edges": {"src_ref", "dst_ref", "kind"},
+    "products": {"ref", "goal_ref", "name", "summary", "body", "external", "bundle_refs",
+                 "decomposition"},
+    "decomposition": {"summary", "epics"},
+    "epics": {"title", "acceptance_criteria", "capability_ref", "stories"},
+    "stories": {"title", "description", "feature_ref", "tickets"},
+    "tickets": {"title", "description", "technical_approach", "acceptance_criteria",
+                "affected_files", "context_budget"},
+    "technologies": {"ref", "name", "slug", "kind", "layer", "products", "satisfies"},
+    "satisfies": {"capability_ref", "fit", "confidence", "basis"},
+}
 
 
 def slugify(value):
@@ -105,6 +131,42 @@ def feature_capability_refs(feature):
     if refs is None and feature.get("unknown_capabilities") is True:
         refs = []  # declared unknown: none named yet
     return refs
+
+
+def _check_keys(errors, doc):
+    """Each object's keys against KEYS, named by the object's path."""
+    def check(where, item, kind):
+        if not isinstance(item, dict):
+            return {}
+        for key in item:
+            if key not in KEYS[kind]:
+                errors.append(f"{where}: unknown key {key!r}")
+        return item
+
+    def each(items):
+        return enumerate(items if isinstance(items, list) else [])
+
+    check("the file", doc, "file")
+    for collection in ("goals", "capabilities", "motivations", "features", "edges", "products",
+                       "technologies"):
+        for i, raw in each(doc.get(collection)):
+            ref = raw.get("ref") if isinstance(raw, dict) else None
+            where = f"{collection}[{i}]" if collection in ("motivations", "edges") else f"{collection}[{i}] ({ref})"
+            item = check(where, raw, collection)
+            if collection == "features":
+                for j, guess in each(item.get("capability_guesses")):
+                    check(f"{where}.capability_guesses[{j}]", guess, "capability_guesses")
+            if collection == "technologies":
+                for j, link in each(item.get("satisfies")):
+                    check(f"{where}.satisfies[{j}]", link, "satisfies")
+            if collection == "products":
+                decomp = check(f"{where}.decomposition", item.get("decomposition"), "decomposition")
+                for j, epic in each(decomp.get("epics")):
+                    ewhere = f"{where}.epics[{j}]"
+                    for k, story in each(check(ewhere, epic, "epics").get("stories")):
+                        swhere = f"{ewhere}.stories[{k}]"
+                        for t, ticket in each(check(swhere, story, "stories").get("tickets")):
+                            check(f"{swhere}.tickets[{t}]", ticket, "tickets")
 
 
 def validate(doc):
@@ -386,6 +448,7 @@ def validate(doc):
                     ):
                         errors.append(f"{twhere}: affected_files must be a list of strings")
 
+    _check_keys(errors, doc)
     return errors
 
 

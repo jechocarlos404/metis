@@ -31,6 +31,10 @@ then copy it over both.
 
 - `format` is required and must be exactly `"metis-seed/v1"`.
 - `source` is free-form provenance metadata; the loader ignores it.
+- Every object takes only the keys this document shows for it. Any other key
+  is refused by name, with where it is (`features[3] (f-plan): unknown key
+  'stauts'`), so a misspelling never drops data without a word. `source` and
+  `facets` are free-form, so their keys are not checked.
 - Every collection is optional; omit or leave empty what you don't have.
 - Entities reference each other by `ref` — a short local string handle, unique within
   its own collection. Refs never reach the instance; the loader resolves them to real

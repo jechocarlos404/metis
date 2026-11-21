@@ -14,6 +14,28 @@ const CONFIDENCES = new Set(["low", "medium", "high"]);
 const TECH_KINDS = new Set(["language", "framework", "library", "runtime", "service", "model", "protocol"]);
 const TECH_LAYERS = new Set(["data", "api", "web", "agent", "infra", "ops"]);
 const TECH_FITS = new Set(["native", "partial", "workaround"]);
+// Every key the format has, per kind of object. Any other key is refused by
+// name: a misspelled one ("stauts") would otherwise be dropped without a word.
+// `source` and `facets` are free-form, so their keys are not checked.
+const KEYS = Object.fromEntries(Object.entries({
+  file: ["format", "source", "goals", "capabilities", "motivations", "features", "edges", "products", "technologies"],
+  goals: ["ref", "goal_type", "parent_ref", "title", "description", "success_criteria", "priority", "status"],
+  capabilities: ["ref", "parent_ref", "name", "slug", "description", "maturity", "facets", "evidence_anchors"],
+  motivations: ["goal_ref", "capability_ref"],
+  features: [
+    "ref", "capability_refs", "capability_ref", "unknown_capabilities", "capability_guesses", "product_ref",
+    "name", "description", "facets", "status", "priority", "priority_rationale",
+  ],
+  capability_guesses: ["capability_ref", "confidence", "basis"],
+  edges: ["src_ref", "dst_ref", "kind"],
+  products: ["ref", "goal_ref", "name", "summary", "body", "external", "bundle_refs", "decomposition"],
+  decomposition: ["summary", "epics"],
+  epics: ["title", "acceptance_criteria", "capability_ref", "stories"],
+  stories: ["title", "description", "feature_ref", "tickets"],
+  tickets: ["title", "description", "technical_approach", "acceptance_criteria", "affected_files", "context_budget"],
+  technologies: ["ref", "name", "slug", "kind", "layer", "products", "satisfies"],
+  satisfies: ["capability_ref", "fit", "confidence", "basis"],
+}).map(([kind, keys]) => [kind, new Set(keys)]));
 
 /** A technology's identity: its explicit slug, else one derived from its name. */
 function techSlug(tech) {
@@ -104,6 +126,44 @@ function featureCapabilityRefs(feature) {
   if (feature.capability_ref != null) return [feature.capability_ref];
   if (feature.unknown_capabilities === true) return []; // declared unknown: none named yet
   return null;
+}
+
+/** Each object's keys against KEYS, named by the object's path. */
+function checkKeys(errors, doc) {
+  const isObject = (item) => item !== null && typeof item === "object" && !Array.isArray(item);
+  const check = (where, item, kind) => {
+    if (!isObject(item)) return {};
+    for (const key of Object.keys(item)) {
+      if (!KEYS[kind].has(key)) errors.push(`${where}: unknown key ${JSON.stringify(key)}`);
+    }
+    return item;
+  };
+  const each = (items) => (Array.isArray(items) ? items.entries() : []);
+
+  check("the file", doc, "file");
+  for (const collection of ["goals", "capabilities", "motivations", "features", "edges", "products", "technologies"]) {
+    for (const [i, raw] of each(doc[collection])) {
+      const ref = isObject(raw) ? raw.ref : undefined;
+      const where = ["motivations", "edges"].includes(collection) ? `${collection}[${i}]` : `${collection}[${i}] (${ref})`;
+      const item = check(where, raw, collection);
+      if (collection === "features") {
+        for (const [j, guess] of each(item.capability_guesses)) check(`${where}.capability_guesses[${j}]`, guess, "capability_guesses");
+      }
+      if (collection === "technologies") {
+        for (const [j, link] of each(item.satisfies)) check(`${where}.satisfies[${j}]`, link, "satisfies");
+      }
+      if (collection === "products") {
+        const decomposition = check(`${where}.decomposition`, item.decomposition, "decomposition");
+        for (const [j, epic] of each(decomposition.epics)) {
+          const ewhere = `${where}.epics[${j}]`;
+          for (const [k, story] of each(check(ewhere, epic, "epics").stories)) {
+            const swhere = `${ewhere}.stories[${k}]`;
+            for (const [t, ticket] of each(check(swhere, story, "stories").tickets)) check(`${swhere}.tickets[${t}]`, ticket, "tickets");
+          }
+        }
+      }
+    }
+  }
 }
 
 function validateSeed(doc) {
@@ -396,6 +456,7 @@ function validateSeed(doc) {
     }
   }
 
+  checkKeys(errors, doc);
   return errors;
 }
 

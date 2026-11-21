@@ -33,11 +33,12 @@ VALID = {
     "capabilities": [{"ref": "c1", "name": "Route Planning"}],
     "motivations": [{"goal_ref": "g1", "capability_ref": "c1"}],
     "features": [
-        {"ref": "f1", "name": "Plan a route", "capability_refs": ["c1"]},
-        {"ref": "f2", "name": "Share a route", "capability_refs": ["c1"]},
+        {"ref": "f1", "product_ref": "p1", "name": "Plan a route", "capability_refs": ["c1"]},
+        {"ref": "f2", "product_ref": "p1", "name": "Share a route", "capability_refs": ["c1"]},
     ],
     "edges": [{"src_ref": "f2", "dst_ref": "f1", "kind": "DEPENDS_ON"}],
-    "products": [{"ref": "p1", "name": "Saddlebag", "feature_refs": ["f1", "f2"]}],
+    # A feature names its product (product_ref); a product lists none.
+    "products": [{"ref": "p1", "name": "Saddlebag"}],
 }
 
 
@@ -62,7 +63,34 @@ DOCS = [
         ]
     ),
     _broken(goals=[{"ref": "g1", "goal_type": "team", "title": "x"}]),
+    # Misspelled keys: each is named, never dropped without a word.
+    _broken(
+        capabilites=[],
+        capabilities=[{"ref": "c1", "name": "Route Planning", "maturty": "ga"}],
+        features=[
+            {"ref": "f1", "name": "Plan a route", "capability_refs": ["c1"], "stauts": "done"},
+            {"ref": "f2", "name": "Share a route", "capability_refs": ["c1"],
+             "capability_guesses": [], "notes": "x"},
+        ],
+        products=[{"ref": "p1", "name": "Saddlebag", "externl": True, "decomposition": {
+            "epics": [{"title": "E", "stories": [{"title": "S", "tickets": [{"title": "T", "estimate": 3}]}]}],
+        }}],
+        technologies=[{"ref": "t1", "name": "Valhalla", "kind": "service",
+                       "satisfies": [{"capability_ref": "c1", "fit": "native", "note": "x"}]}],
+    ),
 ]
+
+
+def test_a_misspelled_key_is_named_with_where_it_is():
+    assert _load(VALIDATE, "validate_seed").validate(DOCS[-1]) == [
+        "the file: unknown key 'capabilites'",
+        "capabilities[0] (c1): unknown key 'maturty'",
+        "features[0] (f1): unknown key 'stauts'",
+        "features[1] (f2): unknown key 'notes'",
+        "products[0] (p1): unknown key 'externl'",
+        "products[0] (p1).epics[0].stories[0].tickets[0]: unknown key 'estimate'",
+        "technologies[0] (t1).satisfies[0]: unknown key 'note'",
+    ]
 
 
 def _load(path, name):

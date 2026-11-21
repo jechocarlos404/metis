@@ -427,7 +427,10 @@ export default function FeaturesIsland({ canWrite = true }) {
       }
       setDialog(null);
     } catch (e) {
-      setError(String(e.message));
+      // A name the product already has links to that feature (B51).
+      setError(e instanceof ApiError && e.status === 409 && e.existing?.id
+        ? <>{e.detail}. <a href={`/features?feature=${e.existing.id}`}>Open {e.existing.name}</a></>
+        : String(e.message));
     } finally {
       setSaving(false);
     }

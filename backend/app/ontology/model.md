@@ -316,6 +316,8 @@ linkable. Only `/ontology` earns its own entry, in the Help position.
 
 `/stacks` carries the only mutation in the buy plane: binding a slot. It is a button a
 human presses, and nothing else in the system presses it.
+Stacks, slots, concerns and constraints have no form: an editor records them through the
+API (`POST /api/stacks`, `/api/stacks/instantiate`); seed files never carry them.
 
 ## Not built
 

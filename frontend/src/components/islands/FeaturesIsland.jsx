@@ -362,13 +362,22 @@ export default function FeaturesIsland({ canWrite = true }) {
       // New capabilities first, once each: one made is linked by id from here
       // on, so Save again after a failed save doesn't make it twice.
       const made = [];
-      for (const name of draft.newCapabilities) made.push(await api("/capabilities", { method: "POST", body: { name } }));
-      const added = [...(draft.added ?? []), ...made.map((c) => c.name)]; // said once the feature saves
-      if (made.length) {
-        setCapabilities((cs) => [...cs, ...made]);
-        setDraft((d) => ({ ...d, capabilityIds: [...d.capabilityIds, ...made.map((c) => c.id)], newCapabilities: [], added }));
+      try {
+        for (const name of draft.newCapabilities) made.push(await api("/capabilities", { method: "POST", body: { name } }));
+      } finally {
+        // Each one made is kept by id, even when the next one or the feature fails.
+        if (made.length) {
+          setCapabilities((cs) => [...cs, ...made]);
+          setDraft((d) => ({
+            ...d,
+            capabilityIds: [...d.capabilityIds, ...made.map((c) => c.id)],
+            newCapabilities: d.newCapabilities.filter((n) => !made.some((c) => c.name === n)),
+            added: [...(d.added ?? []), ...made.map((c) => c.name)],
+          }));
+        }
       }
-      const newLine = added.length ? ` Added ${andList(added)}: not built yet.` : "";
+      const added = [...(draft.added ?? []), ...made.map((c) => c.name)]; // said once the feature saves
+      const newLine = added.length ? ` New capability: ${andList(added)}.` : "";
       const body = {
         name: draft.name.trim(),
         description: draft.description.trim() || null,
@@ -881,7 +890,7 @@ function FeaturePanel({ detail, canWrite, onEdit, onGuessConfirmed, onSelect, pr
                 </optgroup>
               ))}
             </Select>
-            <Button size="sm" variant="secondary" disabled={!edgeDraft.targetId} onClick={onAddEdge} style={{ gap: 6 }}>
+            <Button size="sm" variant="secondary" disabled={!edgeDraft.targetId} onClick={() => { onAddEdge(); setFind(""); }} style={{ gap: 6 }}>
               <Icon name="plus" size={13} />Add relationship
             </Button>
             {edgeError && <div role="alert" style={{ ...NOTE, color: "var(--danger-fg)" }}>{edgeError}</div>}

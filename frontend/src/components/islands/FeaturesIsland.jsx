@@ -1,6 +1,6 @@
 import React from "react";
 import { PageHeader } from "../shell/PageHeader.jsx";
-import { Button, Checkbox, Dialog, Icon, IconButton, Input, PriorityBadge, Select, StatusBadge, Tabs, Tag, DeleteConfirm } from "../../ds";
+import { Button, Checkbox, Dialog, Icon, IconButton, Input, PriorityBadge, Select, StatusBadge, Tabs, Tag, DeleteConfirm, tabId } from "../../ds";
 import { EDGE, EDGE_INCOMING, LAYER, PRIORITY_HINT, andList, count, plain, priorityLabel, productOptions, statusLabel } from "../../lib/words.js";
 import { Term } from "../shared/Term.jsx";
 import { CapabilityPicker } from "../shared/CapabilityPicker.jsx";
@@ -544,7 +544,8 @@ export default function FeaturesIsland({ canWrite = true }) {
       />
       <div ref={setWidthEl} style={{ padding: phone ? "12px 16px 0" : "12px 24px 0", flex: "none" }}>
         {phone && <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>{filters}</div>}
-        <Tabs tabs={[{ value: "directory", label: "Directory", count: directory.length }, { value: "graph", label: "Graph" }, ...(canPlan ? [{ value: "plan", label: "Plan" }] : [])]} value={shownTab} onChange={changeTab} />
+        <Tabs tabs={[{ value: "directory", label: "Directory", count: directory.length }, { value: "graph", label: "Graph" }, ...(canPlan ? [{ value: "plan", label: "Plan" }] : [])]} value={shownTab} onChange={changeTab}
+          label="Features view" panelId={noFeatures ? undefined : "features-panel"} />
       </div>
       {error && !dialog && <div role="alert" style={{ padding: "8px 24px", fontSize: "var(--text-sm)", color: "var(--danger-fg)" }}>{error}</div>}
       {notice && !error && <div role="status" style={{ padding: "8px 24px 0", fontSize: "var(--text-sm)", color: "var(--ok-fg)" }}>{notice}</div>}
@@ -557,7 +558,7 @@ export default function FeaturesIsland({ canWrite = true }) {
           {canWrite && <a href="/settings" style={{ fontSize: "var(--text-sm)", color: "var(--text-accent)", textDecoration: "none" }}>Get started</a>}
         </div>
       ) : (
-      <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
+      <div id="features-panel" role="tabpanel" aria-labelledby={tabId("features-panel", shownTab)} style={{ flex: 1, display: "flex", minHeight: 0 }}>
         {panelShown ? null : tab === "graph" ? (
           <div style={{ flex: 1, position: "relative", display: "flex", flexDirection: "column", margin: 20, background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", overflow: "hidden", minWidth: 0 }}>
             {group !== "order" && !hubs ? (
@@ -948,10 +949,17 @@ function RecheckList({ recheck, onSelect, onClear }) {
   );
   const retestRow = (f) => row(f, `shares ${f.shared.map((c) => c.name).join(", ")}`);
   const nothing = !breaks.length && !retest.length && !broad.length && !elsewhere.length;
+  // The button that asked is gone, and the answer opens at the panel's foot:
+  // take focus there and bring it up, so the click visibly did something (B50).
+  const headRef = React.useRef(null);
+  React.useEffect(() => {
+    headRef.current?.focus({ preventScroll: true });
+    headRef.current?.scrollIntoView({ block: "start" });
+  }, [recheck]);
   return (
     <>
       <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
-        <div style={CAPS_HEADER}>If this changes</div>
+        <div ref={headRef} tabIndex={-1} style={CAPS_HEADER}>If this changes</div>
         <button type="button" onClick={onClear} style={{ border: "none", background: "none", padding: 0, cursor: "pointer", font: "inherit", ...SMALL_NOTE }}>Clear</button>
       </div>
       {nothing && <div style={SMALL_NOTE}>Nothing depends on it and it shares no capability, so nothing else needs a recheck.</div>}

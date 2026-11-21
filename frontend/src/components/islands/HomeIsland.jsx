@@ -2,7 +2,7 @@ import React from "react";
 import { PageHeader } from "../shell/PageHeader.jsx";
 import { Badge, Button, Input } from "../../ds";
 import { api } from "../../lib/api.js";
-import { NEED, VERDICT, count, freshness, needKey, scoreGroups } from "../../lib/words.js";
+import { NEED, REUSE_NOTE, VERDICT, count, freshness, needKey, scoreGroups } from "../../lib/words.js";
 import { CapabilityPicker } from "../shared/CapabilityPicker.jsx";
 import { CoverageReport } from "../shared/coverage.jsx";
 import GetStartedIsland from "./GetStartedIsland.jsx";
@@ -52,6 +52,23 @@ export default function HomeIsland({ canWrite = false, isAdmin = false }) {
       <>
         <PageHeader title="Home" meta="loading" />
         <div role="status" style={{ padding: 24, ...QUIET }}>Loading…</div>
+      </>
+    );
+  }
+  // Get started is the steps an editor takes; a viewer has none to take, so
+  // their empty Home says what it is waiting for instead.
+  if (firstRun && !canWrite) {
+    return (
+      <>
+        <PageHeader title="Home" />
+        <div style={{ flex: 1, overflowY: "auto", padding: 24 }}>
+          <div style={{ maxWidth: 720, margin: "0 auto", display: "flex", flexDirection: "column", gap: 8 }}>
+            <h2 style={{ fontSize: "var(--text-lg)", fontWeight: "var(--weight-semibold)", color: "var(--text-heading)", margin: 0 }}>Nothing here yet</h2>
+            <p style={{ fontSize: "var(--text-sm)", color: "var(--text-body)", lineHeight: "var(--leading-body)", margin: 0 }}>
+              An editor needs to add the first product; once they do, this page shows what could be built from it.
+            </p>
+          </div>
+        </div>
       </>
     );
   }
@@ -310,7 +327,8 @@ function MostReused({ inventory }) {
               </li>
             ))}
           </ul>
-          <div style={{ padding: "10px 16px", borderTop: "1px solid var(--border-hairline)", fontSize: "var(--text-xs)" }}>
+          <div style={{ padding: "10px 16px", borderTop: "1px solid var(--border-hairline)", fontSize: "var(--text-xs)", display: "flex", flexDirection: "column", gap: 6 }}>
+            <span style={QUIET}>{REUSE_NOTE}</span>
             <a href="/capabilities" style={LINK}>See all capabilities</a>
           </div>
         </>

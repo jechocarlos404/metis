@@ -54,6 +54,7 @@ export default function TechDetailIsland({ slug, canWrite = false }) {
   const [draft, setDraft] = React.useState({ person: "", depth: "touched" });
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState(null);
+  const [notice, setNotice] = React.useState(null); // what the last change to "Who has used it" did
 
   const load = React.useCallback(() => {
     Promise.all([
@@ -78,6 +79,7 @@ export default function TechDetailIsland({ slug, canWrite = false }) {
     if (!draft.person.trim()) return;
     setSaving(true);
     setError(null);
+    setNotice(null);
     try {
       await api("/tech/encounters", {
         method: "POST",
@@ -98,10 +100,12 @@ export default function TechDetailIsland({ slug, canWrite = false }) {
     }
   }
 
-  async function removeEncounter(id) {
+  async function removeEncounter(encounter) {
     setError(null);
+    setNotice(null);
     try {
-      await api(`/tech/encounters/${id}`, { method: "DELETE" });
+      await api(`/tech/encounters/${encounter.id}`, { method: "DELETE" });
+      setNotice(`Removed ${encounter.person}'s use of ${detail.name}.`);
       load();
     } catch (e) {
       setError(e.detail ?? e.message);
@@ -255,7 +259,7 @@ export default function TechDetailIsland({ slug, canWrite = false }) {
                   <span style={{ ...MONO, color: "var(--text-secondary)" }}>{e.last_at}</span>
                   {e.product_id && <span style={{ ...MONO, color: "var(--text-secondary)" }}>{productName(e.product_id) ?? ""}</span>}
                   {canWrite && (
-                    <IconButton size="sm" label={`Remove ${e.person}`} onClick={() => removeEncounter(e.id)}>
+                    <IconButton size="sm" label={`Remove ${e.person}`} onClick={() => removeEncounter(e)}>
                       <Icon name="x" size={12} />
                     </IconButton>
                   )}
@@ -263,6 +267,7 @@ export default function TechDetailIsland({ slug, canWrite = false }) {
               ))}
             </div>
           )}
+          {notice && <div role="status" style={{ fontSize: "var(--text-sm)", color: "var(--ok-fg)" }}>{notice}</div>}
 
           {canWrite && (
             <form onSubmit={addEncounter} style={{ display: "flex", gap: "var(--space-2)", alignItems: "center", flexWrap: "wrap" }}>

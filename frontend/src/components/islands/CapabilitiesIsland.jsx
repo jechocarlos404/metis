@@ -5,20 +5,20 @@ import { MaturityBadge } from "../shared/coverage.jsx";
 import { Guesses } from "../shared/Guesses.jsx";
 import { api } from "../../lib/api.js";
 import { readParam, useParamRestore, writeParams } from "../../lib/url-state.js";
-import { MATURITY, NEED, count, needKey } from "../../lib/words.js";
+import { MATURITY, NEED, REUSE_NOTE, count, needKey } from "../../lib/words.js";
 
 // Health finding kinds this page shows, in plain words, and where each links.
 const FINDINGS = {
   empty_intent: { label: "Goal with no capabilities", tone: "neutral", hint: "This product goal links to no capability" },
   unmotivated_capability: { label: "No goal explains it", tone: "danger", hint: "No goal links to it or to anything under it" },
-  aspirational_gap: { label: NEED.none.label, tone: NEED.none.tone, hint: "No feature builds it yet" },
+  // Its own words: a narrower set than the "not built yet" pill, which also
+  // covers capabilities whose features are planned or in progress (B44).
+  aspirational_gap: { label: "No feature builds it", tone: NEED.none.tone, hint: "Planned, alpha or beta, yet no feature in metis, finished or not, links to it or to anything under it" },
   unlinked_feature: { label: "Feature with no capability", tone: "warn", hint: "It can't count toward reuse or coverage until it has one" },
   stale_map: { label: "Map may be out of date", tone: "warn", hint: "Not imported from its seed file in 30 days, or ever" },
 };
 // "never imported from a seed file." → "Never imported from a seed file."
 const sentence = (text) => text.charAt(0).toUpperCase() + text.slice(1);
-// metis knows which products use a capability, not whether they share its code.
-const REUSE_NOTE = "The product count is our products whose features use the capability, whether they share the code or each built it separately.";
 const VIEWS = [
   { value: "tree", label: "Tree" },
   { value: "reused", label: "Most reused", hint: REUSE_NOTE },
@@ -186,7 +186,7 @@ export default function CapabilitiesIsland({ canWrite = true }) {
           maturity: draft.maturity,
         },
       });
-      window.location.href = `/capabilities/${created.slug}`;
+      window.location.href = `/capabilities/${created.slug}?created=${encodeURIComponent(created.name)}`;
     } catch (e) {
       // Same name in another case: point at the one that exists, stay here.
       setDialogError(e.status === 409 && e.existing?.slug

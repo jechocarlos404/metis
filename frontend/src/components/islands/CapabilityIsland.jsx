@@ -5,6 +5,7 @@ import { MaturityBadge } from "../shared/coverage.jsx";
 import { Term } from "../shared/Term.jsx";
 import { Guesses } from "../shared/Guesses.jsx";
 import { api } from "../../lib/api.js";
+import { readParam, writeParams } from "../../lib/url-state.js";
 import { FIT, MATURITY, NEED, andList, count, needKey, plain, statusLabel } from "../../lib/words.js";
 import { FIT_TONE, STANCE_TONE } from "../../lib/ontology.js";
 
@@ -106,6 +107,15 @@ export default function CapabilityIsland({ slug, canWrite = false }) {
   React.useEffect(() => {
     load();
   }, [load]);
+
+  // New capability sends you here after a create; say so once.
+  React.useEffect(() => {
+    const name = readParam("created");
+    if (name) {
+      setSaved(`Created ${name}.`);
+      writeParams({ created: "" });
+    }
+  }, []);
 
   if (notFound || (inventory && !cap)) {
     return (
@@ -223,10 +233,14 @@ export default function CapabilityIsland({ slug, canWrite = false }) {
     }
   };
 
+  // Linking from here says what it did, as linking from the goal's side does.
   const addMotivation = async (goalId) => {
     setError(null);
+    setSaved(null);
+    const goal = goals.find((g) => g.id === goalId);
     try {
       await api(`/capabilities/${cap.id}/motivations`, { method: "POST", body: { goal_id: goalId } });
+      setSaved(`Linked ${goal ? `${goal.display_id} ${goal.title}` : "the goal"}.`);
       setMotivations(await api(`/capabilities/${cap.id}/motivations`));
     } catch (e) {
       setError(String(e.message));
@@ -235,9 +249,12 @@ export default function CapabilityIsland({ slug, canWrite = false }) {
 
   const removeMotivation = async (goalId) => {
     setError(null);
+    setSaved(null);
+    const goal = (motivations ?? []).find((g) => g.id === goalId);
     try {
       await api(`/capabilities/${cap.id}/motivations/${goalId}`, { method: "DELETE" });
       setRemoving(null);
+      setSaved(`Unlinked ${goal ? `${goal.display_id} ${goal.title}` : "the goal"}.`);
       setMotivations(await api(`/capabilities/${cap.id}/motivations`));
     } catch (e) {
       setError(String(e.message));

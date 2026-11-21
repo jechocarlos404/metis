@@ -151,8 +151,9 @@ export default function JourneysIsland({ canWrite }) {
     await api(`/journeys/${id}`, { method: "DELETE" });
     await loadList(); // the selection falls back to the first one
     setNotice(`Deleted ${name}.`);
-    // Focus the list, not whatever button now sits where Delete was.
-    listHeading.current?.focus();
+    // Focus the list, not whatever button now sits where Delete was; with
+    // the last one gone there is no list, so the page itself.
+    requestAnimationFrame(() => (listHeading.current ?? document.getElementById("main"))?.focus());
   }
 
   return (
@@ -165,9 +166,12 @@ export default function JourneysIsland({ canWrite }) {
       {error && <div style={{ padding: "8px 24px", color: "var(--danger-fg)", fontSize: "var(--text-xs)" }}>{error}</div>}
       {notice && <div role="status" style={{ padding: "8px 24px 0", color: "var(--ok-fg)", fontSize: "var(--text-sm)" }}>{notice}</div>}
       <div style={{ flex: 1, minHeight: 0, overflowY: "auto", display: "flex", flexWrap: "wrap", alignItems: "flex-start", alignContent: "flex-start", gap: 16, padding: "16px 24px" }}>
-        <div style={{ flex: "1 0 260px", maxWidth: "100%" }}>
-          <JourneyList journeys={journeys} selected={selected} onSelect={select} headingRef={listHeading} />
-        </div>
+        {/* With nothing saved, the empty state says so once: no empty list beside it. */}
+        {(editing || journeys?.length !== 0) && (
+          <div style={{ flex: "1 0 260px", maxWidth: "100%" }}>
+            <JourneyList journeys={journeys} selected={selected} onSelect={select} headingRef={listHeading} />
+          </div>
+        )}
         <div style={{ flex: "999 1 420px", minWidth: 0 }}>
           {editing && (
             <JourneyEditor

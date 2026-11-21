@@ -116,8 +116,19 @@ async def test_the_tech_tools_are_listed_once_the_catalog_has_a_technology(api):
 
     assert await names() == INVENTORY_TOOLS
     assert server.TECH_TOOLS | INVENTORY_TOOLS == {t.name for t in TOOLS}
-    result = await server.call_tool("tech_search", {"q": "redis"})
-    assert isinstance(result, list) and "No technology is recorded yet" in result[0].text
+    # Through the SDK's own handler, as a client calls it: an unlisted tool
+    # must still run, not be refused.
+    called = server.server.request_handlers[types.CallToolRequest]
+    answer = (
+        await called(
+            types.CallToolRequest(
+                method="tools/call",
+                params=types.CallToolRequestParams(name="tech_search", arguments={"q": "redis"}),
+            )
+        )
+    ).root
+    assert not answer.isError
+    assert "No technology is recorded yet" in answer.content[0].text
 
     async with db() as s:
         await tech_service.create_technology(

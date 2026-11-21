@@ -68,3 +68,53 @@ def test_the_access_log_is_emitted_at_info():
     log = logging.getLogger("metis.access")
     assert log.isEnabledFor(logging.INFO)
     assert any(isinstance(h, logging.StreamHandler) for h in logging.getLogger("metis").handlers)
+
+
+async def _approved_chat_writes(app, db):
+    """A PRD and a delivery strategy written by approving a Chat proposal
+    through the route: who each is recorded as made by."""
+    from sqlalchemy import select
+
+    from app.models import ChatMessage, ChatProposal, ChatThread, DeliveryStrategy, Product, ProductDecomposition
+    from app.services.graph_service import FeatureGraph
+
+    app.state.sessionmaker, app.state.graph = db, FeatureGraph(sessionmaker=None)
+    async with db() as session:
+        product = Product(name="Notes", slug="notes")
+        thread = ChatThread(title="t")
+        session.add_all([product, thread])
+        await session.flush()
+        ids = []
+        for agent, tool, arguments in (
+            ("spec_decomposer", "create_prd_draft", {"product": str(product.id), "document": {"summary": "s"}}),
+            ("strategist", "create_delivery_strategy", {"product": str(product.id), "phases": []}),
+        ):
+            message = ChatMessage(thread_id=thread.id, role="agent", agent_name=agent)
+            session.add(message)
+            await session.flush()
+            proposal = ChatProposal(message_id=message.id, tool_name=tool, arguments=arguments)
+            session.add(proposal)
+            await session.flush()
+            ids.append(proposal.id)
+        await session.commit()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as http:
+        for proposal_id in ids:
+            res = await http.post(f"/api/chat/proposals/{proposal_id}/approve")
+            assert res.status_code == 200 and res.json()["status"] == "applied", res.text
+    async with db() as session:
+        return (
+            await session.scalar(select(ProductDecomposition.created_by)),
+            await session.scalar(select(DeliveryStrategy.created_by)),
+        )
+
+
+async def test_a_chat_write_records_the_person_who_approved_it(app, db):
+    """A Chat change is applied when a person approves it, so with auth on
+    that person is recorded, by the same rule as the REST writes; the agent
+    that proposed it was recorded instead."""
+    app.dependency_overrides[current_user] = lambda: EDITOR
+    assert await _approved_chat_writes(app, db) == ("editor", "editor")
+
+
+async def test_with_auth_off_a_chat_write_keeps_the_agent_name(app, db):
+    assert await _approved_chat_writes(app, db) == ("spec_decomposer", "strategist")

@@ -15,6 +15,8 @@ from fastapi import HTTPException
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth.deps import DEV_PRINCIPAL, author
+from app.auth.jwt import Principal
 from app.llm.types import ToolDef
 from app.models import Capability, Feature, Goal, Product, Ticket
 from app.schemas.capability import CapabilityCreate, CapabilityUpdate, CoverageRequest
@@ -36,6 +38,9 @@ from app.services.slugs import slugify, unique_slug
 class ToolContext:
     session: AsyncSession
     graph: Any = None
+    #: Who applies a write: the person approving its proposal. With auth off
+    #: (DEV_PRINCIPAL) the agent's name is recorded instead (`author`).
+    principal: Principal = field(default_factory=lambda: DEV_PRINCIPAL)
 
 
 @dataclass
@@ -409,7 +414,7 @@ async def create_prd_draft(ctx: ToolContext, product: str, document: dict) -> To
         raise ToolError(f"Invalid PRD document: {e}") from None
     try:
         decomposition = await decomposition_service.create_prd_draft(
-            ctx.session, product_obj.id, prd, created_by="spec_decomposer"
+            ctx.session, product_obj.id, prd, created_by=author(ctx.principal, "spec_decomposer")
         )
     except HTTPException as e:
         raise ToolError(str(e.detail)) from None
@@ -720,7 +725,7 @@ async def create_delivery_strategy(
     ctx: ToolContext, product: str, phases: list[dict], rationale: str = ""
 ) -> ToolResult:
     product_obj = await _resolve(ctx.session, Product, product, "SPEC", Product.name)
-    data = StrategyCreate(phases=phases, rationale=rationale or None, created_by="strategist")
+    data = StrategyCreate(phases=phases, rationale=rationale or None, created_by=author(ctx.principal, "strategist"))
     strategy = await strategy_service.create_strategy(ctx.session, product_obj.id, data)
     return ToolResult(_dump({
         "display_id": f"STR-{strategy.seq:02d}",

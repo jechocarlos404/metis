@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from app.agents import proposals as proposal_service
 from app.agents.runner import start_turn
+from app.auth import Principal, current_user
 from app.db import get_db
 from app.models import ChatMessage, ChatThread
 from app.schemas.chat import MessageRead, MessageSend, ProposalRead, ThreadCreate, ThreadRead
@@ -110,10 +111,13 @@ def _decide_errors(fn):
 
 
 @router.post("/proposals/{proposal_id}/approve", response_model=ProposalRead)
-async def approve_proposal(proposal_id: uuid.UUID, request: Request):
-    """Apply one proposed change. Editors and admins only (writes)."""
+async def approve_proposal(
+    proposal_id: uuid.UUID, request: Request, principal: Principal = Depends(current_user)
+):
+    """Apply one proposed change. Editors and admins only (writes). The
+    person approving is who it is recorded as made by."""
     state = request.app.state
-    return await _decide_errors(proposal_service.approve)(state.sessionmaker, state.graph, proposal_id)
+    return await _decide_errors(proposal_service.approve)(state.sessionmaker, state.graph, proposal_id, principal)
 
 
 @router.post("/proposals/{proposal_id}/reject", response_model=ProposalRead)
@@ -122,7 +126,9 @@ async def reject_proposal(proposal_id: uuid.UUID, request: Request):
 
 
 @router.post("/messages/{message_id}/approve-all", response_model=list[ProposalRead])
-async def approve_all(message_id: uuid.UUID, request: Request):
+async def approve_all(
+    message_id: uuid.UUID, request: Request, principal: Principal = Depends(current_user)
+):
     """Every pending change of one reply, in order, stopping at the first failure."""
     state = request.app.state
-    return await _decide_errors(proposal_service.approve_all)(state.sessionmaker, state.graph, message_id)
+    return await _decide_errors(proposal_service.approve_all)(state.sessionmaker, state.graph, message_id, principal)

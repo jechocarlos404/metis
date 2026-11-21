@@ -8,7 +8,7 @@ marked dirty and rebuilt lazily — never the other way around.
 import uuid
 
 from fastapi import HTTPException
-from sqlalchemy import delete, func, select, text
+from sqlalchemy import delete, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
@@ -72,14 +72,17 @@ async def _refuse_same_name(
 ) -> None:
     """One feature per name in a product (B51): a second "keep notes when
     OFFLINE" beside "Keep notes when offline" would split one feature in two,
-    so it is refused, naming the one that exists, as a capability's is."""
-    stmt = select(Feature).where(
-        func.lower(Feature.name) == name.strip().lower(),
-        Feature.product_id.is_not_distinct_from(product_id),
-    )
+    so it is refused, naming the one that exists, as a capability's is.
+    Both names are lowered here, in Python, as the seed loaders lower them
+    (Python and JavaScript agree): Postgres's lower() differs on İ and final
+    sigma, so a dry run's "would create" met a 409 on the real run."""
+    stmt = select(Feature).where(Feature.product_id.is_not_distinct_from(product_id))
     if exclude_id is not None:
         stmt = stmt.where(Feature.id != exclude_id)
-    existing = await session.scalar(stmt.order_by(Feature.seq).limit(1))
+    typed = name.strip().lower()
+    existing = next(
+        (f for f in await session.scalars(stmt.order_by(Feature.seq)) if f.name.strip().lower() == typed), None
+    )
     if existing is not None:
         where = "this product" if product_id is not None else "the features with no product"
         raise HTTPException(

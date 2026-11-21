@@ -1273,6 +1273,24 @@ def test_the_client_secret_is_read_under_the_name_env_example_gives(tmp_path, mo
     assert Settings().keycloak_mcp_client_secret == "new-name"
 
 
+def test_the_sse_token_is_read_under_the_documented_name(tmp_path, monkeypatch):
+    """README, docs/mcp.md, .env.example and the Guide say METIS_MCP_SSE_TOKEN;
+    the server read only MCP_SSE_TOKEN, which compose mapped one onto the
+    other. The documented name wins, the old one still works alone, and an
+    empty new name (.env.example's blank line) doesn't hide the old one."""
+    for name in ("METIS_MCP_SSE_TOKEN", "MCP_SSE_TOKEN"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("METIS_MCP_SSE_TOKEN=from-dot-env\n")
+    assert Settings().mcp_sse_token == "from-dot-env"
+    (tmp_path / ".env").write_text("METIS_MCP_SSE_TOKEN=\n")
+    assert Settings().mcp_sse_token == ""
+    monkeypatch.setenv("MCP_SSE_TOKEN", "old-name")
+    assert Settings().mcp_sse_token == "old-name"
+    monkeypatch.setenv("METIS_MCP_SSE_TOKEN", "new-name")
+    assert Settings().mcp_sse_token == "new-name"
+
+
 async def test_an_auth_off_server_against_an_auth_on_api_says_so(api, monkeypatch):
     import httpx
 

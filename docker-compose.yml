@@ -91,7 +91,7 @@ services:
       # one into .env: echo "METIS_MCP_SSE_TOKEN=$(openssl rand -hex 32)" >> .env
       # (Empty rather than ${VAR:?}, which would fail `docker compose up`
       # without the mcp profile too.)
-      MCP_SSE_TOKEN: ${METIS_MCP_SSE_TOKEN:-}
+      METIS_MCP_SSE_TOKEN: ${METIS_MCP_SSE_TOKEN:-}
       AUTH_ENABLED: ${AUTH_ENABLED:-true}
     # Published on loopback only, for agents on this machine (the Claude Code
     # plugin in plugin/). The server also rejects any Host header but

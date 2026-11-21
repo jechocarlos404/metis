@@ -107,8 +107,8 @@ never counted as a match. An empty answer or a gap is a real answer.
    server is exposed to anything but your own agent.
 2. **Agent → MCP server.** This token applies to SSE only. A listening port
    would otherwise lend the server's API token to anyone who can reach it, so
-   the server refuses to start SSE without `MCP_SSE_TOKEN`. Callers send
-   `Authorization: Bearer <MCP_SSE_TOKEN>`. stdio needs no token, because the
+   the server refuses to start SSE without `METIS_MCP_SSE_TOKEN`. Callers send
+   `Authorization: Bearer <METIS_MCP_SSE_TOKEN>`. stdio needs no token, because the
    process inherits the identity of whoever launched it.
 
 | Variable | Default | Meaning |
@@ -119,7 +119,7 @@ never counted as a match. An empty answer or a gap is a real answer.
 | `KEYCLOAK_REALM` | `metis` | |
 | `KEYCLOAK_MCP_CLIENT` | `metis-mcp` | |
 | `METIS_MCP_CLIENT_SECRET` | `dev-mcp-secret` | Matches `keycloak/metis-realm.json`. Change it anywhere real. The older name `KEYCLOAK_MCP_CLIENT_SECRET` is still read when this one isn't set |
-| `MCP_SSE_TOKEN` | empty | Required for `--sse` |
+| `METIS_MCP_SSE_TOKEN` | empty | Required for `--sse`. The older name `MCP_SSE_TOKEN` is still read when this one is empty |
 
 ## stdio (local agents)
 

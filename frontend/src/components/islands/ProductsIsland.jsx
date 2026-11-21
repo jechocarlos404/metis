@@ -1,6 +1,6 @@
 import React from "react";
 import { PageHeader } from "../shell/PageHeader.jsx";
-import { Badge, Button, Card, Checkbox, Dialog, Icon, Input, Select, StatusBadge, Tabs, Toast, DeleteConfirm } from "../../ds";
+import { Badge, Button, Card, Checkbox, Dialog, Icon, Input, Select, StatusBadge, Tabs, Toast, DeleteConfirm, tabId } from "../../ds";
 import { api } from "../../lib/api.js";
 import { andList, count, freshness, productOptions, statusLabel } from "../../lib/words.js";
 import { useParamRestore, writeParams } from "../../lib/url-state.js";
@@ -356,8 +356,11 @@ export default function ProductsIsland({ canWrite = true }) {
               ]}
               value={shownTab}
               onChange={changeTab}
+              label="Product view"
+              panelId="product-panel"
             />
 
+            <div id="product-panel" role="tabpanel" aria-labelledby={tabId("product-panel", shownTab)} style={{ minWidth: 0 }}>
             {shownTab === "does" && (
               <WhatItDoes product={product} features={features} score={score} capabilities={capabilities} journeys={journeys}
                 bundles={bundles} canWrite={canWrite} onAddBundle={addBundle} onRemoveBundle={removeBundle} />
@@ -372,6 +375,7 @@ export default function ProductsIsland({ canWrite = true }) {
             ) : (
               <div role="status" style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>Loading the plan…</div>
             ))}
+            </div>
           </div>
         ) : (
           <div style={{ maxWidth: 860, border: "1px dashed var(--border-default)", borderRadius: "var(--radius-md)", padding: 24, display: "flex", flexDirection: "column", gap: 12, alignItems: "flex-start", color: "var(--text-secondary)", fontSize: "var(--text-sm)" }}>

@@ -948,10 +948,17 @@ function RecheckList({ recheck, onSelect, onClear }) {
   );
   const retestRow = (f) => row(f, `shares ${f.shared.map((c) => c.name).join(", ")}`);
   const nothing = !breaks.length && !retest.length && !broad.length && !elsewhere.length;
+  // The button that asked is gone, and the answer opens at the panel's foot:
+  // take focus there and bring it up, so the click visibly did something (B50).
+  const headRef = React.useRef(null);
+  React.useEffect(() => {
+    headRef.current?.focus({ preventScroll: true });
+    headRef.current?.scrollIntoView({ block: "start" });
+  }, [recheck]);
   return (
     <>
       <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
-        <div style={CAPS_HEADER}>If this changes</div>
+        <div ref={headRef} tabIndex={-1} style={CAPS_HEADER}>If this changes</div>
         <button type="button" onClick={onClear} style={{ border: "none", background: "none", padding: 0, cursor: "pointer", font: "inherit", ...SMALL_NOTE }}>Clear</button>
       </div>
       {nothing && <div style={SMALL_NOTE}>Nothing depends on it and it shares no capability, so nothing else needs a recheck.</div>}

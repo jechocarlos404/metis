@@ -45,8 +45,10 @@ export function Tabs({ tabs = [], value, onChange, style, label, panelId }) {
   measure.current = () => {
     const el = strip.current;
     if (!el) return;
-    const start = el.scrollLeft > 1;
-    const end = el.scrollLeft + el.clientWidth < el.scrollWidth - 1;
+    // Only a strip that scrolls: one that doesn't would fade tabs out of reach.
+    const scrolls = /auto|scroll/.test(getComputedStyle(el).overflowX);
+    const start = scrolls && el.scrollLeft > 1;
+    const end = scrolls && el.scrollLeft + el.clientWidth < el.scrollWidth - 1;
     setCut((c) => (c.start === start && c.end === end ? c : { start, end }));
   };
   React.useEffect(() => {

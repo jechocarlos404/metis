@@ -447,6 +447,7 @@ function GoalList({ goals, productById, capsByGoal, highlightStyle, editButton, 
         {goals.map((g) => {
           const owner = productById[g.product_id];
           const caps = capsByGoal[g.id] || [];
+          const choices = linking ? linking.options.filter((o) => !caps.some((c) => c.id === o.id)) : [];
           return (
             <div key={g.id} id={`goal-${g.id}`} style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 14, background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", boxShadow: "var(--shadow-card)", padding: "14px 18px", ...highlightStyle(g.id) }}>
               <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-secondary)", width: 46 }}>{g.display_id}</span>
@@ -489,9 +490,9 @@ function GoalList({ goals, productById, capsByGoal, highlightStyle, editButton, 
                   <div style={{ marginTop: 6, display: "flex", gap: 8, alignItems: "flex-start" }}>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <CapabilityPicker id={`goal-${g.id}-link`} label={`Capability ${g.display_id} needs`} value={[]}
-                        options={linking.options.filter((o) => !caps.some((c) => c.id === o.id))}
+                        options={choices}
                         onChange={(names) => {
-                          const picked = linking.options.find((o) => o.name === names[names.length - 1]);
+                          const picked = choices.find((o) => o.name === names[names.length - 1]);
                           if (picked) linking.onLink(g, picked);
                           setLinkingId(null);
                         }} placeholder="Type a capability…" />

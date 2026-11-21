@@ -28,6 +28,7 @@ from app.schemas.capability import (
     MAX_CAPABILITY_NAME,
     MAX_IDEA_FEATURES,
     MAX_IDEA_NAMES,
+    MAX_NAME,
     CapabilityCreate,
 )
 from app.schemas.envelope import Question
@@ -1236,6 +1237,70 @@ def test_real_writes_from_mcp_are_still_refused(method, path):
         )
     assert err.value.status_code == 403
     assert err.value.detail["error"] == "human_action_required"
+
+
+async def test_an_exact_miss_offers_near_names_and_never_picks_one(api):
+    """Products, features and journeys still match exactly. A miss offers
+    near names by the rule check_idea's candidates follow, each leading with
+    what the next call takes, and a case-only difference is always one."""
+    w = await _world(*api)
+    climb = w["climb"]
+
+    product = await server._dispatch("product_score", {"product": "Can I Climb"})
+    assert product.splitlines() == [
+        "0 products have id or slug 'Can I Climb'. Call `products` for ids and slugs.",
+        'Near names, unconfirmed: can-i-climb "Can I Climb"',
+        "Open: /products",
+    ]
+    for tool in ("tech_exposure", "stack_redundancy", "stack_recommend", "ready_features"):
+        assert await server._dispatch(tool, {"product": "Can I Climb"}) == product
+    assert 'rival "Rival"' in await server._dispatch("product_score", {"product": "RIVAL"})
+
+    for tool in ("feature_why", "recheck"):
+        feature = await server._dispatch(tool, {"feature": "estimate climb power"})
+        lines = feature.splitlines()
+        assert lines[0] == (
+            "0 features are named 'estimate climb power'. Matching is exact: pass an id or the exact name."
+        )
+        assert lines[1].startswith("Near names, unconfirmed: ")
+        offered = lines[1].removeprefix("Near names, unconfirmed: ").split(", ")
+        # Nearest first, the case-only one; each with its id and product.
+        assert offered[0].endswith('"Estimate climb power" (can-i-climb)')
+        assert lines[-1] == "Open: /features"
+    picked = await server._dispatch("recheck", {"feature": offered[0].split()[0]})
+    assert not picked.startswith("0 features")
+
+    journey = await server._dispatch("journeys", {"journey": "plan a CLIMB"})
+    assert journey.splitlines()[1] == f'Near names, unconfirmed: {w["journey"].id} "Plan a climb"'
+
+    # Nothing near, or an id: the miss alone, as before.
+    assert await server._dispatch("product_score", {"product": "zzzz"}) == (
+        "0 products have id or slug 'zzzz'. Call `products` for ids and slugs.\nOpen: /products"
+    )
+    assert "Near names" not in await server._dispatch("journeys", {"journey": "qqqq xxxx"})
+
+
+async def test_the_list_reads_offer_near_names_on_request(api):
+    """`near` on the product, feature and journey lists: three at most,
+    nearest first, case ignored, nothing for a name far from every row, and a
+    name longer than any name refused."""
+    app, _ = api
+    await _world(*api)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as http:
+        async def names(path, near):
+            res = await http.get(path, params={"near": near})
+            assert res.status_code == 200, res.text
+            return [r["name"] for r in res.json()]
+
+        assert await names("/api/products", "can i climb") == ["Can I Climb"]
+        near = await names("/api/features", "RIVAL")
+        assert len(near) == 3 and all(n.startswith("Rival") for n in near)
+        assert await names("/api/journeys", "PLAN A CLIMB") == ["Plan a climb"]
+        assert await names("/api/products", "zzzz") == []
+        res = await http.get("/api/products", params={"near": "n" * (MAX_NAME + 1)})
+        assert res.status_code == 422 and f"at most {MAX_NAME} characters" in res.json()["detail"]
+        # Without it, the whole list as before.
+        assert len((await http.get("/api/products")).json()) == 2
 
 
 async def test_check_idea_takes_the_api_s_bounds_and_says_which_one(api):

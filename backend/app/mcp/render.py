@@ -570,9 +570,18 @@ def product_score(score: dict) -> str:
     return _end(lines, f"/products?product={product['id']}")
 
 
-def no_product(value: str) -> str:
+def _near(offered: list[str]) -> list[str]:
+    """Near names after an exact miss, as no_capability offers them: each
+    leads with what the next call takes. Unconfirmed, never picked."""
+    return [f"Near names, unconfirmed: {', '.join(offered)}"] if offered else []
+
+
+def no_product(value: str, near: list[dict] = ()) -> str:
     return _end(
-        [f"0 products have id or slug {value!r}. Call `products` for ids and slugs."],
+        [
+            f"0 products have id or slug {value!r}. Call `products` for ids and slugs.",
+            *_near([f'{p["slug"]} "{p["name"]}"' for p in near]),
+        ],
         "/products",
     )
 
@@ -941,14 +950,22 @@ def recheck(result: dict, products: list[dict]) -> str:
     return _end(lines, f"/features?feature={feature['id']}")
 
 
-def no_feature(value: str, named: list[dict], products: list[dict]) -> str:
-    """Exact names only. A name several features share is listed, not picked."""
+def no_feature(
+    value: str, named: list[dict], products: list[dict], near: list[dict] = ()
+) -> str:
+    """Exact names only. A name several features share is listed, not picked;
+    a name none has offers the near ones."""
+    by_id = {p["id"]: p["slug"] for p in products}
     if not named:
         return _end(
-            [f"0 features are named {value!r}. Matching is exact: pass an id or the exact name."],
+            [
+                f"0 features are named {value!r}. Matching is exact: pass an id or the exact name.",
+                *_near(
+                    [f'{f["id"]} "{f["name"]}" ({by_id.get(f["product_id"], "no product")})' for f in near]
+                ),
+            ],
             "/features",
         )
-    by_id = {p["id"]: p["slug"] for p in products}
     lines = [f"{len(named)} features are named {value!r}. Pass one id:", ""]
     lines += _table(
         [["  " + f["name"], by_id.get(f["product_id"], "(no product)"), f["id"]] for f in named]
@@ -957,13 +974,15 @@ def no_feature(value: str, named: list[dict], products: list[dict]) -> str:
     return _end(lines, "/features")
 
 
-def no_journey(value: str, named: list[dict]) -> str:
-    """The same rule as features: an id or the exact name, never a near one."""
+def no_journey(value: str, named: list[dict], near: list[dict] = ()) -> str:
+    """The same rule as features: an id or the exact name, never a near one,
+    which is only offered."""
     if not named:
         return _end(
             [
                 f"0 journeys are named {value!r}. Matching is exact: pass an id or the "
-                "exact name; journeys with no argument lists them."
+                "exact name; journeys with no argument lists them.",
+                *_near([f'{j["id"]} "{j["name"]}"' for j in near]),
             ],
             "/journeys",
         )

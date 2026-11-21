@@ -4,6 +4,8 @@ from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
+from app.models import Feature
+from app.schemas.capability import MAX_NAME
 from app.schemas.feature import (
     EdgeCreate,
     EdgeRead,
@@ -26,8 +28,15 @@ def get_graph(request: Request):
 
 @router.get("", response_model=list[FeatureRead])
 async def list_features(
-    q: str | None = None, session: AsyncSession = Depends(get_db)
+    q: str | None = None,
+    near: str | None = Query(None, max_length=MAX_NAME),
+    session: AsyncSession = Depends(get_db),
 ):
+    """Every feature, or those whose name holds `q`. With `near`, only those
+    whose name is near it (three at most, nearest first): candidates after an
+    exact miss, never a match."""
+    if near is not None:
+        return (await capability_service.near_names(session, Feature, [near]))[near]
     return await feature_service.list_features(session, q)
 
 

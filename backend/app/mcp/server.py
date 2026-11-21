@@ -311,7 +311,7 @@ TOOLS = [
         inputSchema={
             "type": "object",
             "properties": {
-                "feature": {"type": "string", "description": "Feature id or exact feature name"}
+                "feature": {"type": "string", "description": "Feature id or exact feature name; a miss offers near names, never picks one"}
             },
             "required": ["feature"],
         },
@@ -326,7 +326,7 @@ TOOLS = [
         inputSchema={
             "type": "object",
             "properties": {
-                "journey": {"type": "string", "description": "Journey id or exact name, optional"}
+                "journey": {"type": "string", "description": "Journey id or exact name, optional; a miss offers near names, never picks one"}
             },
         },
     ),
@@ -355,7 +355,7 @@ TOOLS = [
         inputSchema={
             "type": "object",
             "properties": {
-                "feature": {"type": "string", "description": "Feature id or exact feature name"}
+                "feature": {"type": "string", "description": "Feature id or exact feature name; a miss offers near names, never picks one"}
             },
             "required": ["feature"],
         },
@@ -476,7 +476,7 @@ async def _dispatch(name: str, args: dict) -> str:
         if args.get("product"):
             product = await _product(args["product"])
             if product is None:
-                return render.no_product(args["product"])
+                return await _no_product(args["product"])
             slug = _safe_slug(product["slug"], "product")
         return render.tech_exposure(
             await client.get(
@@ -487,7 +487,7 @@ async def _dispatch(name: str, args: dict) -> str:
     if name == "stack_redundancy":
         product = await _product(args["product"])
         if product is None:
-            return render.no_product(args["product"])
+            return await _no_product(args["product"])
         return render.stack_redundancy(
             await client.get(f"/api/stacks/{_safe_slug(product['slug'], 'product')}/redundancy")
         )
@@ -502,7 +502,7 @@ async def _dispatch(name: str, args: dict) -> str:
         body = {k: args[k] for k in ("slot", "archetype") if args.get(k)}
         product = await _product(args["product"])
         if product is None:
-            return render.no_product(args["product"])
+            return await _no_product(args["product"])
         slug = _safe_slug(product["slug"], "product")
         return render.stack_recommend(await client.post(f"/api/stacks/{slug}/recommend", body))
 
@@ -536,7 +536,7 @@ async def _dispatch(name: str, args: dict) -> str:
     if name == "product_score":
         product = await _product(args["product"])
         if product is None:
-            return render.no_product(args["product"])
+            return await _no_product(args["product"])
         if not product["external"]:
             return render.own_product(product)
         return render.product_score(
@@ -550,7 +550,7 @@ async def _dispatch(name: str, args: dict) -> str:
         products = await client.get("/api/products")
         feature_id, named = await _feature_id(args["feature"])
         if feature_id is None:
-            return render.no_feature(args["feature"], named, products)
+            return await _no_feature(args["feature"], named, products)
         try:
             why = await client.get(f"/api/features/{feature_id}/why")
         except ApiError as exc:
@@ -576,7 +576,8 @@ async def _dispatch(name: str, args: dict) -> str:
         except BadInput:
             named = [j for j in await client.get("/api/journeys") if j["name"] == value]
             if len(named) != 1:
-                return render.no_journey(value, named)
+                near = [] if named else await _near("/api/journeys", value)
+                return render.no_journey(value, named, near)
             journey = _safe_id(named[0]["id"])
         return await _or_absent(
             render.journey_analysis, f"/api/journeys/{journey}/analysis", render.no_journey(value, [])
@@ -588,7 +589,7 @@ async def _dispatch(name: str, args: dict) -> str:
         if args.get("product"):
             only = _match_product(products, args["product"])
             if only is None:
-                return render.no_product(args["product"])
+                return await _no_product(args["product"])
             if only["external"]:
                 return render.external_product_work(only)
         ready = (await client.get("/api/graph/ready"))["ready"]
@@ -610,12 +611,37 @@ async def _dispatch(name: str, args: dict) -> str:
 
 
 def _match_product(products: list[dict], value: str) -> dict | None:
-    """By id or by exact slug. Never by name: a near name is not a product."""
+    """By id or by exact slug. Never by name: a near name is not a product,
+    only offered after a miss (_no_product)."""
     return next((p for p in products if value in (p["id"], p["slug"])), None)
 
 
 async def _product(value: str) -> dict | None:
     return _match_product(await client.get("/api/products"), value)
+
+
+async def _near(path: str, value: str) -> list[dict]:
+    """Rows whose name is near a value that matched nothing exactly, by the
+    API's rule (the one check_idea's candidates follow): offered, never
+    picked. An id has no near name, nor does a value longer than any name."""
+    try:
+        _safe_id(value)
+        return []
+    except BadInput:
+        pass
+    if len(value) > MAX_NAME:
+        return []
+    return await client.get(path, {"near": value})
+
+
+async def _no_product(value: str) -> str:
+    return render.no_product(value, await _near("/api/products", value))
+
+
+async def _no_feature(value: str, named: list[dict], products: list[dict]) -> str:
+    """A name several features share lists them; a name none has, the near ones."""
+    near = [] if named else await _near("/api/features", value)
+    return render.no_feature(value, named, products, near)
 
 
 async def _feature_id(value: str) -> tuple[str | None, list[dict]]:
@@ -633,7 +659,7 @@ async def _recheck(value: str) -> str:
     products = await client.get("/api/products")
     feature_id, named = await _feature_id(value)
     if feature_id is None:
-        return render.no_feature(value, named, products)
+        return await _no_feature(value, named, products)
     return await _or_absent(
         lambda answer: render.recheck(answer, products),
         f"/api/graph/recheck/{feature_id}",

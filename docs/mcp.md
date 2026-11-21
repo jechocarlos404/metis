@@ -28,8 +28,20 @@ says which service it can't reach or sign in to (the metis API or Keycloak) and
 the setting that points at it, and so does a base URL that answers but isn't
 the metis API. An unknown tool, arguments a tool's schema refuses, and a
 resource that can't be read come back the same way. A subject that doesn't exist under an exact name
-is an answer, not an error: `0 features are named '…'`, with the near matches
-listed when a name is shared.
+is an answer, not an error: `0 features are named '…'`, with the features listed
+when several share the name. When none has it, up to three near names follow as
+unconfirmed candidates, each leading with what the next call takes, as
+`capability` and `check_idea` offer them (trigram closeness over 0.3; case is
+ignored, so a case-only difference is always offered):
+
+```
+0 products have id or slug 'Plausible Analytics'. Call `products` for ids and slugs.
+Near names, unconfirmed: plausible-analytics "Plausible Analytics"
+Open: /products
+```
+
+A feature candidate reads `<id> "<name>" (<product slug>)`, a journey one
+`<id> "<name>"`. A candidate is never picked: pass its slug or id to use it.
 
 Inputs follow one rule: a product by id or slug, a capability by slug or name
 (a name matches through its slug, as in `check_idea`), and a feature or a
@@ -41,7 +53,7 @@ The inventory tools answer the portfolio questions:
 
 | Tool | What it answers | API |
 |---|---|---|
-| `products` | Every product, ours and external, with slug and id. Start here so you never guess an id. | `GET /api/products` |
+| `products` | Every product, ours and external, with slug and id. Start here so you never guess an id. | `GET /api/products` (`?near=<name>` gives the near names a miss offers; features and journeys take it too) |
 | `capability_inventory` | What we can already do, most reused first: each capability's slug and exact name (a seed file reuses a capability by its name), its maturity when ours, and our products and features working on it at any status (a feature linked only to a sub-capability counts, and the row says how many do). Takes an optional `q` substring filter, applied in the server, and a `limit`. | `GET /api/capabilities/inventory` |
 | `check_idea` | How much of an idea we already have. Each need comes back `ours`, `only elsewhere` (not ours; an external product has it), `not built yet` (named, but no finished feature realizes it), or `no match` with near names listed as unconfirmed candidates. A capability is ours when a finished (`done`) feature of one of our products realizes it. Takes an optional `idea` name. Its `Open:` line pre-fills Home's idea check (`/home?idea=<name>&caps=<slug>,<slug>,...`: matched needs by slug, the rest as typed) and runs it, so the owner can save it as an idea with one click. The tool itself saves nothing. An idea holds at most 100 features and 300 capability names in all, a capability name at most 100 characters and a feature name at most 300 (the biggest real product has 52 features naming 110). Over a limit is refused with the limit named, by the tool's schema or by the API's `422`. | `POST /api/capabilities/coverage` (a read) |
 | `product_score` | How much of an external product, by id or slug, we could build: buildable, partly known, not described, missing a capability. It is a lower bound. Our own products are not scored, as on the desktop: their own features are what make their capabilities ours, so the score would measure itself. | `GET /api/products/{id}/coverage` |
@@ -69,9 +81,9 @@ Resources: `metis://ontology/model`, `metis://policy/adoptions`,
 `metis://tech/{slug}`, `metis://stacks/{product}`. Prompts:
 `check_this_dependency`, `choose_a_stack`, `explain_the_ontology`.
 
-Capability names match exactly, by slug. A near name is a candidate for a human
-to confirm and is never counted as a match. An empty answer or a gap is a real
-answer.
+Capability names match exactly, by slug; products, features and journeys by id,
+slug or exact name. A near name is a candidate for a human to confirm and is
+never counted as a match. An empty answer or a gap is a real answer.
 
 ## Auth: two tokens
 

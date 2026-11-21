@@ -24,7 +24,12 @@ from app.mcp.server import PROMPTS, RESOURCE_TEMPLATES, RESOURCES, TOOLS, _hard_
 from app.models import CapabilityMaturity, Goal, GoalType, Product, TechKind, WorkStatus
 from app.models.enums import Surface
 from app.models.stack import TechStack
-from app.schemas.capability import CapabilityCreate
+from app.schemas.capability import (
+    MAX_CAPABILITY_NAME,
+    MAX_IDEA_FEATURES,
+    MAX_IDEA_NAMES,
+    CapabilityCreate,
+)
 from app.schemas.envelope import Question
 from app.schemas.feature import EdgeCreate, FeatureCreate
 from app.schemas.journey import JourneyCreate, JourneyStepIn
@@ -1231,6 +1236,61 @@ def test_real_writes_from_mcp_are_still_refused(method, path):
         )
     assert err.value.status_code == 403
     assert err.value.detail["error"] == "human_action_required"
+
+
+async def test_check_idea_takes_the_api_s_bounds_and_says_which_one(api):
+    """check_idea's schema carries the coverage body's limits, so an agent is
+    told before any request; the one across all features only the API checks,
+    and its 422 still reads as a sentence with the limit in it. A capability
+    asked for by a name too long to be one is refused the same way, since its
+    miss would post that name to coverage."""
+    await _world(*api)
+
+    async def call(name, arguments):
+        result = await server.call_tool(name, arguments)
+        return result.content[0].text.splitlines() if not isinstance(result, list) else None
+
+    one = {"name": "f", "capabilities": ["Strava import"]}
+    assert await call("check_idea", {"features": [one] * MAX_IDEA_FEATURES}) is None
+    refused = await call("check_idea", {"features": [one] * (MAX_IDEA_FEATURES + 1)})
+    assert refused == [
+        f"Arguments refused at features: at most {MAX_IDEA_FEATURES} items, got {MAX_IDEA_FEATURES + 1}.",
+        "Open: /home",
+    ]
+    names = [f"name {i}" for i in range(MAX_IDEA_NAMES + 1)]
+    refused = await call(
+        "check_idea",
+        {"features": [{"name": "a", "capabilities": names[:150]}, {"name": "b", "capabilities": names[150:]}]},
+    )
+    assert refused == [
+        f"Refused (422): body: Value error, at most {MAX_IDEA_NAMES} capability names per "
+        f"request across all features, got {MAX_IDEA_NAMES + 1}",
+        "Open: /home",
+    ]
+    long = "c" * (MAX_CAPABILITY_NAME + 1)
+    for tool, arg in (("capability", "slug"), ("capability_supply", "capability")):
+        refused = await call(tool, {arg: long})
+        assert refused[0] == (
+            f"Arguments refused at {arg}: at most {MAX_CAPABILITY_NAME} characters, "
+            f"got {MAX_CAPABILITY_NAME + 1}."
+        )
+
+
+async def test_a_product_with_more_features_than_a_body_may_carry_is_still_scored(api):
+    """The bounds are on the body a caller sends; a stored product's features
+    are scored in-process, whatever their number."""
+    app, db = api
+    async with db() as s:
+        cap = await capability_service.create_capability(s, CapabilityCreate(name="Search"))
+        big = Product(name="Big rival", slug="big-rival", external=True)
+        s.add(big)
+        await s.commit()
+        for i in range(MAX_IDEA_FEATURES + 1):
+            await feature_service.create_feature(
+                s, FeatureCreate(name=f"Rival feature {i}", product_id=big.id, capability_ids=[cap.id])
+            )
+    text = await server._dispatch("product_score", {"product": "big-rival"})
+    assert text.startswith(f"0/{MAX_IDEA_FEATURES + 1} feature(s) of big-rival buildable")
 
 
 async def test_sdk_and_resource_errors_end_with_an_open_line(api):

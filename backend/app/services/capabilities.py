@@ -13,7 +13,8 @@ from datetime import datetime, timedelta, timezone
 from collections import defaultdict
 
 from fastapi import HTTPException
-from sqlalchemy import func, or_, select
+from sqlalchemy import Text, func, literal, or_, select, true
+from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
@@ -482,6 +483,39 @@ def name_closeness(column, name: str):
     )
 
 
+async def near_names(session: AsyncSession, model, names: list[str]) -> dict[str, list]:
+    """Per typed name, up to three rows of `model` whose name is near it,
+    nearest first (closeness over 0.3, then oldest): candidates for someone to
+    confirm, never a match. One statement for all the names, so a long idea
+    costs one round trip; the work is still per name, which is why the
+    coverage body is bounded (schemas.capability)."""
+    if not names:
+        return {}
+    typed = func.unnest(literal(list(names), ARRAY(Text))).table_valued("name").alias("typed")
+    score = name_closeness(model.name, typed.c.name)
+    near = (
+        select(model.id, score.label("score"), model.seq)
+        .where(score > 0.3)
+        .order_by(score.desc(), model.seq)
+        .limit(3)
+        .lateral("near")
+    )
+    pairs = (
+        await session.execute(
+            select(typed.c.name, near.c.id)
+            .select_from(typed.join(near, true()))
+            .order_by(typed.c.name, near.c.score.desc(), near.c.seq)
+        )
+    ).all()
+    out: dict[str, list] = {name: [] for name in names}
+    if not pairs:
+        return out
+    rows = {r.id: r for r in await session.scalars(select(model).where(model.id.in_({p.id for p in pairs})))}
+    for name, row_id in pairs:
+        out[name].append(rows[row_id])
+    return out
+
+
 def ours_clause():
     """Our features: a feature is ours unless its product is external. A
     feature with no product is internal work, so ours. Any status — this is
@@ -615,21 +649,22 @@ async def coverage(
             external_products=u.external_products,
         )
 
-    async def candidates(name: str) -> list[CapabilityMatch]:
-        score = name_closeness(Capability.name, name)
-        stmt = (
-            select(Capability)
-            .where(score > 0.3)
-            .order_by(score.desc(), Capability.seq)
-            .limit(3)
-        )
-        return [as_match(c) for c in await session.scalars(stmt)]
+    asked = [
+        list(dict.fromkeys(n.strip() for n in idea.capabilities if n.strip()))
+        for idea in request.features
+    ]
+    # Every unmatched name searched once, all in one statement.
+    near = await near_names(
+        session,
+        Capability,
+        list(dict.fromkeys(n for names in asked for n in names if slugify(n) not in by_slug)),
+    )
 
     features: list[FeatureCoverage] = []
     seen: dict[str, Capability | None] = {}
-    for idea in request.features:
+    for idea, names in zip(request.features, asked):
         needs: list[CapabilityNeed] = []
-        for name in dict.fromkeys(n.strip() for n in idea.capabilities if n.strip()):
+        for name in names:
             key = slugify(name)
             found = by_slug.get(key)
             seen.setdefault(key, found)
@@ -637,7 +672,7 @@ async def coverage(
                 CapabilityNeed(
                     name=name,
                     match=as_match(found) if found else None,
-                    candidates=[] if found else await candidates(name),
+                    candidates=[] if found else [as_match(c) for c in near[name]],
                 )
             )
         features.append(

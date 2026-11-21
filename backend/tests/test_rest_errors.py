@@ -16,7 +16,13 @@ from httpx import ASGITransport, AsyncClient
 from app.config import Settings, get_settings
 from app.db import get_db
 from app.main import MAX_BODY, MAX_READ_BODY, create_app, http_error
-from app.schemas.capability import CapabilityCreate
+from app.schemas.capability import (
+    MAX_CAPABILITY_NAME,
+    MAX_IDEA_FEATURES,
+    MAX_IDEA_NAMES,
+    MAX_NAME,
+    CapabilityCreate,
+)
 from app.services import capabilities as capability_service
 
 
@@ -149,12 +155,53 @@ async def test_an_oversized_read_body_is_refused_before_it_is_parsed(client):
     assert res.status_code == 413
     assert res.json() == {"detail": f"Request body is over {MAX_READ_BODY} bytes."}
     # A real idea is a few KB and goes through.
-    res = await client.post(
-        "/api/capabilities/coverage",
-        content=_idea(2_000),
-        headers={"content-type": "application/json"},
-    )
+    real = {"features": [{"name": f"Feature {i}", "capabilities": ["Search", "Sync"]} for i in range(52)]}
+    res = await client.post("/api/capabilities/coverage", json=real)
     assert res.status_code == 200
+
+
+async def test_the_coverage_body_is_bounded_and_the_422_names_each_limit(client):
+    """Bytes alone don't bound the near-name search, which costs per name and
+    per character: counts and lengths do, each refused by a 422 naming it."""
+
+    def names(n, size=10):
+        return [f"{i:0{size}d}" for i in range(n)]
+
+    async def post(features):
+        return await client.post("/api/capabilities/coverage", json={"features": features})
+
+    # At each limit, goes through.
+    for features in (
+        [{"name": "n" * MAX_NAME, "capabilities": names(MAX_IDEA_NAMES, MAX_CAPABILITY_NAME)}],
+        [{"name": f"f{i}", "capabilities": ["Search"]} for i in range(MAX_IDEA_FEATURES)],
+    ):
+        assert (await post(features)).status_code == 200
+
+    # One over each, refused with the limit in the sentence and in `errors`.
+    over = {
+        f"at most {MAX_IDEA_FEATURES} items": [
+            {"name": f"f{i}", "capabilities": ["Search"]} for i in range(MAX_IDEA_FEATURES + 1)
+        ],
+        f"at most {MAX_IDEA_NAMES} items": [
+            {"name": "x", "capabilities": names(MAX_IDEA_NAMES + 1)}
+        ],
+        f"at most {MAX_IDEA_NAMES} capability names per request across all features, got {MAX_IDEA_NAMES + 1}": [
+            {"name": "a", "capabilities": names(MAX_IDEA_NAMES)[:150]},
+            {"name": "b", "capabilities": names(MAX_IDEA_NAMES + 1)[150:]},
+        ],
+        f"at most {MAX_CAPABILITY_NAME} characters": [
+            {"name": "x", "capabilities": ["c" * (MAX_CAPABILITY_NAME + 1)]}
+        ],
+        f"at most {MAX_NAME} characters": [
+            {"name": "n" * (MAX_NAME + 1), "capabilities": ["Search"]}
+        ],
+    }
+    for said, features in over.items():
+        res = await post(features)
+        body = res.json()
+        assert res.status_code == 422, said
+        assert said in body["detail"], body["detail"]
+        assert any(said in e["msg"] for e in body["errors"]), body["errors"]
 
 
 async def test_a_streamed_body_is_counted_too(client):

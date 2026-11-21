@@ -6,7 +6,7 @@ import pytest
 from fastapi import HTTPException
 from sqlalchemy import select
 
-from app.models import CapabilityMaturity, Feature, FeatureCapability, Product, WorkStatus
+from app.models import Capability, CapabilityMaturity, Feature, FeatureCapability, Product, WorkStatus
 from app.schemas.capability import CapabilityCreate, CapabilityUpdate, CoverageRequest
 from app.schemas.feature import FeatureCreate, FeatureUpdate
 from app.services import capabilities as capability_service
@@ -254,6 +254,49 @@ async def test_coverage_suggests_near_names_instead_of_guessing(db):
     need = report.features[0].capabilities[0]
     assert need.match is None  # never silently fuzzy-matched
     assert [c.name for c in need.candidates] == ["Authentication"]
+
+
+@pytest.mark.asyncio
+async def test_one_statement_finds_the_near_names_each_name_would_alone(db):
+    """Coverage searches every unmatched name in one statement. It must give
+    what one query per name gave: closeness over 0.3, nearest first, ties to
+    the older capability, three at most, and a name repeated across features
+    gets the same candidates."""
+    async with db() as session:
+        for name in (
+            "Authentication", "Auth tokens", "Authorization", "Author profiles",
+            "Search", "Semantic search", "Full-text search", "Search filters", "Payments",
+        ):
+            await make_capability(session, name)
+        typed = ["Auth", "search", "Search engine", "Authentication service", "Nothing alike"]
+
+        async def alone(name):
+            score = capability_service.name_closeness(Capability.name, name)
+            stmt = (
+                select(Capability.name)
+                .where(score > 0.3)
+                .order_by(score.desc(), Capability.seq)
+                .limit(3)
+            )
+            return list(await session.scalars(stmt))
+
+        expected = {name: await alone(name) for name in typed}
+        report = await capability_service.coverage(
+            session,
+            CoverageRequest.model_validate(
+                {"features": [
+                    {"name": "One", "capabilities": typed},
+                    {"name": "Two", "capabilities": ["Auth", "Nothing alike"]},
+                ]}
+            ),
+        )
+    got = [
+        {n.name: [c.name for c in n.candidates] for n in f.capabilities if n.match is None}
+        for f in report.features
+    ]
+    assert got[0] == {name: expected[name] for name in typed if name != "search"}
+    assert got[1] == {"Auth": expected["Auth"], "Nothing alike": expected["Nothing alike"]}
+    assert len(expected["Auth"]) == 3 and expected["Nothing alike"] == []
 
 
 @pytest.mark.asyncio

@@ -9,8 +9,8 @@ from app.schemas.capability import (
     CapabilityNode,
     CapabilityRead,
     CapabilityUpdate,
+    CoverageBody,
     CoverageReport,
-    CoverageRequest,
     HealthFinding,
     InventoryEntry,
     MotivationCreate,
@@ -54,8 +54,9 @@ async def inventory(session: AsyncSession = Depends(get_db)):
 
 
 @router.post("/coverage", response_model=CoverageReport)
-async def coverage(data: CoverageRequest, session: AsyncSession = Depends(get_db)):
-    """A read: the idea travels in the body, nothing is written."""
+async def coverage(data: CoverageBody, session: AsyncSession = Depends(get_db)):
+    """A read: the idea travels in the body, nothing is written. The body is
+    bounded (schemas.capability.MAX_IDEA_NAMES); over a limit is a 422 naming it."""
     return await capability_service.coverage(session, data)
 
 

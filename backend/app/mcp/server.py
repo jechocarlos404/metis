@@ -35,6 +35,12 @@ from pydantic import AnyUrl
 
 from app.mcp import render
 from app.mcp.client import ApiError, MetisClient, SetupError
+from app.schemas.capability import (
+    MAX_CAPABILITY_NAME,
+    MAX_IDEA_FEATURES,
+    MAX_IDEA_NAMES,
+    MAX_NAME,
+)
 from app.services.slugs import slugify
 
 server = Server("metis")
@@ -92,7 +98,11 @@ TOOLS = [
         inputSchema={
             "type": "object",
             "properties": {
-                "capability": {"type": "string", "description": "Capability slug"},
+                "capability": {
+                    "type": "string",
+                    "maxLength": MAX_CAPABILITY_NAME,
+                    "description": "Capability slug",
+                },
                 "include_unadopted": {"type": "boolean", "default": True},
             },
             "required": ["capability"],
@@ -233,14 +243,18 @@ TOOLS = [
                 "features": {
                     "type": "array",
                     "minItems": 1,
+                    # The API's bounds (schemas.capability); the names cap
+                    # counts across all features, which only the API checks.
+                    "maxItems": MAX_IDEA_FEATURES,
                     "items": {
                         "type": "object",
                         "properties": {
-                            "name": {"type": "string"},
+                            "name": {"type": "string", "maxLength": MAX_NAME},
                             "capabilities": {
                                 "type": "array",
                                 "minItems": 1,
-                                "items": {"type": "string"},
+                                "maxItems": MAX_IDEA_NAMES,
+                                "items": {"type": "string", "maxLength": MAX_CAPABILITY_NAME},
                             },
                         },
                         "required": ["name", "capabilities"],
@@ -277,7 +291,11 @@ TOOLS = [
         inputSchema={
             "type": "object",
             "properties": {
-                "slug": {"type": "string", "description": "Capability slug or name"}
+                "slug": {
+                    "type": "string",
+                    "maxLength": MAX_CAPABILITY_NAME,
+                    "description": "Capability slug or name",
+                }
             },
             "required": ["slug"],
         },
@@ -386,7 +404,12 @@ def _check_arguments(name: str, arguments: dict) -> None:
         jsonschema.validate(instance=arguments, schema=tool.inputSchema)
     except jsonschema.ValidationError as exc:
         where = ".".join(str(part) for part in exc.absolute_path)
-        raise BadInput(f"Arguments refused{f' at {where}' if where else ''}: {exc.message}.") from None
+        said = exc.message
+        if exc.validator in ("maxItems", "maxLength"):
+            # Its own words echo the whole value; the limit is what helps.
+            unit = "items" if exc.validator == "maxItems" else "characters"
+            said = f"at most {exc.validator_value} {unit}, got {len(exc.instance)}"
+        raise BadInput(f"Arguments refused{f' at {where}' if where else ''}: {said}.") from None
 
 
 @server.call_tool(validate_input=False)

@@ -103,6 +103,14 @@ async def _refuse_name_clash(
         stmt = stmt.where(Capability.id != exclude_id)
     # Several can match (older -2 duplicates): name the same-named, oldest one.
     existing = await session.scalar(stmt.order_by(same_name.desc(), Capability.seq).limit(1))
+    if existing is None:
+        # And on the slug each row's current name derives: a renamed row, or
+        # one stored before accents folded ("Résumé Parsing" is r-sum-parsing),
+        # holds a slug its own name no longer gives.
+        rows = select(Capability).order_by(Capability.seq)
+        if exclude_id is not None:
+            rows = rows.where(Capability.id != exclude_id)
+        existing = next((c for c in await session.scalars(rows) if slugify(c.name) in slugs), None)
     if existing is not None:
         raise HTTPException(
             409,

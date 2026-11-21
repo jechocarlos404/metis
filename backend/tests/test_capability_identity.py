@@ -138,3 +138,21 @@ async def test_agent_rename_clash_is_a_clear_tool_error(db):
         with pytest.raises(ToolError) as err:
             await tools.update_capability(ctx, capability="Payments", name="user authentication")
         assert '"User Authentication" already exists' in str(err.value)
+
+
+async def test_an_accented_name_stored_before_the_fold_still_guards_its_name(client, db):
+    """Slugs fold accents now, but a row stored before keeps its old slug
+    ("Résumé Parsing" is r-sum-parsing): its name must still guard."""
+    async with db() as session:
+        session.add(Capability(name="Résumé Parsing", slug="r-sum-parsing"))
+        await session.commit()
+    for name in ("Résumé-Parsing", "Résumé  Parsing", "Resume Parsing", "resume parsing"):
+        res = await _create(client, name)
+        assert res.status_code == 409, (name, res.json())
+        assert res.json()["existing"] == {"slug": "r-sum-parsing", "name": "Résumé Parsing"}
+
+
+async def test_a_renamed_capability_guards_its_new_name_in_any_punctuation(client):
+    made = (await _create(client, "Semantic Search")).json()
+    await client.patch(f"/api/capabilities/{made['id']}", json={"name": "Vector Retrieval"})
+    assert (await _create(client, "vector-retrieval")).status_code == 409

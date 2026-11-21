@@ -2,14 +2,14 @@ import React from "react";
 import { PageHeader } from "../shell/PageHeader.jsx";
 import { VizBlock } from "../chat/VizBlock.jsx";
 import { ProposalDraft } from "../chat/ProposalDraft.jsx";
-import { changeLabel, stepLabel, stepRows } from "../chat/proposal-words.js";
+import { changeLabel, stepLabel, stepProposals, stepRows } from "../chat/proposal-words.js";
 import { Badge, Button, Icon, IconButton, Select, DeleteConfirm } from "../../ds";
 import { AGENT, PROPOSAL_STATUS, count } from "../../lib/words.js";
 import { Term } from "../shared/Term.jsx";
 import { api } from "../../lib/api.js";
 import { renderChatMarkdown } from "../../lib/chat-markdown.js";
 
-const STEP_STATUS = { started: "running…", finished: "done", failed: "failed", proposed: "proposed" };
+const STEP_STATUS = { started: "running…", finished: "done", failed: "failed" };
 
 const agentLabel = (name) => AGENT[name] ?? (name ? name.replace(/_/g, " ") : "Metis");
 
@@ -33,10 +33,12 @@ function StepArgs({ args, named }) {
 
 // What an agent did on the way to its reply: each tool it called, whether
 // that read or changed data, what it was given and what came back. A
-// proposed change's outcome is the approval card's: the step keeps no status
-// of its own, which would go stale once someone decides.
-function AgentSteps({ tools, waiting = false }) {
+// proposed change's step reads its proposal's state, the approval card's
+// word ("waiting for you", "applied"): the step keeps no status of its own,
+// which would go stale once someone decides.
+function AgentSteps({ tools, proposals, waiting = false }) {
   const proposed = tools.filter((t) => t.status === "proposed").length;
+  const decided = stepProposals(tools, proposals);
   const failed = tools.filter((t) => t.status === "failed").length;
   return (
     <details style={{ fontSize: "var(--text-xs)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-sm)", background: "var(--surface-card)" }}>
@@ -51,9 +53,15 @@ function AgentSteps({ tools, waiting = false }) {
             <span style={{ display: "inline-flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
               <span title={t.name} style={{ color: "var(--text-heading)" }}>{stepLabel(t.name)}</span>
               {t.changes && <Badge tone="warn">changes data</Badge>}
-              <span style={{ color: t.status === "failed" ? "var(--danger-fg)" : "var(--text-secondary)" }}>
-                {STEP_STATUS[t.status] ?? t.status}
-              </span>
+              {t.status === "proposed" ? (
+                decided[i] && <span title={decided[i].status} style={{ color: decided[i].status === "failed" ? "var(--danger-fg)" : "var(--text-secondary)" }}>
+                  {PROPOSAL_STATUS[decided[i].status] ?? decided[i].status}
+                </span>
+              ) : (
+                <span style={{ color: t.status === "failed" ? "var(--danger-fg)" : "var(--text-secondary)" }}>
+                  {STEP_STATUS[t.status] ?? t.status}
+                </span>
+              )}
             </span>
             {t.arguments && Object.keys(t.arguments).length > 0 && <StepArgs args={t.arguments} named={t.named_arguments} />}
             {t.summary && t.status !== "proposed" && <div style={{ color: t.status === "failed" ? "var(--danger-fg)" : "var(--text-body)" }}>→ {t.summary}</div>}
@@ -73,7 +81,7 @@ function Dot() {
   return <span aria-hidden="true" style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--accent)", animation: "pulse 1s infinite" }} />;
 }
 
-function AgentMessage({ agent, text, viz, tools, status, waiting }) {
+function AgentMessage({ agent, text, viz, tools, proposals, status, waiting }) {
   const running = status === "running";
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8, minWidth: 0 }}>
@@ -85,7 +93,7 @@ function AgentMessage({ agent, text, viz, tools, status, waiting }) {
         {running && <Dot />}
         {running && !text && <span style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>working…</span>}
       </div>
-      {tools && tools.length > 0 && <AgentSteps tools={tools} waiting={waiting} />}
+      {tools && tools.length > 0 && <AgentSteps tools={tools} proposals={proposals} waiting={waiting} />}
       {text && (
         // renderChatMarkdown escapes raw HTML and unsafe links; see lib/chat-markdown.js.
         <div className="chat-md" style={{ fontSize: "var(--text-sm)", color: "var(--text-body)", lineHeight: "var(--leading-body)" }}
@@ -185,7 +193,7 @@ function SpecialistCard({ message, canWrite, onDecided }) {
       </summary>
       <div style={{ padding: "0 12px 12px", display: "flex", flexDirection: "column", gap: 8 }}>
         {message.task && <div style={{ fontSize: "var(--text-xs)", color: "var(--text-body)" }}>Task: {message.task}</div>}
-        {message.tool_calls?.length > 0 && <AgentSteps tools={message.tool_calls} waiting={waiting > 0} />}
+        {message.tool_calls?.length > 0 && <AgentSteps tools={message.tool_calls} proposals={message.proposals} waiting={waiting > 0} />}
         {message.content && (
           <div className="chat-md" style={{ fontSize: "var(--text-sm)", color: "var(--text-body)", lineHeight: "var(--leading-body)" }}
             dangerouslySetInnerHTML={{ __html: renderChatMarkdown(message.content) }} />
@@ -224,7 +232,7 @@ function TurnBody({ run, children, canWrite, onDecided }) {
     const only = children[0];
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        <AgentMessage agent="orchestrator" text={only.content} viz={only.viz} tools={only.tool_calls} status={only.status}
+        <AgentMessage agent="orchestrator" text={only.content} viz={only.viz} tools={only.tool_calls} proposals={only.proposals} status={only.status}
           waiting={(only.proposals ?? []).some((p) => p.status === "pending")} />
         <Proposals message={only} canWrite={canWrite} onDecided={onDecided} />
       </div>
@@ -501,7 +509,7 @@ export default function ChatIsland({ threadId: initialThreadId = null, canWrite 
             ) : (
               // Replies from before agents ran in the background.
               <div key={m.id} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                <AgentMessage agent={m.agent_name} text={m.content} viz={m.viz} tools={m.tool_calls} status={m.status} />
+                <AgentMessage agent={m.agent_name} text={m.content} viz={m.viz} tools={m.tool_calls} proposals={m.proposals} status={m.status} />
                 <Proposals message={m} canWrite={canWrite} onDecided={() => load()} />
               </div>
             ),

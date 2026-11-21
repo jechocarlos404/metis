@@ -113,3 +113,20 @@ export function stepRows(args, named) {
     return { key, label: FIELD[key] ?? key.replace(/_/g, " "), text: value, raw: raw === value ? null : raw };
   });
 }
+
+/**
+ * The proposal each step stands for: a step is "proposed" exactly when the
+ * runner stored a proposal for it, in the same order (proposals by seq), so
+ * the k-th proposed step is the k-th proposal. A step shows that proposal's
+ * state, never a word of its own that goes stale once someone decides. A
+ * pairing that doesn't line up (another tool) gives null: no word beats a
+ * wrong one.
+ */
+export function stepProposals(tools, proposals = []) {
+  let k = 0;
+  return tools.map((t) => {
+    if (t.status !== "proposed") return null;
+    const p = proposals[k++];
+    return p && p.tool_name === t.name ? p : null;
+  });
+}

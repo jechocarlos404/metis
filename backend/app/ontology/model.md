@@ -226,8 +226,8 @@ and nine that answer inventory questions: `products`, `capability_inventory`,
 `ready_features` and `recheck`. All seventeen are always listed: a client lists tools
 once, when it connects, and is never told the catalog filled. With no technology
 recorded none of the technology ones (the `question` keys, `tech_search` and
-`propose_binding`) errors: each says it found nothing and points to where a technology
-gets recorded or looked up.
+`propose_binding`) errors: each says it found nothing and points to where a technology or
+stack gets recorded or looked up.
 Four resources: `metis://ontology/model` and `metis://policy/adoptions` serve the same
 files as `GET /api/ontology/model` and `/api/ontology/adoptions`; `metis://tech/{slug}`
 and `metis://stacks/{product}` are templated. Three prompts.

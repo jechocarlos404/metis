@@ -69,7 +69,7 @@ The technology and buy tools stay hidden on the desktop until there is data for
 them, but this server always lists them: a client lists tools once, when it
 connects, and the server can't tell it the catalog filled (`listChanged` is
 false). With no technology recorded none of them errors: each says it found
-nothing and points to where a technology gets recorded or looked up:
+nothing and points to where a technology or stack gets recorded or looked up:
 
 | Tool | What it answers |
 |---|---|

@@ -354,6 +354,51 @@ def _probe(**extra):
     return routes
 
 
+def test_the_removal_line_names_tickets_a_re_import_wont_restore(capsys):
+    """The latest plan made ep1: tk1 is as it was made, tk2 moved on since
+    and tk3 was added by hand, so a re-import brings back neither of those."""
+    routes = _probe(**{
+        "/api/products/p1/decompositions": [
+            {"id": "pd2", "product_id": "p1", "version": 2, "status": "draft"},
+            {"id": "pd1", "product_id": "p1", "version": 1, "status": "draft"},
+        ],
+        "/api/products/p1/epics": [{"id": "ep1", "product_id": "p1", "decomposition_id": "pd2", "title": "Plan epic", "stories": []}],
+        "/api/tickets": [
+            {"id": "tk1", "product_id": "p1", "epic_id": "ep1", "created_at": AT, "updated_at": AT},
+            {"id": "tk2", "product_id": "p1", "epic_id": "ep1", "created_at": AT, "updated_at": "2026-11-21T09:00:00Z"},
+            {"id": "tk3", "product_id": "p1", "epic_id": None, "created_at": AT, "updated_at": AT},
+        ],
+    })
+    out = _run_unseed(_unseeder(routes, PROBE_SEED), capsys)
+    line = next(l for l in out.splitlines() if l.startswith("  would delete product 'Probe'"))
+    assert "3 ticket(s)" in line
+    assert line.endswith(
+        "importing this file again won't bring back 1 older plan document(s) "
+        "and 2 ticket(s) as they are now (changed or added since its plan was written)"
+    ), line
+
+
+def test_the_summary_tallies_each_kind_as_the_in_app_removal_does(capsys):
+    """What a delete takes with it is counted under its own kind too, as the
+    in-app removal's counts do (unseed.js): a product's technology use, hand
+    added capabilities and plan documents, a feature's guesses, a
+    technology's links and guesses."""
+    out = _run_unseed(_unseeder(_probe(), PROBE_SEED), capsys)
+    summary = {l.split()[0]: l.split(None, 1)[1] for l in out.splitlines()
+               if l.startswith("  ") and not l.startswith(("  would", "  note", "  kept", "  can't"))}
+    assert summary == {
+        "features": "1 would delete",
+        "products": "1 would delete",
+        "bundles": "1 would delete",
+        "decompositions": "1 would delete",
+        "technologies": "1 would delete",
+        "tech_usage": "1 would delete",
+        "satisfactions": "1 would delete",
+        "guesses": "1 would delete",
+        "capabilities": "1 would delete",
+    }, out
+
+
 def test_a_technology_list_that_fails_to_read_is_unreadable_not_empty(capsys):
     """Read as none, the technologies would match nothing and their links
     would be judged against an empty list."""

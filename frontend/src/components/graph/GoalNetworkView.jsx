@@ -36,8 +36,11 @@ export function GoalNetworkView({ goals, capsByGoal, selectedId, onSelect }) {
   const data = React.useMemo(() => buildGoalNetwork(goals, capsByGoal), [goals, capsByGoal]);
   const adjacency = React.useMemo(() => buildAdjacency(data.edges), [data]);
 
+  const adjacencyRef = React.useRef(adjacency);
+
   useIsomorphicLayoutEffect(() => {
     onSelectRef.current = onSelect;
+    adjacencyRef.current = adjacency;
   });
 
   useIsomorphicLayoutEffect(() => {
@@ -54,11 +57,16 @@ export function GoalNetworkView({ goals, capsByGoal, selectedId, onSelect }) {
       alphaDecay: 0.06,
       linkDistance,
       linkStrength,
-      frameInsets: () => controlInsets(keyRef.current, toolbarRef.current),
+      frameInsets: () => controlInsets(keyRef.current, toolbarRef.current, svgRef.current),
       reducedMotion: window.matchMedia("(prefers-reduced-motion: reduce)").matches,
       onSelect: (id) => {
         canvasPickRef.current = id;
         onSelectRef.current?.(id);
+      },
+      // A goal pressed on a view too far out to name it comes in to where its
+      // name reads (A49); one already readable stays under the pointer.
+      onPress: (id) => {
+        if (svgRef.current?.classList.contains("graph-far")) engine.framePick(id, [...(adjacencyRef.current.get(id) ?? [])]);
       },
     });
     engineRef.current = engine;
@@ -127,7 +135,7 @@ export function GoalNetworkView({ goals, capsByGoal, selectedId, onSelect }) {
     // own; stacked (.graph-goal-row wraps), the list leads (base.css).
     <div className="graph-goal-network" style={{ flex: 1, display: "flex", minHeight: 0 }}>
       <div className="graph-goal-row" style={{ flex: 1, display: "flex", minHeight: 0, overflowY: "auto" }}>
-        <div ref={canvasRef} style={{ flex: "999 1 420px", minHeight: 420, position: "relative", margin: 20, background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", overflow: "hidden", minWidth: 0 }}>
+        <div ref={canvasRef} className="graph-hint-room" style={{ flex: "999 1 420px", minHeight: 420, position: "relative", margin: 20, background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-md)", overflow: "hidden", minWidth: 0 }}>
           <svg ref={svgRef} role="group" aria-label="Goals linked by the capabilities they share. Arrow keys move between goals."
             style={{ width: "100%", height: "100%", display: "block", cursor: "grab", touchAction: "none" }}>
             <g ref={viewportRef}>
@@ -169,7 +177,7 @@ export function GoalNetworkView({ goals, capsByGoal, selectedId, onSelect }) {
             onZoomOut={() => engineRef.current?.zoomBy(1 / 1.4)}
             onFit={() => engineRef.current?.fitToView()}
             toolbarRef={toolbarRef} />
-          <NetworkKey keyRef={keyRef} />
+          <NetworkKey keyRef={keyRef} onToggle={() => engineRef.current?.refit()} />
           <GraphCaption name={named?.goal.title} />
         </div>
         <GoalPanel goals={goals} edges={data.edges} capsByGoal={capsByGoal} selectedId={selectedId} onSelect={onSelect} />
@@ -212,7 +220,7 @@ function GoalNode({ node, isSelected, isTabStop, isDimmed, onSelect, onHoverChan
   );
 }
 
-function NetworkKey({ keyRef }) {
+function NetworkKey({ keyRef, onToggle }) {
   const row = { display: "flex", alignItems: "center", gap: 6 };
   const card = (fill, stroke, dash) => (
     <svg width="16" height="10"><rect x="1" y="1" width="14" height="8" rx="2" fill={fill} stroke={stroke} strokeDasharray={dash} /></svg>
@@ -221,7 +229,7 @@ function NetworkKey({ keyRef }) {
     <svg width="16" height="8"><line x1="0" y1="4" x2="16" y2="4" stroke={stroke} strokeWidth={width} strokeLinecap="round" /></svg>
   );
   return (
-    <details ref={keyRef} style={{ position: "absolute", top: 10, left: 10, background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-sm)", boxShadow: "var(--shadow-card)", padding: "6px 10px", fontFamily: "var(--font-mono)", fontSize: "var(--text-2xs)", color: "var(--text-secondary)" }}>
+    <details ref={keyRef} onToggle={onToggle} style={{ position: "absolute", top: 10, left: 10, background: "var(--surface-card)", border: "1px solid var(--border-hairline)", borderRadius: "var(--radius-sm)", boxShadow: "var(--shadow-card)", padding: "6px 10px", fontFamily: "var(--font-mono)", fontSize: "var(--text-2xs)", color: "var(--text-secondary)" }}>
       <summary style={{ cursor: "pointer", color: "var(--text-heading)" }}>Key</summary>
       <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 6 }}>
         <div style={row}>{card("var(--surface-inverse)", "var(--surface-inverse)")}org goal</div>

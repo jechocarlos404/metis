@@ -86,6 +86,8 @@ main:focus { outline: none; }
 .graph-far ~ .graph-caption { display: block; }
 .graph-far ~ .graph-caption ~ .graph-hint { display: none; }
 @media (max-width: 960px), (pointer: coarse) { .graph-hint { display: none; } }
+/* Where the hint shows, the drawing ends above it, so it never sits over a card (C41 note). */
+@media (min-width: 960.02px) and (pointer: fine) { .graph-hint-room { padding-bottom: 46px; box-sizing: border-box; } }
 /* Goals network: side by side, the canvas keeps the page's height and the list
    scrolls; once they stack (canvas 420 + 40 margin, list 300), the list leads. */
 .graph-goal-network { container-type: inline-size; }

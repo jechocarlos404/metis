@@ -66,11 +66,11 @@ export function openTransform(bounds, w, h, inset = 0, maxK = 2.5, focus = null,
 const join = (a, b) => ({ x0: Math.min(a.x0, b.x0), y0: Math.min(a.y0, b.y0), x1: Math.max(a.x1, b.x1), y1: Math.max(a.y1, b.y1) });
 
 /**
- * The view for a goal picked outside the canvas (C39): its `box` and the
- * boxes of the goals it lights (`near`) all in view, so its lines are.
- * Centred on it (A10) when they fit around it at a readable scale;
- * otherwise all of them fitted, readable where they can be. Never closer
- * than `maxK`.
+ * The view for a picked goal: its `box` centred (A10), never below the
+ * readable scale, so its name shows (A49). As far out as that allows to
+ * bring in the goals it lights (`near`), so their lines show (C39); the ones
+ * that still don't fit stay off screen, their lines leading out to them.
+ * Fit is how to see them all. Never closer than `maxK`.
  */
 export function pickTransform(box, near, w, h, inset = 0, maxK = 1) {
   const all = near.reduce(join, box);
@@ -79,7 +79,7 @@ export function pickTransform(box, near, w, h, inset = 0, maxK = 1) {
   const hw = Math.max(cx - all.x0, all.x1 - cx);
   const hh = Math.max(cy - all.y0, all.y1 - cy);
   const around = fitTransform({ x0: cx - hw, y0: cy - hh, x1: cx + hw, y1: cy + hh }, w, h, inset, maxK);
-  return around.k >= READABLE_SCALE ? around : fitTransform(all, w, h, inset, maxK);
+  return centreTransform(box, Math.max(READABLE_SCALE, around.k), w, h, inset);
 }
 
 /**
@@ -264,7 +264,9 @@ export function buildGoalNetwork(goals, capsByGoal) {
   let rowH = 0;
   for (const c of clusters) {
     const d = side(c);
-    if (x > 0 && x + d > rowWidth) {
+    // A tree starts a new row once its centre would pass the row's width, so
+    // two small trees sit side by side rather than in one column (C41).
+    if (x > 0 && x + d / 2 > rowWidth) {
       x = 0;
       y += rowH;
       rowH = 0;
